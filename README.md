@@ -12,8 +12,9 @@ and a **thin client** that understands releases and blocks unsafe partial upgrad
   check built from the ELF soname graph.
 
 > Status: proof of concept — results in [docs/POC-RESULTS.md](docs/POC-RESULTS.md).
-> See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design and
-> [docs/TESTING.md](docs/TESTING.md) for how to verify it.
+> See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design,
+> [docs/TESTING.md](docs/TESTING.md) for how to verify it, and [TODO.md](TODO.md)
+> if you want to help.
 
 ## Try the staging repository
 
