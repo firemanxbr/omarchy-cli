@@ -1,29 +1,51 @@
-import { json, type Env } from "../index";
+import { isRing, json, type Env } from "../index";
+import { ringHead } from "../db";
+
+const MAX_NODES = 2000;
 
 /**
- * Returns the transitive dependency closure for the requested targets.
- *
- * Implemented as a bounded BFS over `package_requires` → `package_provides`,
- * always picking the highest (epoch, vercmp) version per name in the channel.
- * Bounded to keep well inside the Worker CPU budget; the client can page by
- * asking again for the frontier it did not receive.
+ * Transitive dependency closure of `targets` within a ring's current release,
+ * computed with a recursive CTE: requires → provides, restricted to packages in
+ * the release. Requirements satisfied outside the release (e.g. glibc from the
+ * Arch repos) simply do not expand; the client checks those against the local
+ * pacman database.
  */
 export async function handleGraph(url: URL, env: Env): Promise<Response> {
-  const targets = (url.searchParams.get("targets") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-  const channel = url.searchParams.get("channel") ?? env.DEFAULT_CHANNEL;
+  const targets = (url.searchParams.get("targets") ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const ring = url.searchParams.get("ring") ?? env.DEFAULT_RING;
   if (targets.length === 0) return json({ error: "targets is required" }, 400);
+  if (!isRing(ring)) return json({ error: "unknown ring" }, 400);
+  const head = await ringHead(env, ring);
+  if (!head) return json({ error: `ring ${ring} has no release yet` }, 404);
 
-  // TODO(phase 4): BFS closure over D1. For now return the targets' manifests only.
-  const placeholders = targets.map(() => "?").join(",");
   const rows = await env.DB.prepare(
-    `SELECT manifest_json FROM packages WHERE channel = ? AND name IN (${placeholders})`,
+    `WITH RECURSIVE
+       sel(package_id) AS (SELECT package_id FROM release_packages WHERE release_id = ?1),
+       closure(package_id) AS (
+         SELECT p.id FROM packages p JOIN sel ON sel.package_id = p.id
+          WHERE p.name IN (SELECT value FROM json_each(?2))
+         UNION
+         SELECT pv.package_id FROM closure c
+           JOIN package_requires rq ON rq.package_id = c.package_id AND rq.kind = 'depends'
+           JOIN package_provides pv ON pv.capability = rq.requirement
+           JOIN sel ON sel.package_id = pv.package_id
+       )
+     SELECT p.manifest_json FROM packages p WHERE p.id IN (SELECT package_id FROM closure)
+     ORDER BY p.name LIMIT ?3`,
   )
-    .bind(channel, ...targets)
+    .bind(head.id, JSON.stringify(targets), MAX_NODES + 1)
     .all<{ manifest_json: string }>();
 
+  const packages = rows.results.slice(0, MAX_NODES).map((r) => JSON.parse(r.manifest_json));
+  const found = new Set(packages.map((p: { name: string }) => p.name));
   return json({
-    channel,
-    packages: rows.results.map((r) => JSON.parse(r.manifest_json)),
-    truncated: false,
+    ring,
+    release_id: head.id,
+    packages,
+    missing_targets: targets.filter((t) => !found.has(t)),
+    truncated: rows.results.length > MAX_NODES,
   });
 }

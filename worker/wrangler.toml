@@ -19,14 +19,14 @@ database_name = "omarchy-repo"
 database_id = "REPLACE_WITH_D1_ID"
 migrations_dir = "migrations"
 
-# Binary objects: `<sha256>.pkg.tar.zst` + `<sha256>.sig`.
+# Pool objects: pool/<sha256>.pkg.tar.zst (+ .sig); generated databases: releases/<id>/...
 # Create with `wrangler r2 bucket create omarchy-packages`.
 [[r2_buckets]]
 binding = "PACKAGES"
 bucket_name = "omarchy-packages"
 
 [vars]
-DEFAULT_CHANNEL = "stable"
+DEFAULT_RING = "stable"
 
 # Secrets (set with `wrangler secret put <NAME>`):
 #   PUBLISH_TOKEN  — bearer token required by the CI publisher on PUT /api/v1/packages

@@ -89,6 +89,33 @@ pulls the image.
 | `podman: command not found` | install Podman Desktop (or Docker) and `podman machine start` |
 | `agent_genkey failed: No agent running` | `GNUPGHOME` path too long for a Unix socket; keep the default cache location |
 
+## End-to-end: the whole pipeline through the worker
+
+Same requirements plus the worker's npm dependencies. Starts a throwaway local
+worker (`wrangler dev` with local D1 and R2 under `target/e2e-worker/`), publishes
+the fixtures to `edge`, promotes `edge → rc → stable`, renders and signs the
+`stable` databases, checks the mirror routes (databases, signatures, blobs, Range),
+and finally runs pacman in a container against
+`http://host.containers.internal:<port>/stable/os/$arch`:
+
+```bash
+tests/e2e-worker.sh
+```
+
+This is the local proof for POC questions 1 and 2: pool objects are uploaded once
+(re-publishing is a no-op), promotion is an index write measured in milliseconds,
+and pacman consumes the generated database exactly as it would a `repo-add` one.
+
+Publisher commands used by the script, for manual runs against any worker:
+
+```bash
+export OMARCHY_API=http://127.0.0.1:8787 OMARCHY_PUBLISH_TOKEN=dev-token
+pkg-repo publish --ring edge foo-1.0-1-x86_64.pkg.tar.zst   # pool + index + new edge release
+pkg-repo promote --from edge --to rc
+pkg-repo render --ring rc --sign <gpg key id>               # databases for the ring head
+curl $OMARCHY_API/api/v1/releases/rc/history
+```
+
 ## Cloudflare (staging)
 
 Deploying to the staging account is a manual step:

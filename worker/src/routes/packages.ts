@@ -1,12 +1,106 @@
 import { json, type Env } from "../index";
+import { poolKey, poolSigKey } from "../r2";
 
-export async function handlePackage(name: string, url: URL, env: Env): Promise<Response> {
-  const channel = url.searchParams.get("channel") ?? env.DEFAULT_CHANNEL;
-  const rows = await env.DB.prepare(
-    "SELECT manifest_json FROM packages WHERE name = ? AND channel = ? ORDER BY epoch DESC, created_at DESC",
+interface Rule {
+  name: string;
+  constraint: { op: string; version: string } | null;
+  symbol_version: string | null;
+}
+
+interface Manifest {
+  schema_version: number;
+  name: string;
+  version: string;
+  arch: string;
+  sha256: string;
+  filename: string;
+  size_download: number;
+  size_installed: number;
+  provides: string[];
+  requires: string[];
+  optional?: string[];
+  conflicts?: string[];
+  replaces?: string[];
+  files: string[];
+}
+
+const OPS = [">=", "<=", "=", ">", "<"];
+
+/** Parses the Arch dependency syntax the Rust side serializes rules as. */
+export function parseRule(s: string): Rule {
+  let symbol_version: string | null = null;
+  const open = s.indexOf("(");
+  if (open >= 0 && s.endsWith(")")) {
+    symbol_version = s.slice(open + 1, -1);
+    s = s.slice(0, open);
+  }
+  for (const op of OPS) {
+    const i = s.indexOf(op);
+    if (i > 0) return { name: s.slice(0, i), constraint: { op, version: s.slice(i + op.length) }, symbol_version };
+  }
+  return { name: s, constraint: null, symbol_version };
+}
+
+/**
+ * Registers a manifest whose archive is already in the pool. Inserting the
+ * package row and its graph rows happens in one batch.
+ */
+export async function handlePostPackage(request: Request, env: Env): Promise<Response> {
+  const m = (await request.json()) as Manifest;
+  if (!m?.sha256 || !m.name || !m.version || !m.arch || !m.filename) {
+    return json({ error: "manifest is missing required fields" }, 400);
+  }
+  const blob = await env.PACKAGES.head(poolKey(m.sha256));
+  if (!blob) return json({ error: "archive not in pool; upload it first" }, 409);
+  if (blob.size !== m.size_download) {
+    return json({ error: `pool object is ${blob.size} bytes, manifest says ${m.size_download}` }, 422);
+  }
+  const existing = await env.DB.prepare("SELECT id FROM packages WHERE sha256 = ?").bind(m.sha256).first<{ id: number }>();
+  if (existing) return json({ id: existing.id, sha256: m.sha256, status: "already-indexed" });
+
+  const hasSig = (await env.PACKAGES.head(poolSigKey(m.sha256))) ? 1 : 0;
+  const inserted = await env.DB.prepare(
+    `INSERT INTO packages (sha256, name, version, arch, filename, size_download, size_installed, has_signature, manifest_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
   )
-    .bind(decodeURIComponent(name), channel)
-    .all<{ manifest_json: string }>();
-  if (rows.results.length === 0) return json({ error: "package not found" }, 404);
-  return json({ channel, versions: rows.results.map((r) => JSON.parse(r.manifest_json)) });
+    .bind(m.sha256, m.name, m.version, m.arch, m.filename, m.size_download, m.size_installed, hasSig, JSON.stringify(m))
+    .first<{ id: number }>();
+  const id = inserted!.id;
+
+  const stmts: D1PreparedStatement[] = [];
+  const prov = env.DB.prepare(
+    "INSERT INTO package_provides (package_id, capability, version_constraint, symbol_version) VALUES (?, ?, ?, ?)",
+  );
+  for (const raw of m.provides ?? []) {
+    const r = parseRule(raw);
+    stmts.push(prov.bind(id, r.name, r.constraint ? r.constraint.op + r.constraint.version : null, r.symbol_version));
+  }
+  const req = env.DB.prepare(
+    "INSERT INTO package_requires (package_id, requirement, version_constraint, symbol_version, kind) VALUES (?, ?, ?, ?, ?)",
+  );
+  const kinds: [string[] | undefined, string][] = [
+    [m.requires, "depends"],
+    [m.optional, "optdepends"],
+    [m.conflicts, "conflicts"],
+    [m.replaces, "replaces"],
+  ];
+  for (const [list, kind] of kinds) {
+    for (const raw of list ?? []) {
+      const r = parseRule(raw);
+      stmts.push(req.bind(id, r.name, r.constraint ? r.constraint.op + r.constraint.version : null, r.symbol_version, kind));
+    }
+  }
+  const file = env.DB.prepare("INSERT INTO package_files (package_id, file_path) VALUES (?, ?)");
+  for (const path of m.files ?? []) stmts.push(file.bind(id, path));
+
+  // D1 batches are limited in size; chunk to stay well inside it.
+  for (let i = 0; i < stmts.length; i += 100) await env.DB.batch(stmts.slice(i, i + 100));
+
+  return json({ id, sha256: m.sha256, status: "indexed" }, 201);
+}
+
+export async function handleGetPackage(sha256: string, env: Env): Promise<Response> {
+  const row = await env.DB.prepare("SELECT manifest_json FROM packages WHERE sha256 = ?").bind(sha256).first<{ manifest_json: string }>();
+  if (!row) return json({ error: "not found" }, 404);
+  return new Response(row.manifest_json, { headers: { "content-type": "application/json" } });
 }

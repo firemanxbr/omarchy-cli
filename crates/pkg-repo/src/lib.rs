@@ -6,6 +6,7 @@
 //! who wrote the archive, which is the whole point: releases can be rendered from
 //! the index without ever running `repo-add` over 275 GB of packages.
 
+pub mod client;
 pub mod desc;
 pub mod sign;
 
@@ -22,6 +23,12 @@ pub enum RepoError {
     Io(#[from] std::io::Error),
     #[error("gpg failed: {0}")]
     Gpg(String),
+    #[error("HTTP error: {0}")]
+    Http(#[from] reqwest::Error),
+    #[error("API returned {status}: {body}")]
+    Api { status: u16, body: String },
+    #[error("extraction failed: {0}")]
+    Extract(#[from] pkg_extract::ExtractError),
 }
 
 /// Which archive to render.
