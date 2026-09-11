@@ -1,0 +1,32 @@
+name: Benchmark
+
+# Current promotion mechanics (rsync + repo-add) versus the index, measured on a
+# native x86_64 runner so repo-add is not slowed down by emulation.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["tests/bench-current.sh", "tests/bench/**", ".github/workflows/bench.yml"]
+
+jobs:
+  current-vs-index:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.1
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: worker/package-lock.json
+      - run: npm ci
+        working-directory: worker
+      - run: sudo apt-get install -y -q zstd rsync >/dev/null
+      - run: tests/bench-current.sh 1000 5
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bench-current-results
+          path: target/bench-current/results.json
