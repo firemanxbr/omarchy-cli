@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 396" width="1240" height="396" font-family="-apple-system, 'Segoe UI', Inter, Helvetica, Arial, sans-serif">
+<rect width="1240" height="396" fill="white"/>
+<text x="330" y="26" font-size="16" font-weight="600" fill="#333">Release promotion at 275 GB — today vs pool + index</text>
+<text x="330" y="44" font-size="12" fill="#666">log scale · gray = current mechanics (omarchy-mirror, omarchy-pkgs) · green = this POC</text>
+<line x1="330.0" y1="56" x2="330.0" y2="326" stroke="#E4E4E0" stroke-width="1"/>
+<text x="330.0" y="344" font-size="11" fill="#777" text-anchor="middle">10 ms</text>
+<line x1="423.5" y1="56" x2="423.5" y2="326" stroke="#E4E4E0" stroke-width="1"/>
+<text x="423.5" y="344" font-size="11" fill="#777" text-anchor="middle">100 ms</text>
+<line x1="516.9" y1="56" x2="516.9" y2="326" stroke="#E4E4E0" stroke-width="1"/>
+<text x="516.9" y="344" font-size="11" fill="#777" text-anchor="middle">1 s</text>
+<line x1="610.4" y1="56" x2="610.4" y2="326" stroke="#E4E4E0" stroke-width="1"/>
+<text x="610.4" y="344" font-size="11" fill="#777" text-anchor="middle">10 s</text>
+<line x1="683.1" y1="56" x2="683.1" y2="326" stroke="#E4E4E0" stroke-width="1"/>
+<text x="683.1" y="344" font-size="11" fill="#777" text-anchor="middle">1 min</text>
+<line x1="776.5" y1="56" x2="776.5" y2="326" stroke="#E4E4E0" stroke-width="1"/>
+<text x="776.5" y="344" font-size="11" fill="#777" text-anchor="middle">10 min</text>
+<line x1="849.3" y1="56" x2="849.3" y2="326" stroke="#E4E4E0" stroke-width="1"/>
+<text x="849.3" y="344" font-size="11" fill="#777" text-anchor="middle">1 h</text>
+<rect x="330.0" y="70.0" width="434.9" height="26" rx="5" fill="#EBEBE6" stroke="#9A9A94" stroke-width="1.2"/>
+<text x="318" y="87.0" font-size="13" fill="#333" text-anchor="end" font-weight="600">Promotion — copy the tree (rsync)</text>
+<text x="772.9" y="87.0" font-size="12" fill="#333" font-weight="600">8 min</text>
+<text x="810.4" y="87.0" font-size="11" fill="#777">extrapolated from 8.0 s / 4.9 GB</text>
+<rect x="330.0" y="124.0" width="507.6" height="26" rx="5" fill="#EBEBE6" stroke="#9A9A94" stroke-width="1.2" stroke-dasharray="4 3"/>
+<text x="318" y="141.0" font-size="13" fill="#333" text-anchor="end" font-weight="600">Promotion — upload + prune 2nd bucket</text>
+<text x="845.6" y="141.0" font-size="12" fill="#333" font-weight="600">45 min</text>
+<text x="890.6" y="141.0" font-size="11" fill="#777">reported by the team: 30–60 min</text>
+<rect x="330.0" y="178.0" width="515.9" height="26" rx="5" fill="#EBEBE6" stroke="#9A9A94" stroke-width="1.2"/>
+<text x="318" y="195.0" font-size="13" fill="#333" text-anchor="end" font-weight="600">Database — repo-add over every archive</text>
+<text x="853.9" y="195.0" font-size="12" fill="#333" font-weight="600">55 min</text>
+<text x="898.9" y="195.0" font-size="11" fill="#777">extrapolated from 58.9 s / 1,000 pkgs</text>
+<rect x="330.0" y="232.0" width="32.0" height="26" rx="5" fill="#E3F2DA" stroke="#6EA84F" stroke-width="1.2"/>
+<text x="318" y="249.0" font-size="13" fill="#2E6B1E" text-anchor="end" font-weight="600">Promotion — index write (pkg-repo promote)</text>
+<text x="370.0" y="249.0" font-size="12" fill="#333" font-weight="600">22 ms</text>
+<text x="407.5" y="249.0" font-size="11" fill="#777">measured, 1,000 pkgs; 37 ms at 10,000</text>
+<rect x="330.0" y="286.0" width="117.3" height="26" rx="5" fill="#E3F2DA" stroke="#6EA84F" stroke-width="1.2"/>
+<text x="318" y="303.0" font-size="13" fill="#2E6B1E" text-anchor="end" font-weight="600">Database — rendered from the index</text>
+<text x="455.3" y="303.0" font-size="12" fill="#333" font-weight="600">180 ms</text>
+<text x="500.3" y="303.0" font-size="11" fill="#777">measured, 1,000 pkgs; 0.5 s at 10,000</text>
+<text x="330" y="382" font-size="12" fill="#444">Extrapolation is linear in bytes from the measured 1,000-package tree; the index cost depends on package count, not bytes.</text>
+</svg>

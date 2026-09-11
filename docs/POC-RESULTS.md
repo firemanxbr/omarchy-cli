@@ -88,38 +88,41 @@ shared libraries on disk) and drives `pacman -U` with URLs from the release.
 * Everything the client knows is available as `--json`, which is the shape an MCP
   server would expose.
 
-## Benchmark: promotion at scale
+## Benchmark: today's mechanics versus the index
 
-`tests/bench-promotion.sh 10000` seeds a local worker with 10,000 synthetic packages
-(average 18 MB each — roughly the 275 GB / ~15k packages ratio of a ring today —
-40 files, 8 requirements) in an `edge` release and measures the operations that
-replace "copy the directory tree". Local D1/R2 (miniflare) on a laptop; staging
-adds network latency but the same work.
+![Release promotion at 275 GB — today vs pool + index](diagrams/benchmark-promotion.svg)
 
-| Operation | 10,000 packages (≈176 GB of package data) |
-|---|---|
-| Promote `edge → rc` | **37 ms**, 0 bytes moved |
-| Promote `rc → stable` | **27 ms**, 0 bytes moved |
-| Render + sign + upload `omarchy.db` / `omarchy.files` from the index | 512 ms (987 KB / 2.1 MB) |
-| Dependency closure query (2,000-package closure) | 132 ms |
-| Release listing the client downloads for `status` | 2.9 MB in 49 ms (`?fields=summary`) |
-| `pacman -Sy` against the generated database | 172 ms, 10,000 packages listed |
-| Same promotion against the live staging worker (2 packages) | 350–430 ms — the network floor |
+Two scripts, both run on a native x86_64 GitHub Actions runner
+(`.github/workflows/bench.yml`) with the tools production uses today:
 
-Against the current process as described in the migration outline (three ~275 GB
-trees, promotion = copy + re-upload, **30–60 minutes**):
+**`tests/bench-current.sh 1000 5`** builds 1,000 valid packages of 5 MB (4.9 GB),
+then measures what `omacom/omarchy-mirror` and `omacom/omarchy-pkgs` do on a
+promotion — `rsync -a --delete` of the ring tree and `repo-add` over every archive
+(pacman 7.1) — next to the index model at the same package count.
+
+| | 1,000 packages, 4.9 GB (measured) | 275 GB ring (extrapolated, linear in bytes) | Pool + index (measured) |
+|---|---|---|---|
+| Promotion: copy the tree | 8.0 s | ~7.5 min, local copy only | **22 ms**, 0 bytes |
+| Promotion: upload + prune the second R2 bucket | — | 30–60 min as reported by the team | not needed |
+| Database: `repo-add` vs `pkg-repo render` | 58.9 s | ~55 min | **0.18 s**, 0 archives read |
+
+**`tests/bench-promotion.sh 10000`** seeds 10,000 synthetic packages
+(≈176 GB at 18 MB average, the 275 GB / ~15k ratio of a ring) and measures the
+index model alone: promote **37 ms** and **27 ms**, render 512 ms
+(`omarchy.db` 987 KB, `omarchy.files` 2.1 MB), closure query 132 ms, the release
+listing the client downloads 2.9 MB, `pacman -Sy` 172 ms with 10,000 packages listed.
+Against the live staging worker a promotion takes 350–430 ms — the network floor.
 
 | | Today | Pool + index |
 |---|---|---|
-| Promotion time | 30–60 min | well under a second (index write + network round trip) |
+| Promotion time | 30–60 min | well under a second |
 | Bytes moved per promotion | ~275 GB | 0 |
-| Storage for edge + rc + stable | ~825 GB (3 trees) | ~275 GB + the packages that differ between rings |
-| Database generation | `repo-add` reads every archive | rendered from the index, no package reads |
+| Storage for edge + rc + stable | ~825 GB (three buckets) | ~275 GB + the packages that differ between rings |
+| Database generation | `repo-add` reads every archive | rendered from the index |
 
-The promotion cost depends on the number of packages in the selection, not on
-their size: the 10,000-package release above carries the same 176 GB whether it is
-promoted once or a hundred times. Storage numbers are derived from the model (one
-object per sha256), not measured on 275 GB.
+The index cost depends on the number of packages in the selection, not on their
+size; storage figures follow from the model (one object per sha256) rather than a
+275 GB measurement.
 
 ## What is not covered by the POC
 
@@ -140,5 +143,6 @@ object per sha256), not measured on 275 GB.
 tests/e2e-pacman.sh   # local file:// mirror, pacman in a container
 tests/e2e-worker.sh   # local worker (wrangler dev), publish → promote → render → pacman
 tests/e2e-client.sh   # thin client: safe vs blocked systems, real upgrade in a container
-tests/bench-promotion.sh 10000   # promotion / render / pacman -Sy at scale
+tests/bench-promotion.sh 10000   # index model at scale: promotion / render / pacman -Sy
+tests/bench-current.sh 1000 5    # today's rsync + repo-add vs the index, same package count
 ```

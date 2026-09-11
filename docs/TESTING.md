@@ -158,7 +158,18 @@ Seeds a throwaway local worker with N synthetic packages (`tests/bench/seed.py`
 generates the SQL; D1 caps statements at 100 KB so rows are batched) in an `edge`
 release, then times `promote`, `render`, the closure query, the release listing and
 — when a container runtime is present — `pacman -Sy` against the generated
-database. Results for N = 10,000 are recorded in [POC-RESULTS.md](POC-RESULTS.md).
+database.
+
+```bash
+tests/bench-current.sh [N] [SIZE_MB]    # default 1000 packages of 5 MB
+```
+
+Builds N valid `.pkg.tar.zst` files with random payloads and measures today's
+promotion mechanics (`rsync -a --delete` of the tree, real `repo-add` in an Arch
+container) next to the index at the same N. Run it on Linux x86_64 for fair
+`repo-add` numbers — under emulation on Apple Silicon it is roughly 10× slower;
+the Benchmark workflow (`.github/workflows/bench.yml`) does exactly that and
+uploads `results.json`. Results are recorded in [POC-RESULTS.md](POC-RESULTS.md).
 
 ## Cloudflare (staging)
 
