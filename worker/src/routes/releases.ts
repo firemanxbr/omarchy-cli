@@ -6,6 +6,8 @@ interface CreateRelease {
   ring: string;
   /** Promote: start from this ring's head selection instead of our own. */
   from_ring?: string | null;
+  /** Roll back / pin: start from this exact release's selection (any ring). */
+  from_release_id?: number | null;
   /** Package sha256s to add; a package replaces any same-name/arch entry. */
   add?: string[];
   /** Package names to drop from the selection. */
@@ -15,15 +17,20 @@ interface CreateRelease {
 
 /**
  * Creates a new release for `ring`. The selection starts as a copy of the base
- * release (own head, or `from_ring`'s head when promoting), then `remove` and
- * `add` are applied. Package bytes are never touched.
+ * release (own head; `from_ring`'s head when promoting; an explicit
+ * `from_release_id` when rolling back or pinning), then `remove` and `add` are
+ * applied. Package bytes are never touched, and history is append-only: a
+ * rollback is a new release whose selection equals an older one.
  */
 export async function handleCreateRelease(request: Request, env: Env): Promise<Response> {
   const body = (await request.json()) as CreateRelease;
   if (!isRing(body.ring)) return json({ error: "ring must be edge, rc or stable" }, 400);
   const ring: Ring = body.ring;
   let source: ReleaseRow | null = null;
-  if (body.from_ring !== undefined && body.from_ring !== null) {
+  if (body.from_release_id !== undefined && body.from_release_id !== null) {
+    source = await env.DB.prepare("SELECT * FROM releases WHERE id = ?").bind(body.from_release_id).first<ReleaseRow>();
+    if (!source) return json({ error: `release ${body.from_release_id} does not exist` }, 404);
+  } else if (body.from_ring !== undefined && body.from_ring !== null) {
     if (!isRing(body.from_ring)) return json({ error: "from_ring must be edge, rc or stable" }, 400);
     source = await ringHead(env, body.from_ring);
     if (!source) return json({ error: `ring ${body.from_ring} has no release to promote` }, 409);

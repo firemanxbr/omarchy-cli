@@ -28,7 +28,8 @@ Promoting a release copies and re-uploads most of that data, so a bump takes
   plus the ELF soname graph extracted by `pkg-extract`) and every release.
 * **Releases** — a release is a pinned selection of package ids for one ring
   (`edge`, `rc`, `stable`). Promotion creates a new release for the target ring that
-  points at the same selection: an index write, no bytes move.
+  points at the same selection: an index write, no bytes move. Rollback is the same
+  write pointing at an earlier selection; history is append-only.
 * **Generated pacman databases** — for each ring the publisher renders
   `<repo>.db.tar.gz` and `<repo>.files.tar.gz` in `repo-add` format, signs them with
   GPG, and stores them in R2. pacman keeps working unchanged.
@@ -56,7 +57,7 @@ Migrations live in `worker/migrations/`.
 | `GET /api/v1/releases/:ring` | current release and its package list |
 | `GET /api/v1/graph?targets=a,b&ring=stable` | dependency subgraph for the client's safety check |
 | `PUT /api/v1/packages` | publish: pool upload + index rows (bearer token) |
-| `POST /api/v1/releases` | create / promote a release (bearer token) |
+| `POST /api/v1/releases` | create / promote / roll back a release (bearer token) |
 
 The Worker never resolves dependencies; it serves data. Decisions are made by the
 publisher (`pkg-repo`) and the client.

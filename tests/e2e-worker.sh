@@ -73,6 +73,14 @@ step "Promote edge → rc → stable (index writes only)"
 "$PKG_REPO" promote --from edge --to rc --note "rc cut"
 "$PKG_REPO" promote --from rc --to stable --note "ship"
 
+step "Rollback: stable back to the zlib-only release, then forward again"
+FIRST_EDGE=$("$PKG_REPO" releases --ring edge | awk '$2 == 1 {print $1}')
+"$PKG_REPO" rollback --ring stable --to "$FIRST_EDGE" --note "rollback drill"
+curl -s "$OMARCHY_API/api/v1/releases/stable?fields=summary" | grep -q '"name":"zlib"' || { echo "rollback lost zlib"; exit 1; }
+curl -s "$OMARCHY_API/api/v1/releases/stable?fields=summary" | grep -q '"name":"xz"' && { echo "rollback still serves xz"; exit 1; }
+"$PKG_REPO" promote --from rc --to stable --note "forward again"
+"$PKG_REPO" releases --ring stable
+
 step "Render + sign databases for stable"
 "$PKG_REPO" render --ring stable --sign "$KEYID"
 

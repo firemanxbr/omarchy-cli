@@ -117,7 +117,8 @@ export OMARCHY_API=http://127.0.0.1:8787 OMARCHY_PUBLISH_TOKEN=dev-token
 pkg-repo publish --ring edge foo-1.0-1-x86_64.pkg.tar.zst   # pool + index + new edge release
 pkg-repo promote --from edge --to rc
 pkg-repo render --ring rc --sign <gpg key id>               # databases for the ring head
-curl $OMARCHY_API/api/v1/releases/rc/history
+pkg-repo releases --ring rc                                 # history, newest first
+pkg-repo rollback --ring rc --to <release id>               # then render again
 ```
 
 ## End-to-end: the thin client

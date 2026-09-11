@@ -61,6 +61,26 @@ enum Command {
         #[arg(long)]
         note: Option<String>,
     },
+    /// Points a ring at the selection of an earlier release (a new release is created;
+    /// history stays append-only). Re-run `render` afterwards.
+    Rollback {
+        #[command(flatten)]
+        remote: Remote,
+        #[arg(long)]
+        ring: String,
+        /// Release id to return to (see `releases`).
+        #[arg(long)]
+        to: u64,
+        #[arg(long)]
+        note: Option<String>,
+    },
+    /// Lists the releases of a ring, newest first.
+    Releases {
+        #[command(flatten)]
+        remote: Remote,
+        #[arg(long)]
+        ring: String,
+    },
     /// Renders, signs and uploads the pacman databases of a ring's current release.
     Render {
         #[command(flatten)]
@@ -101,6 +121,13 @@ fn main() -> Result<()> {
             to,
             note,
         } => promote(&remote, &from, &to, note.as_deref()),
+        Command::Rollback {
+            remote,
+            ring,
+            to,
+            note,
+        } => rollback(&remote, &ring, to, note.as_deref()),
+        Command::Releases { remote, ring } => releases(&remote, &ring),
         Command::Render {
             remote,
             ring,
@@ -109,6 +136,43 @@ fn main() -> Result<()> {
             sign,
         } => render(&remote, &ring, &repo, &arch, sign.as_deref()),
     }
+}
+
+fn rollback(remote: &Remote, ring: &str, to: u64, note: Option<&str>) -> Result<()> {
+    let api = Api::new(&remote.api, &remote.token)?;
+    let started = std::time::Instant::now();
+    let created = api.create_release(ring, None, Some(to), &[], &[], note)?;
+    println!(
+        "{ring} now serves the selection of release {to} as {}#{} (id {}) — {} packages, {:?}, zero bytes copied",
+        created.release.ring,
+        created.release.seq,
+        created.release.id,
+        created.package_count,
+        started.elapsed()
+    );
+    Ok(())
+}
+
+fn releases(remote: &Remote, ring: &str) -> Result<()> {
+    let api = Api::new(&remote.api, &remote.token)?;
+    let history = api.history(ring)?;
+    println!(
+        "{:<6} {:<5} {:<9} {:<8} {:<7} {:<26} note",
+        "id", "seq", "packages", "source", "head", "created"
+    );
+    for r in &history.releases {
+        println!(
+            "{:<6} {:<5} {:<9} {:<8} {:<7} {:<26} {}",
+            r.id,
+            r.seq,
+            r.package_count,
+            r.source_id.map_or("-".to_owned(), |s| s.to_string()),
+            if r.is_head == 1 { "*" } else { "" },
+            r.created_at,
+            r.note.as_deref().unwrap_or("")
+        );
+    }
+    Ok(())
 }
 
 fn sorted(mut packages: Vec<PackageManifest>) -> Vec<PackageManifest> {
@@ -171,7 +235,7 @@ fn publish(remote: &Remote, ring: &str, note: Option<&str>, archives: &[PathBuf]
         }
         added.push(sha);
     }
-    let created = api.create_release(ring, None, &added, &[], note)?;
+    let created = api.create_release(ring, None, None, &added, &[], note)?;
     println!(
         "release {}#{} (id {}) — {} packages, {} bytes in pool",
         created.release.ring,
@@ -186,7 +250,7 @@ fn publish(remote: &Remote, ring: &str, note: Option<&str>, archives: &[PathBuf]
 fn promote(remote: &Remote, from: &str, to: &str, note: Option<&str>) -> Result<()> {
     let api = Api::new(&remote.api, &remote.token)?;
     let started = std::time::Instant::now();
-    let created = api.create_release(to, Some(from), &[], &[], note)?;
+    let created = api.create_release(to, Some(from), None, &[], &[], note)?;
     println!(
         "promoted {from} → {}#{} (id {}, from release {:?}) — {} packages, {} bytes, {:?}, zero bytes copied",
         created.release.ring,

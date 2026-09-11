@@ -34,6 +34,24 @@ pub struct ReleaseCreated {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct HistoryEntry {
+    pub id: u64,
+    pub seq: u64,
+    pub parent_id: Option<u64>,
+    pub source_id: Option<u64>,
+    pub note: Option<String>,
+    pub created_at: String,
+    pub package_count: u64,
+    pub is_head: u8,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct History {
+    pub ring: String,
+    pub releases: Vec<HistoryEntry>,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct ReleaseView {
     pub release: Release,
     pub package_count: u64,
@@ -119,6 +137,7 @@ impl Api {
         &self,
         ring: &str,
         from_ring: Option<&str>,
+        from_release_id: Option<u64>,
         add: &[String],
         remove: &[String],
         note: Option<&str>,
@@ -126,6 +145,7 @@ impl Api {
         let body = serde_json::json!({
             "ring": ring,
             "from_ring": from_ring,
+            "from_release_id": from_release_id,
             "add": add,
             "remove": remove,
             "note": note,
@@ -135,6 +155,14 @@ impl Api {
             .post(self.url("/releases"))
             .bearer_auth(&self.token)
             .json(&body)
+            .send()?;
+        Ok(Self::check(resp)?.json()?)
+    }
+
+    pub fn history(&self, ring: &str) -> Result<History, RepoError> {
+        let resp = self
+            .http
+            .get(self.url(&format!("/releases/{ring}/history")))
             .send()?;
         Ok(Self::check(resp)?.json()?)
     }

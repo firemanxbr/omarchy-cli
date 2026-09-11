@@ -27,6 +27,9 @@ production.
 * Lineage is kept: every release records its parent (previous head of the ring) and
   its source (the release it was promoted from), so "what does stable#7 contain and
   where did it come from" is one query.
+* **Rollback is the same operation.** `pkg-repo rollback --ring stable --to <id>`
+  creates a new release whose selection equals an earlier one (4 ms in the local
+  run; history stays append-only), then `render` republishes the databases.
 
 ## 2. Can we generate valid, signed pacman databases from it?
 
