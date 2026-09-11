@@ -41,6 +41,21 @@ what `makepkg` produced. For each package the extractor:
    and `.gnu.version_r` (e.g. `libc.so.6(GLIBC_2.38)`);
 3. merges both into a `PackageManifest` (`crates/pkg-manifest`).
 
+Merge rules:
+
+* `provides` = `name=version` + `.PKGINFO` `provides=` + for every `DT_SONAME` both
+  the raw soname (`libz.so.1`, what `DT_NEEDED` asks for) and Arch's convention
+  (`libz.so=1-64`, what PKGBUILDs declare);
+* `requires` = `.PKGINFO` `depend=` + every `DT_NEEDED` + symbol version needs,
+  minus sonames the package ships itself;
+* symbol version needs are collapsed to the highest version per
+  `(soname, namespace)` — `GLIBC_2.34` subsumes `GLIBC_2.14` — which turns a typical
+  17-entry list into 2–3 rules without losing information;
+* `makedepend=` never reaches the manifest.
+
+`pkg-extract index <dir>` writes a `RepoIndex` (`index.json`) so the client can be
+developed against a directory of packages instead of the edge API.
+
 ELF facts *refine* declarative dependencies; they never replace them, because
 scripts, data files and `dlopen()`-loaded plugins are invisible to the loader.
 
@@ -140,7 +155,7 @@ single-publisher repository.
 
 | Phase | Crate(s) | Deliverable |
 |---|---|---|
-| 1 | `pkg-manifest`, `pkg-extract` | `pkg-extract inspect foo.pkg.tar.zst` prints a complete manifest; `--local-repo` mode emits an `index.json` so the client can be developed without Cloudflare |
+| 1 ✅ | `pkg-manifest`, `pkg-extract` | `pkg-extract inspect foo.pkg.tar.zst` prints a complete manifest; `pkg-extract index <dir>` emits an `index.json` so the client can be developed without Cloudflare |
 | 2 | `pkg-store` | install/remove from a local repo with journaled rollback; integration tests against a temp root |
 | 3 | `pkg-resolver` | resolvo provider over pacman DB + store + candidates; `install --dry-run` prints a plan |
 | 4 | `worker/` | D1 migrations, `/graph` BFS closure, publish endpoint, signatures, `sync/diff` with vercmp |

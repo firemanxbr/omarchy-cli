@@ -59,6 +59,16 @@ pub struct PackageManifest {
     pub backup: Vec<String>,
 }
 
+/// A flat repository index: what `pkg-extract index` writes and what the client
+/// consumes in local-repository mode (development and offline testing) instead of
+/// the edge API.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RepoIndex {
+    pub schema_version: u32,
+    pub packages: Vec<PackageManifest>,
+}
+
 impl PackageManifest {
     /// Returns the JSON Schema for the manifest, used to keep the TypeScript worker
     /// in sync with the Rust types.

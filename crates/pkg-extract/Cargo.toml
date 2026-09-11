@@ -26,7 +26,10 @@ hex = { workspace = true }
 tar = "0.4"
 zstd = "0.13"
 # ELF parsing
-goblin = { version = "0.10", default-features = false, features = ["elf32", "elf64", "std"] }
+goblin = { version = "0.10", default-features = false, features = ["elf32", "elf64", "endian_fd", "std"] }
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+serde_json = { workspace = true }

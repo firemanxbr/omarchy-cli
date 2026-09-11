@@ -15,5 +15,5 @@ pub mod manifest;
 pub mod vercmp;
 
 pub use dependency::{DependencyRule, VersionConstraint, VersionOp};
-pub use manifest::{PackageManifest, MANIFEST_SCHEMA_VERSION};
+pub use manifest::{PackageManifest, RepoIndex, MANIFEST_SCHEMA_VERSION};
 pub use vercmp::{vercmp, Version};
