@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 892 824" width="892" height="824" font-family="-apple-system, 'Segoe UI', Inter, Helvetica, Arial, sans-serif">
+<defs>
+<marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#8A8A8A"/></marker>
+</defs>
+<rect width="892" height="824" fill="white"/>
+<path d="M 226.0 110 L 226.0 162" fill="none" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+<path d="M 666.0 110 L 666.0 136.0 L 226.0 136.0 L 226.0 162" fill="none" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+<path d="M 226.0 238 L 226.0 290" fill="none" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+<path d="M 226.0 238 L 226.0 264.0 L 666.0 264.0 L 666.0 290" fill="none" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+<path d="M 666.0 366 L 666.0 418" fill="none" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+<path d="M 666.0 494 L 666.0 546" fill="none" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+<path d="M 666.0 622 L 666.0 648.0 L 226.0 648.0 L 226.0 674" fill="none" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+<path d="M 666.0 622 L 666.0 674" fill="none" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+<rect x="36" y="36" width="380" height="72" rx="12" fill="#EBEBE6" stroke="#9A9A94" stroke-width="1.3"/><text x="226.0" y="66" text-anchor="middle" font-size="18" font-weight="600" fill="#333333">Arch mirror sync</text><text x="226.0" y="89" text-anchor="middle" font-size="14" fill="#555555">Upstream core / extra packages</text>
+<rect x="476" y="36" width="380" height="72" rx="12" fill="#EBEBE6" stroke="#9A9A94" stroke-width="1.3"/><text x="666.0" y="66" text-anchor="middle" font-size="18" font-weight="600" fill="#333333">OPR builds</text><text x="666.0" y="89" text-anchor="middle" font-size="14" fill="#555555">Omarchy packages from PKGBUILDs</text>
+<rect x="36" y="164" width="380" height="72" rx="12" fill="#ECEBFE" stroke="#6B5BD6" stroke-width="1.3"/><text x="226.0" y="194" text-anchor="middle" font-size="18" font-weight="600" fill="#3F2FA0">pkg-extract</text><text x="226.0" y="217" text-anchor="middle" font-size="14" fill="#5A4BC4">.PKGINFO + ELF sonames → manifest</text>
+<rect x="36" y="292" width="380" height="72" rx="12" fill="#ECEBFE" stroke="#6B5BD6" stroke-width="1.3"/><text x="226.0" y="322" text-anchor="middle" font-size="18" font-weight="600" fill="#3F2FA0">Immutable pool (R2)</text><text x="226.0" y="345" text-anchor="middle" font-size="14" fill="#5A4BC4">One object per sha256, uploaded once</text>
+<rect x="476" y="292" width="380" height="72" rx="12" fill="#ECEBFE" stroke="#6B5BD6" stroke-width="1.3"/><text x="666.0" y="322" text-anchor="middle" font-size="18" font-weight="600" fill="#3F2FA0">Index (D1)</text><text x="666.0" y="345" text-anchor="middle" font-size="14" fill="#5A4BC4">Packages, metadata, releases</text>
+<rect x="476" y="420" width="380" height="72" rx="12" fill="#ECEBFE" stroke="#6B5BD6" stroke-width="1.3"/><text x="666.0" y="450" text-anchor="middle" font-size="18" font-weight="600" fill="#3F2FA0">Releases</text><text x="666.0" y="473" text-anchor="middle" font-size="14" fill="#5A4BC4">edge / rc / stable = pinned selections</text>
+<rect x="476" y="548" width="380" height="72" rx="12" fill="#E3F2DA" stroke="#6EA84F" stroke-width="1.3"/><text x="666.0" y="578" text-anchor="middle" font-size="18" font-weight="600" fill="#2E6B1E">Generated pacman databases</text><text x="666.0" y="601" text-anchor="middle" font-size="14" fill="#3F7F2C">repo-add format, GPG-signed</text>
+<rect x="36" y="676" width="380" height="72" rx="12" fill="#EBEBE6" stroke="#9A9A94" stroke-width="1.3"/><text x="226.0" y="706" text-anchor="middle" font-size="18" font-weight="600" fill="#333333">pacman</text><text x="226.0" y="729" text-anchor="middle" font-size="14" fill="#555555">Server = pkgs.omarchy.org/$repo/os/$arch</text>
+<rect x="476" y="676" width="380" height="72" rx="12" fill="#EBEBE6" stroke="#9A9A94" stroke-width="1.3"/><text x="666.0" y="706" text-anchor="middle" font-size="18" font-weight="600" fill="#333333">omarchy-cli</text><text x="666.0" y="729" text-anchor="middle" font-size="14" fill="#555555">Thin client: releases, safety checks, MCP</text>
+<text x="446.0" y="794" text-anchor="middle" font-size="14" fill="#444">Both inputs feed one publishing layer: one release model, one retention model.</text>
+</svg>

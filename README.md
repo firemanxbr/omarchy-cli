@@ -1,18 +1,18 @@
 # omarchy-cli
 
-Package manager for the [Omarchy](https://omarchy.org) repository, written in Rust.
+Proof of concept for the [Omarchy](https://omarchy.org) repository migration:
+an **immutable package pool** on Cloudflare R2, an **index** on D1 where `edge`,
+`rc` and `stable` are pinned selections, **generated, signed pacman databases**,
+and a **thin client** that understands releases and blocks unsafe partial upgrades.
 
-* Installs unmodified Arch packages (`.pkg.tar.zst`) — no new package format, no new build tool.
-* Resolves dependencies at the **soname/ABI level** with a SAT solver, so installing one
-  package never forces a full-system upgrade.
-* Keeps local state in a single ACID database and applies filesystem changes through a
-  journaled, rollback-safe transaction.
-* Served from a Cloudflare edge repository (Workers + D1 + R2): clients fetch only the
-  dependency subgraph they need instead of a whole `.db.tar.gz`.
-* Coexists with `pacman`; existing libalpm hooks keep working.
+* Packages stay unmodified `makepkg` output — no new format, no new build tool.
+* Promoting a release is an index write, not a 275 GB copy.
+* pacman keeps working through generated `repo-add` databases.
+* `omarchy-cli` drives pacman and adds release awareness plus an ABI-level safety
+  check built from the ELF soname graph.
 
-> Status: early development. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the
-> design and roadmap.
+> Status: proof of concept. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the
+> design and roadmap and [docs/TESTING.md](docs/TESTING.md) for how to verify it.
 
 ## Layout
 
@@ -20,12 +20,13 @@ Package manager for the [Omarchy](https://omarchy.org) repository, written in Ru
 crates/
   pkg-manifest/   shared types, dependency rules, Arch-compatible vercmp
   pkg-extract/    .pkg.tar.zst inspection → PackageManifest (lib + CI binary)
-  pkg-resolver/   SAT resolution (resolvo)
-  pkg-store/      redb state store + transactional FS engine
-  pkg-hooks/      libalpm .hook compatibility
-  omarchy-cli/    the CLI
-worker/           Cloudflare Worker (TypeScript), D1 migrations
-docs/             architecture and design notes
+  pkg-repo/       renders signed repo-add databases from a release
+  pkg-resolver/   dependency / ABI safety checks
+  pkg-store/      redb state store + transactional FS engine (future engine)
+  pkg-hooks/      libalpm .hook compatibility (later)
+  omarchy-cli/    the thin client
+worker/           Cloudflare Worker (TypeScript): pool, index, releases, pacman mirror
+docs/             architecture, testing, diagrams
 ```
 
 ## Development

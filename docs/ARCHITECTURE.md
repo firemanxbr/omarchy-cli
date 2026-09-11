@@ -1,163 +1,122 @@
 # Architecture
 
-`omarchy-cli` is a package manager for the [Omarchy](https://omarchy.org) repository.
-It installs standard Arch Linux packages (`.pkg.tar.zst`, produced by `makepkg`,
-never modified) using a SAT solver for dependency resolution, an ACID local state
-store and a transactional filesystem engine, served from a Cloudflare edge repository.
+`omarchy-cli` is a proof of concept for the Omarchy repository migration. It answers
+three questions:
 
-It **coexists with pacman**: it manages only packages from the Omarchy repository and
-treats the pacman local database as the read-only source of truth for everything
-else on the system.
+1. Can an **immutable package pool plus an index** cleanly represent complete releases?
+2. Can **valid, signed pacman databases** be generated from that index?
+3. Does a **thin Omarchy client** give enough control to justify becoming part of the system?
 
-## Layers
+Packages are standard Arch `.pkg.tar.zst` archives produced by `makepkg`; they are never
+modified. Nothing here touches production.
 
-```
-[ makepkg ] ──► foo.pkg.tar.zst (unchanged)
-                     │
-      ┌──────────────┴──────────────┐
-      ▼                             ▼
-[ R2 upload ]              [ pkg-extract (CI) ]
-      │                    reads .PKGINFO + ELF sonames
-      ▼                             ▼
-Cloudflare R2 ◄───────── Cloudflare D1 (package graph)
-      ▲                             ▲
-      │  GET /blob/:sha256          │  GET /graph?targets=...
-      └──────────────┬──────────────┘
-                     ▼
-              [ omarchy-cli ]
-               ├── pkg-resolver   SAT solver (resolvo) over installed + remote candidates
-               ├── pkg-store      redb state + journaled transactional FS engine
-               ├── pkg-hooks      libalpm .hook compatibility
-               └── pkg-extract    local inspection of AUR-built packages
-```
+## The problem
 
-### 1. Extraction pipeline (`crates/pkg-extract`)
+Today `edge`, `rc` and `stable` are three complete directory trees (~275 GB each).
+Promoting a release copies and re-uploads most of that data, so a bump takes
+30–60 minutes even when almost nothing changed.
 
-ABI metadata is extracted **out-of-band**: the archive stored in R2 is byte-for-byte
-what `makepkg` produced. For each package the extractor:
+## The publishing layer
 
-1. parses `.PKGINFO` (`depend=`, `provides=`, `conflict=`, `replaces=`, `backup=`, sizes);
-2. walks every regular file, and for ELF objects reads `DT_SONAME`, `DT_NEEDED`
-   and `.gnu.version_r` (e.g. `libc.so.6(GLIBC_2.38)`);
-3. merges both into a `PackageManifest` (`crates/pkg-manifest`).
+![Publishing layer](diagrams/publishing-layer.svg)
 
-Merge rules:
+* **Pool** — Cloudflare R2, one object per package keyed by its SHA-256. A package is
+  uploaded exactly once, whether it came from the Arch mirror sync or from an OPR build.
+* **Index** — Cloudflare D1. Every package with its full metadata (from `.PKGINFO`
+  plus the ELF soname graph extracted by `pkg-extract`) and every release.
+* **Releases** — a release is a pinned selection of package ids for one ring
+  (`edge`, `rc`, `stable`). Promotion creates a new release for the target ring that
+  points at the same selection: an index write, no bytes move.
+* **Generated pacman databases** — for each ring the publisher renders
+  `<repo>.db.tar.gz` and `<repo>.files.tar.gz` in `repo-add` format, signs them with
+  GPG, and stores them in R2. pacman keeps working unchanged.
 
-* `provides` = `name=version` + `.PKGINFO` `provides=` + for every `DT_SONAME` both
-  the raw soname (`libz.so.1`, what `DT_NEEDED` asks for) and Arch's convention
-  (`libz.so=1-64`, what PKGBUILDs declare);
-* `requires` = `.PKGINFO` `depend=` + every `DT_NEEDED` + symbol version needs,
-  minus sonames the package ships itself;
-* symbol version needs are collapsed to the highest version per
-  `(soname, namespace)` — `GLIBC_2.34` subsumes `GLIBC_2.14` — which turns a typical
-  17-entry list into 2–3 rules without losing information;
-* `makedepend=` never reaches the manifest.
+![Release promotion](diagrams/release-promotion.svg)
 
-`pkg-extract index <dir>` writes a `RepoIndex` (`index.json`) so the client can be
-developed against a directory of packages instead of the edge API.
+### Index schema (D1)
 
-ELF facts *refine* declarative dependencies; they never replace them, because
-scripts, data files and `dlopen()`-loaded plugins are invisible to the loader.
+| table | purpose |
+|---|---|
+| `packages` | immutable rows keyed by `sha256`; `manifest_json` holds the full manifest |
+| `package_provides` / `package_requires` / `package_files` | normalized graph for queries |
+| `releases` | `(ring, seq)` with `created_at`, optional `parent_id` and a note |
+| `release_packages` | `(release_id, package_id)` — the pinned selection |
+| `ring_heads` | `ring → release_id` currently served |
 
-The same library runs inside `omarchy-cli` so packages built locally from the AUR
-get the same treatment before being recorded in the state store.
+Migrations live in `worker/migrations/`.
 
-### 2. Edge repository (`worker/`)
-
-Cloudflare Worker (TypeScript) in front of D1 (metadata) and R2 (blobs).
-The worker **does not resolve dependencies** — it does not know the client's
-installed state and Workers have a bounded CPU budget. It only serves the subgraph
-the client asks for.
+### Edge API (Worker)
 
 | Route | Purpose |
 |---|---|
-| `GET /api/v1/graph?targets=a,b&channel=stable` | transitive dependency closure of the latest version of each target |
-| `GET /api/v1/packages/:name` | every published version of a package |
-| `GET /api/v1/blob/:sha256` | streams the archive from R2, supports `Range` |
-| `POST /api/v1/sync/diff` | `{installed: {name: version}}` → available updates |
-| `PUT /api/v1/packages` | CI publish (bearer token), writes R2 + D1 in one batch |
+| `GET /:ring/os/:arch/<repo>.db` (and `.files`, `.sig`) | pacman mirror: the generated database for the ring's current release |
+| `GET /:ring/os/:arch/<filename>` | pacman mirror: resolves the filename in the release and streams the pool blob (Range supported) |
+| `GET /api/v1/releases/:ring` | current release and its package list |
+| `GET /api/v1/graph?targets=a,b&ring=stable` | dependency subgraph for the client's safety check |
+| `PUT /api/v1/packages` | publish: pool upload + index rows (bearer token) |
+| `POST /api/v1/releases` | create / promote a release (bearer token) |
 
-D1 schema: `worker/migrations/`. Packages are keyed by `(name, version, epoch, arch, channel)`
-and by `sha256`; the full manifest is stored as JSON alongside the normalized
-`package_provides` / `package_requires` / `package_files` rows used for graph queries.
+The Worker never resolves dependencies; it serves data. Decisions are made by the
+publisher (`pkg-repo`) and the client.
 
-The JSON Schema for `PackageManifest` is generated from the Rust types
-(`pkg-extract schema`) and checked into `worker/src/manifest.schema.json` so both
-sides share one contract.
+## Extraction (`crates/pkg-extract`)
 
-### 3. Resolver (`crates/pkg-resolver`)
+Out-of-band: the archive in the pool is byte-for-byte what `makepkg` produced.
+For each package the extractor merges `.PKGINFO` with the ELF facts of every
+shipped object (`DT_SONAME`, `DT_NEEDED`, `.gnu.version_r`) into a
+`PackageManifest` (`crates/pkg-manifest`). Symbol versions collapse to the highest
+per `(soname, namespace)` since `GLIBC_2.34` subsumes `GLIBC_2.14`.
 
-Built on [resolvo](https://github.com/prefix-dev/resolvo). Candidates come from two
-sources:
+The manifest carries everything `repo-add` puts in a `desc` file (`pkgbase`,
+`builddate`, `packager`, `makedepends`, `filename`, …) so databases can be rendered
+from the index alone.
 
-* **Installed state** — pacman local DB (`/var/lib/pacman/local`, read-only) plus
-  the omarchy-cli store. These are *locked/favored*: the solver keeps them unless a
-  hard soname requirement of a target cannot otherwise be satisfied.
-* **Remote candidates** — the subgraph returned by `/graph`.
+## Database generation (`crates/pkg-repo`)
 
-Result: a `Plan` with the minimal set of packages to download. If the system already
-provides every `DT_NEEDED` soname a target needs, the plan contains exactly one package.
+Renders a release into `repo-add`-compatible archives:
 
-Version comparison is a byte-for-byte port of `alpm_pkg_vercmp` (`pkg-manifest::vercmp`)
-so the resolver and `pacman -Q` always agree on ordering.
+* `<repo>.db.tar.gz` — one `<name>-<version>/desc` entry per package;
+* `<repo>.files.tar.gz` — the same plus a `files` entry;
+* detached GPG signatures (`.sig`) for both.
 
-### 4. State store and transactions (`crates/pkg-store`)
+Validation: an Arch container with `Server = https://pkgs.<domain>/$repo/os/$arch`
+runs `pacman -Sy` and `pacman -Sp <pkg>` against the generated database. See
+[TESTING.md](TESTING.md).
 
-One redb file at `/var/lib/omarchy-cli/state.redb`:
+## Thin client (`crates/omarchy-cli`)
 
-| table | key | value |
-|---|---|---|
-| `installed_packages` | name | version, sha256, install date, manifest |
-| `installed_capabilities` | capability | package, version |
-| `tracked_files` | path | owner, mode, sha256 |
-| `transactions` | tx id | rollback journal |
+![Thin client install](diagrams/thin-client-install.svg)
 
-Transaction lifecycle:
+The client drives pacman rather than replacing it. What it adds:
 
-```
-1. resolve            SAT plan
-2. download + verify  stream from R2 → sha256 → ed25519 signature
-3. PreTransaction     hooks
-4. stage              extract into /usr/.omarchy-staging/<tx>/ (same FS as /usr)
-                      collision check against tracked_files
-5. apply              per-file rename(2); every op journaled *before* it runs
-6. commit             single redb write transaction
-7. PostTransaction    hooks (ldconfig, mkinitcpio, glib-compile-schemas, ...)
-```
+* knows which **release** the machine is on and what the ring currently serves
+  (`status`, `upgrade` pins pacman to that release);
+* **safety check** before an out-of-band install: fetches the dependency subgraph,
+  reads `/var/lib/pacman/local`, and refuses when a required soname or symbol
+  version is not present on the system — the case that today produces a broken
+  partial upgrade;
+* mirror discovery and release notifications come from the index, not from
+  `pacman -Sy` polling;
+* exposes package and release information locally (MCP, later).
 
-Atomicity across many files is not something the filesystem gives us
-(`renameat2(RENAME_EXCHANGE)` is per-file). What makes the transaction safe is the
-journal: any failure in 4–6, including `SIGKILL` or power loss, is undone by replaying
-the journal in reverse on next start. On btrfs systems (Omarchy default) a snapper
-snapshot before step 5 is an optional last-resort rollback.
+`vercmp` is a byte-for-byte port of `alpm_pkg_vercmp` so the client and pacman
+always agree on ordering.
 
-### 5. Hooks (`crates/pkg-hooks`)
+## Future: native transaction engine (`crates/pkg-store`)
 
-Parses `.hook` files from `/etc/pacman.d/hooks` and `/usr/share/libalpm/hooks`
-(same precedence as pacman) and runs matching `Exec` lines in the right phase so
-existing Arch triggers keep working without changes.
+Built and tested, but not on the POC path. If the thin client proves itself, this
+is the engine that would let it stop shelling out to pacman: a single redb state
+file plus a journaled, crash-safe filesystem transaction.
 
-## Coexistence with pacman
-
-| Concern | Approach |
-|---|---|
-| pacman must not overwrite our files | we only manage `[omarchy]` packages; collisions against `tracked_files` and pacman's DB abort the transaction |
-| `pacman -Qo` / `yay` should see our packages | phase 6: also write a `/var/lib/pacman/local/<pkg>/{desc,files,mtree}` entry |
-| base libraries | never installed by us; read from pacman DB as satisfied capabilities |
-
-## Signing
-
-Detached ed25519 signatures (minisign-compatible) stored next to the archive in R2.
-The public key is embedded in the client binary. Simpler than GPG and sufficient for a
-single-publisher repository.
+![Transaction lifecycle](diagrams/transaction-lifecycle.svg)
 
 ## Roadmap
 
-| Phase | Crate(s) | Deliverable |
+| Step | Deliverable | Answers |
 |---|---|---|
-| 1 ✅ | `pkg-manifest`, `pkg-extract` | `pkg-extract inspect foo.pkg.tar.zst` prints a complete manifest; `pkg-extract index <dir>` emits an `index.json` so the client can be developed without Cloudflare |
-| 2 | `pkg-store` | install/remove from a local repo with journaled rollback; integration tests against a temp root |
-| 3 | `pkg-resolver` | resolvo provider over pacman DB + store + candidates; `install --dry-run` prints a plan |
-| 4 | `worker/` | D1 migrations, `/graph` BFS closure, publish endpoint, signatures, `sync/diff` with vercmp |
-| 5 | `pkg-hooks` | `.hook` parser + executor wired into the transaction |
-| 6 | `omarchy-cli` | pacman local DB write-compat, `upgrade`, `search`, `owns` |
+| 1 ✅ | `pkg-extract`: manifest from unmodified archives; `index` for local repos | groundwork |
+| 2 ✅ | `pkg-store`: redb + journaled transactions (parked) | future |
+| 3 | Index schema v2 (releases), publish + promote commands | Q1 |
+| 4 | `pkg-repo`: signed `repo-add` databases from a release; Worker mirror routes; pacman validation in a container | Q2 |
+| 5 | Thin `omarchy-cli`: `status`, `check`, `install`, `upgrade` over pacman | Q3 |
+| 6 | libalpm hook compatibility, native engine wiring | later |
