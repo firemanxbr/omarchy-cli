@@ -22,6 +22,8 @@ push and pull request.
 | `pkg-manifest` | dependency rule parsing, `vercmp` against pacman's own test table, manifest JSON round-trip | unit tests |
 | `pkg-extract` | `.PKGINFO` parsing, ELF magic detection, soname → Arch provide conversion, symbol version collapsing | unit tests |
 | `pkg-extract` | end-to-end manifests from **real** `zlib` and `xz` packages (`tests/fixtures/`) | `tests/fixtures.rs` |
+| `pkg-repo` | `desc`/`files` rendering identical to `repo-add`, database determinism | unit + `tests/database.rs` |
+| `pkg-check` | pacman `desc` parsing, satisfiers, ABI check verdicts against a real `liblzma.so.5` | unit + `tests/check.rs` |
 | `pkg-store` | install / upgrade / remove, collisions, `.pacnew`, I/O failure rollback, crash recovery before and after commit | `tests/transactions.rs` against a temp root |
 
 Useful invocations:
@@ -114,6 +116,33 @@ pkg-repo publish --ring edge foo-1.0-1-x86_64.pkg.tar.zst   # pool + index + new
 pkg-repo promote --from edge --to rc
 pkg-repo render --ring rc --sign <gpg key id>               # databases for the ring head
 curl $OMARCHY_API/api/v1/releases/rc/history
+```
+
+## End-to-end: the thin client
+
+Runs `omarchy-cli` against the staging index and two real Arch systems exported
+from containers (only `var/lib/pacman/local` and `usr/lib/lib*.so*` are extracted):
+
+```bash
+tests/e2e-client.sh
+```
+
+* current `archlinux:base` → `check xz` is safe, `install --dry-run` prints the
+  `pacman -U` command;
+* `archlinux:base-20210131` (glibc 2.32) → `check xz` is **BLOCKED** on
+  `libc.so.6(GLIBC_2.34)` with exit code 2 and pacman is never invoked;
+* with `cargo-zigbuild` installed (`brew install zig && cargo install cargo-zigbuild`)
+  the client is cross-compiled for `x86_64-unknown-linux-musl` and `omarchy-cli upgrade`
+  runs inside the container: safety check, `pacman -U` from the pool with signature
+  verification, hooks, and the release pin.
+
+The container needs `DisableSandboxSyscalls` in `/etc/pacman.conf` because pacman
+7's seccomp download sandbox cannot run under x86_64 emulation; the script sets it.
+
+You can also point the client at any rootfs by hand:
+
+```bash
+OMARCHY_API=https://pkgs.firemanxbr.org omarchy-cli --root target/rootfs-2021 check xz
 ```
 
 ## Cloudflare (staging)

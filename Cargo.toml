@@ -4,7 +4,7 @@ members = [
     "crates/pkg-manifest",
     "crates/pkg-extract",
     "crates/pkg-repo",
-    "crates/pkg-resolver",
+    "crates/pkg-check",
     "crates/pkg-store",
     "crates/pkg-hooks",
     "crates/omarchy-cli",
@@ -22,7 +22,7 @@ rust-version = "1.85"
 pkg-manifest = { path = "crates/pkg-manifest" }
 pkg-extract = { path = "crates/pkg-extract" }
 pkg-repo = { path = "crates/pkg-repo" }
-pkg-resolver = { path = "crates/pkg-resolver" }
+pkg-check = { path = "crates/pkg-check" }
 pkg-store = { path = "crates/pkg-store" }
 pkg-hooks = { path = "crates/pkg-hooks" }
 

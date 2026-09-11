@@ -61,6 +61,30 @@ pub fn inspect(bytes: &[u8]) -> Result<Option<ElfFacts>, goblin::error::Error> {
     }))
 }
 
+/// Symbol versions an ELF object **defines** (`.gnu.version_d`), e.g.
+/// `["GLIBC_2.2.5", "GLIBC_2.34", "GLIBC_PRIVATE"]` for libc. This is what the
+/// client checks a package's version needs against.
+///
+/// Returns `Ok(None)` for non-ELF input.
+pub fn defined_versions(bytes: &[u8]) -> Result<Option<Vec<String>>, goblin::error::Error> {
+    if !is_elf(bytes) {
+        return Ok(None);
+    }
+    let elf = Elf::parse(bytes)?;
+    let mut out = Vec::new();
+    if let Some(verdef) = &elf.verdef {
+        for def in verdef {
+            // The first aux entry names the version; later ones are parents.
+            if let Some(aux) = def.iter().next() {
+                if let Some(name) = elf.dynstrtab.get_at(aux.vda_name) {
+                    out.push(name.to_owned());
+                }
+            }
+        }
+    }
+    Ok(Some(out))
+}
+
 /// Converts a raw soname into Arch's `provides` convention:
 /// `libz.so.1` on a 64-bit object → `libz.so=1-64`.
 ///

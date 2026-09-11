@@ -115,3 +115,26 @@ fn manifest_round_trips_through_json() {
     let back: PackageManifest = serde_json::from_str(&json).unwrap();
     assert_eq!(m, back);
 }
+
+#[test]
+fn liblzma_defines_its_symbol_versions() {
+    // Pull liblzma.so.5.8.4 out of the xz archive and read its .gnu.version_d.
+    use std::io::Read;
+    let file = std::fs::File::open(fixture("xz-5.8.4-1-x86_64.pkg.tar.zst")).unwrap();
+    let mut archive = tar::Archive::new(zstd::Decoder::new(file).unwrap());
+    let mut lib = Vec::new();
+    for entry in archive.entries().unwrap() {
+        let mut entry = entry.unwrap();
+        if entry.path().unwrap().to_string_lossy() == "usr/lib/liblzma.so.5.8.4" {
+            entry.read_to_end(&mut lib).unwrap();
+        }
+    }
+    assert!(!lib.is_empty(), "fixture layout changed");
+    let versions = pkg_extract::elf::defined_versions(&lib).unwrap().unwrap();
+    assert!(versions.iter().any(|v| v == "XZ_5.0"), "{versions:?}");
+    assert!(versions.iter().any(|v| v == "XZ_5.2"), "{versions:?}");
+    assert_eq!(
+        pkg_extract::elf::defined_versions(b"not elf").unwrap(),
+        None
+    );
+}

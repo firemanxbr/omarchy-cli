@@ -11,8 +11,32 @@ and a **thin client** that understands releases and blocks unsafe partial upgrad
 * `omarchy-cli` drives pacman and adds release awareness plus an ABI-level safety
   check built from the ELF soname graph.
 
-> Status: proof of concept. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the
-> design and roadmap and [docs/TESTING.md](docs/TESTING.md) for how to verify it.
+> Status: proof of concept — results in [docs/POC-RESULTS.md](docs/POC-RESULTS.md).
+> See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design and
+> [docs/TESTING.md](docs/TESTING.md) for how to verify it.
+
+## Try the staging repository
+
+The POC runs at **https://pkgs.firemanxbr.org** with two test packages (`zlib`, `xz`
+from Arch `core`) published through `edge → rc → stable`. It is a plain pacman mirror:
+
+```ini
+# /etc/pacman.conf
+[omarchy]
+Server = https://pkgs.firemanxbr.org/stable/os/$arch
+```
+
+Databases and packages are signed with a throwaway key (`docs/omarchy-poc.pub.asc`,
+expires 2026-10-11): `pacman-key --add docs/omarchy-poc.pub.asc && pacman-key --lsign-key poc@omarchy.invalid`.
+
+The thin client works against the same index:
+
+```bash
+export OMARCHY_API=https://pkgs.firemanxbr.org
+omarchy-cli status          # pinned release vs. what stable serves now
+omarchy-cli check xz        # ABI safety check against this machine, exit 2 if unsafe
+omarchy-cli upgrade         # pacman -U from the pool, then pin the release
+```
 
 ## Layout
 

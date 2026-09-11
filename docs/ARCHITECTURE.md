@@ -8,7 +8,9 @@ three questions:
 3. Does a **thin Omarchy client** give enough control to justify becoming part of the system?
 
 Packages are standard Arch `.pkg.tar.zst` archives produced by `makepkg`; they are never
-modified. Nothing here touches production.
+modified. Nothing here touches production: the staging deployment lives at
+`https://pkgs.firemanxbr.org` (Cloudflare Worker + D1 + R2) and results are collected
+in [POC-RESULTS.md](POC-RESULTS.md).
 
 ## The problem
 
@@ -83,6 +85,17 @@ Validation: an Arch container with `Server = https://pkgs.<domain>/$repo/os/$arc
 runs `pacman -Sy` and `pacman -Sp <pkg>` against the generated database. See
 [TESTING.md](TESTING.md).
 
+## Safety check (`crates/pkg-check`)
+
+* `local::LocalDb` — the pacman local database, read-only: installed versions and
+  `provides`.
+* `abi::SystemAbi` — the shared libraries actually on disk and the symbol versions
+  they define (`.gnu.version_d`).
+* `check` — for every package the release would install, each `requires` rule is
+  classified: satisfied by the plan itself, by an installed library/package, a
+  **warning** (pacman must resolve it from another repository) or a **blocker**
+  (a soname or symbol version this system does not have).
+
 ## Thin client (`crates/omarchy-cli`)
 
 ![Thin client install](diagrams/thin-client-install.svg)
@@ -118,5 +131,5 @@ file plus a journaled, crash-safe filesystem transaction.
 | 2 ✅ | `pkg-store`: redb + journaled transactions (parked) | future |
 | 3 ✅ | Index schema with releases; `pkg-repo publish` / `promote`; worker API | Q1 |
 | 4 ✅ | `pkg-repo render`: signed `repo-add` databases per release; worker mirror routes; validated with pacman 7.1 in a container, over `file://` and through the worker | Q2 |
-| 5 | Thin `omarchy-cli`: `status`, `check`, `install`, `upgrade` over pacman | Q3 |
+| 5 ✅ | Thin `omarchy-cli`: `status`, `check`, `install`, `upgrade`, `search`, `info`, `list` over pacman; ABI check validated on a 2021 system (blocked) and a current one (upgrade through pacman) | Q3 |
 | 6 | libalpm hook compatibility, native engine wiring | later |
