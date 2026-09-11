@@ -16,7 +16,7 @@ enabled = true
 [[d1_databases]]
 binding = "DB"
 database_name = "omarchy-repo"
-database_id = "REPLACE_WITH_D1_ID"
+database_id = "e2f04e65-465c-4170-8750-69061f846b9b"
 migrations_dir = "migrations"
 
 # Pool objects: pool/<sha256>.pkg.tar.zst (+ .sig); generated databases: releases/<id>/...
