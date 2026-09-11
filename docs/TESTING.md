@@ -118,7 +118,8 @@ curl $OMARCHY_API/api/v1/releases/rc/history
 
 ## Cloudflare (staging)
 
-Deploying to the staging account is a manual step:
+The staging worker runs at `https://pkgs.firemanxbr.org` with a real D1 database and
+R2 bucket. Deploying is a manual step:
 
 ```bash
 cd worker
@@ -126,5 +127,22 @@ npx wrangler d1 migrations apply omarchy-repo --remote
 npx wrangler deploy
 ```
 
-Then point a container's `pacman.conf` at `https://pkgs.firemanxbr.org/$repo/os/$arch`
-and repeat the end-to-end checks.
+Publishing needs the token stored as the worker's `PUBLISH_TOKEN` secret:
+
+```bash
+export OMARCHY_API=https://pkgs.firemanxbr.org OMARCHY_PUBLISH_TOKEN=...
+pkg-repo publish --ring edge <archives>
+pkg-repo promote --from edge --to rc && pkg-repo promote --from rc --to stable
+pkg-repo render --ring stable --sign <key id>
+```
+
+To validate with pacman, use the same container recipe as the local scripts with
+
+```
+[omarchy]
+Server = https://pkgs.firemanxbr.org/stable/os/$arch
+```
+
+and the POC public key imported into `pacman-key`. This has been exercised end to end:
+`-Sy` accepts the signed database, `-Sw` downloads the package and its signature from
+the pool through the worker, and `-U` installs it.
