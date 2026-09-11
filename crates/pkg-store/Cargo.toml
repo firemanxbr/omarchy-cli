@@ -18,6 +18,11 @@ hex = { workspace = true }
 redb = "2"
 tar = "0.4"
 zstd = "0.13"
+rustix = { version = "1", features = ["process"] }
+
+[dev-dependencies]
+pkg-extract = { workspace = true }
+tempfile = "3"
 
 [lints]
 workspace = true
