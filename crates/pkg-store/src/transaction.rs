@@ -408,8 +408,7 @@ impl<'a> Transaction<'a> {
     fn commit_state(&self, record: &mut TransactionRecord, plan: &Plan) -> Result<()> {
         let installed_at = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
+            .map_or(0, |d| d.as_secs());
         let txn = self.store.db().begin_write()?;
         {
             let mut packages = txn.open_table(PACKAGES)?;
