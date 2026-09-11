@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use crate::DependencyRule;
 
 /// Bumped whenever the on-the-wire manifest shape changes incompatibly.
-pub const MANIFEST_SCHEMA_VERSION: u32 = 1;
+pub const MANIFEST_SCHEMA_VERSION: u32 = 2;
 
 /// Metadata extracted from a built package.
 ///
@@ -36,6 +36,12 @@ pub struct PackageManifest {
     pub size_download: u64,
     /// Hex-encoded SHA-256 of the `.pkg.tar.zst` archive.
     pub sha256: String,
+    /// Archive file name as produced by makepkg (`zlib-1:1.3.2-3-x86_64.pkg.tar.zst`).
+    pub filename: String,
+    /// Declarative metadata copied verbatim from `.PKGINFO`. This is what
+    /// `repo-add` puts in a `desc` file; keep it untouched so generated pacman
+    /// databases are indistinguishable from the real thing.
+    pub pkginfo: PkgInfoFields,
     /// Capabilities this package satisfies. Always includes `name=version`.
     /// Example: `libssl.so=3-64`, `openssl=3.3.1-1`, `web-browser`.
     #[serde(default)]
@@ -57,6 +63,35 @@ pub struct PackageManifest {
     /// Paths that must be preserved on upgrade/removal (`backup=` in `.PKGINFO`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub backup: Vec<String>,
+}
+
+/// Verbatim `.PKGINFO` values, in Arch dependency syntax, without ELF enrichment.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PkgInfoFields {
+    /// `pkgbase` — the PKGBUILD this package was built from.
+    pub base: String,
+    /// Unix timestamp from `builddate`.
+    pub builddate: u64,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub packager: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub groups: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub depends: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub makedepends: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub checkdepends: Vec<String>,
+    /// `name: description` entries, description preserved.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub optdepends: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub provides: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub conflicts: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub replaces: Vec<String>,
 }
 
 /// A flat repository index: what `pkg-extract index` writes and what the client
@@ -94,6 +129,12 @@ mod tests {
             size_installed: 10,
             size_download: 5,
             sha256: "00".repeat(32),
+            filename: "flea-1.2.0-1-x86_64.pkg.tar.zst".into(),
+            pkginfo: PkgInfoFields {
+                base: "flea".into(),
+                builddate: 1_700_000_000,
+                ..PkgInfoFields::default()
+            },
             provides: vec!["flea=1.2.0-1".parse().unwrap()],
             requires: vec!["libc.so.6(GLIBC_2.38)".parse().unwrap()],
             optional: vec![],

@@ -38,6 +38,12 @@ fn zlib_identity_comes_from_pkginfo() {
     assert_eq!(m.size_installed, 228_580);
     assert_eq!(m.size_download, 84_690);
     assert_eq!(m.sha256.len(), 64);
+    assert_eq!(m.filename, "zlib-1:1.3.2-3-x86_64.pkg.tar.zst");
+    assert_eq!(m.pkginfo.base, "zlib");
+    assert_eq!(m.pkginfo.builddate, 1_772_984_636);
+    assert_eq!(m.pkginfo.packager, "David Runge <dvzrv@archlinux.org>");
+    assert_eq!(m.pkginfo.depends, ["glibc"]);
+    assert_eq!(m.pkginfo.provides, ["libz.so=1-64"]);
 }
 
 #[test]
@@ -95,8 +101,10 @@ fn xz_keeps_non_elf_dependencies_and_skips_internal_sonames() {
     assert!(has(&m.provides, "liblzma.so.5"));
     assert!(has(&m.provides, "liblzma.so=5-64"));
     assert!(!has(&m.requires, "liblzma.so.5"), "{:?}", m.requires);
-    // makedepend must not leak into runtime requires.
+    // makedepend must not leak into runtime requires, but is kept verbatim.
     assert!(!has(&m.requires, "git"));
+    assert_eq!(m.pkginfo.makedepends, ["git", "po4a", "doxygen"]);
+    assert_eq!(m.pkginfo.depends, ["glibc", "sh"]);
     assert!(m.files.contains(&"/usr/bin/xz".to_owned()));
 }
 

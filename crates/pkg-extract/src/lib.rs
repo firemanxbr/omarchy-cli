@@ -18,7 +18,7 @@ use std::fs::File;
 use std::io::{BufReader, Read};
 use std::path::Path;
 
-use pkg_manifest::{DependencyRule, PackageManifest, MANIFEST_SCHEMA_VERSION};
+use pkg_manifest::{DependencyRule, PackageManifest, PkgInfoFields, MANIFEST_SCHEMA_VERSION};
 use sha2::{Digest, Sha256};
 use tar::EntryType;
 
@@ -56,7 +56,11 @@ pub fn extract_manifest(archive: &Path) -> Result<PackageManifest, ExtractError>
     let (sha256, size_download) = hash_file(archive)?;
     let scan = scan_archive(archive)?;
     let pkginfo = scan.pkginfo.as_ref().ok_or(ExtractError::MissingPkgInfo)?;
-    Ok(merge(pkginfo, &scan, sha256, size_download)?)
+    let filename = archive
+        .file_name()
+        .map(|f| f.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    Ok(merge(pkginfo, &scan, sha256, size_download, filename)?)
 }
 
 /// First pass: SHA-256 and byte length of the archive as stored.
@@ -146,10 +150,27 @@ fn merge(
     scan: &ArchiveScan,
     sha256: String,
     size_download: u64,
+    filename: String,
 ) -> Result<PackageManifest, pkginfo::PkgInfoError> {
     let name = info.required("pkgname")?.to_owned();
     let version = info.required("pkgver")?.to_owned();
     let arch = info.required("arch")?.to_owned();
+    let pkginfo = PkgInfoFields {
+        base: info.first("pkgbase").unwrap_or(&name).to_owned(),
+        builddate: info
+            .first("builddate")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0),
+        packager: info.first("packager").unwrap_or_default().to_owned(),
+        groups: info.all("group").to_vec(),
+        depends: info.all("depend").to_vec(),
+        makedepends: info.all("makedepend").to_vec(),
+        checkdepends: info.all("checkdepend").to_vec(),
+        optdepends: info.all("optdepend").to_vec(),
+        provides: info.all("provides").to_vec(),
+        conflicts: info.all("conflict").to_vec(),
+        replaces: info.all("replaces").to_vec(),
+    };
 
     let mut provides = RuleSet::default();
     provides.push(DependencyRule::with_constraint(
@@ -223,6 +244,8 @@ fn merge(
         size_installed: info.first("size").and_then(|s| s.parse().ok()).unwrap_or(0),
         size_download,
         sha256,
+        filename,
+        pkginfo,
         provides: provides.into_vec(),
         requires: requires.into_vec(),
         optional: optional.into_vec(),

@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/pkg-manifest",
     "crates/pkg-extract",
+    "crates/pkg-repo",
     "crates/pkg-resolver",
     "crates/pkg-store",
     "crates/pkg-hooks",
@@ -20,6 +21,7 @@ rust-version = "1.85"
 # Internal crates
 pkg-manifest = { path = "crates/pkg-manifest" }
 pkg-extract = { path = "crates/pkg-extract" }
+pkg-repo = { path = "crates/pkg-repo" }
 pkg-resolver = { path = "crates/pkg-resolver" }
 pkg-store = { path = "crates/pkg-store" }
 pkg-hooks = { path = "crates/pkg-hooks" }

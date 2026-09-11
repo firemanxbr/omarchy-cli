@@ -69,16 +69,25 @@ cd worker && npm run schema:sync && git diff --exit-code src/manifest.schema.jso
 
 ## End-to-end: pacman against a generated database
 
-Requires a container runtime (Podman or Docker). The script publishes the fixture
-packages to a local index, renders the `omarchy` database, serves it, and runs
-pacman inside an Arch container:
+Requires a container runtime (Podman or Docker) and `gpg`. The script indexes the
+fixture packages, renders and signs the `omarchy` database with a throwaway key
+(created on first run in `~/.cache/omarchy-cli-poc/gnupg`), signs the packages the
+way a mirror or build would, and runs a real pacman (`archlinux:base`, x86_64) inside
+a container with `SigLevel = Required DatabaseRequired` against a `file://` mirror:
 
 ```bash
 tests/e2e-pacman.sh
 ```
 
-It checks that `pacman -Sy` accepts the database and signature and that
-`pacman -Sp zlib` resolves to a URL served from the pool. *(Lands with roadmap step 4.)*
+It exercises `-Sy` (signed database accepted), `-Sl`, `-Si`, `-Sp`, the files
+database (`-Fy`/`-Fl`), `-Sw` (download with signature verification) and a real
+`-U` install. On Apple Silicon the x86_64 image runs under emulation; the first run
+pulls the image.
+
+| Symptom | Cause |
+|---|---|
+| `podman: command not found` | install Podman Desktop (or Docker) and `podman machine start` |
+| `agent_genkey failed: No agent running` | `GNUPGHOME` path too long for a Unix socket; keep the default cache location |
 
 ## Cloudflare (staging)
 

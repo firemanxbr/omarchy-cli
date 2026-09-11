@@ -117,6 +117,6 @@ file plus a journaled, crash-safe filesystem transaction.
 | 1 ✅ | `pkg-extract`: manifest from unmodified archives; `index` for local repos | groundwork |
 | 2 ✅ | `pkg-store`: redb + journaled transactions (parked) | future |
 | 3 | Index schema v2 (releases), publish + promote commands | Q1 |
-| 4 | `pkg-repo`: signed `repo-add` databases from a release; Worker mirror routes; pacman validation in a container | Q2 |
+| 4 ✅ (local) | `pkg-repo`: signed `repo-add` databases from a release, validated with pacman 7.1 in a container; Worker mirror routes pending | Q2 |
 | 5 | Thin `omarchy-cli`: `status`, `check`, `install`, `upgrade` over pacman | Q3 |
 | 6 | libalpm hook compatibility, native engine wiring | later |

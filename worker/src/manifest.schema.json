@@ -26,6 +26,10 @@
         "null"
       ]
     },
+    "filename": {
+      "description": "Archive file name as produced by makepkg (`zlib-1:1.3.2-3-x86_64.pkg.tar.zst`).",
+      "type": "string"
+    },
     "files": {
       "description": "Absolute paths of every file installed by the package, used for collision\ndetection and `owns` queries. Directories end with `/`.",
       "type": "array",
@@ -48,6 +52,10 @@
       "items": {
         "$ref": "#/$defs/DependencyRule"
       }
+    },
+    "pkginfo": {
+      "description": "Declarative metadata copied verbatim from `.PKGINFO`. This is what\n`repo-add` puts in a `desc` file; keep it untouched so generated pacman\ndatabases are indistinguishable from the real thing.",
+      "$ref": "#/$defs/PkgInfoFields"
     },
     "provides": {
       "description": "Capabilities this package satisfies. Always includes `name=version`.\nExample: `libssl.so=3-64`, `openssl=3.3.1-1`, `web-browser`.",
@@ -110,12 +118,87 @@
     "arch",
     "size_installed",
     "size_download",
-    "sha256"
+    "sha256",
+    "filename",
+    "pkginfo"
   ],
   "$defs": {
     "DependencyRule": {
       "description": "A single dependency or capability.\n\nThe optional `symbol_version` captures glibc-style symbol version needs\n(`libc.so.6(GLIBC_2.38)`) that come from the ELF `.gnu.version_r` section.",
       "type": "string"
+    },
+    "PkgInfoFields": {
+      "description": "Verbatim `.PKGINFO` values, in Arch dependency syntax, without ELF enrichment.",
+      "type": "object",
+      "properties": {
+        "base": {
+          "description": "`pkgbase` — the PKGBUILD this package was built from.",
+          "type": "string"
+        },
+        "builddate": {
+          "description": "Unix timestamp from `builddate`.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "checkdepends": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "conflicts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "depends": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "groups": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "makedepends": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "optdepends": {
+          "description": "`name: description` entries, description preserved.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "packager": {
+          "type": "string"
+        },
+        "provides": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "replaces": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "base",
+        "builddate"
+      ]
     }
   }
 }
