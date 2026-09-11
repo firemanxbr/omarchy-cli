@@ -21,7 +21,8 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            api: "https://pkgs.omarchy.org".into(),
+            // The POC staging repository; production will move this to omarchy.org.
+            api: "https://pkgs.firemanxbr.org".into(),
             ring: "stable".into(),
             repo: "omarchy".into(),
             arch: "x86_64".into(),

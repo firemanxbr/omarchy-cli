@@ -20,8 +20,27 @@ pub struct Release {
 #[derive(Debug, Deserialize)]
 pub struct ReleaseView {
     pub release: Release,
-    pub package_count: u64,
     pub packages: Vec<PackageManifest>,
+}
+
+/// One row of `?fields=summary`: what status / list / search need.
+#[derive(Debug, Clone, Deserialize, serde::Serialize)]
+pub struct PackageSummary {
+    pub name: String,
+    pub version: String,
+    pub arch: String,
+    pub filename: String,
+    pub sha256: String,
+    pub size_download: u64,
+    pub size_installed: u64,
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ReleaseSummaryView {
+    pub release: Release,
+    pub package_count: u64,
+    pub packages: Vec<PackageSummary>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -59,8 +78,14 @@ impl Api {
         resp.json().with_context(|| format!("decoding {url}"))
     }
 
+    /// Full manifests (without file lists) — needed for the safety check.
     pub fn release(&self, ring: &str) -> Result<ReleaseView> {
         self.get(&format!("/releases/{ring}"))
+    }
+
+    /// Light listing for status / list / search.
+    pub fn release_summary(&self, ring: &str) -> Result<ReleaseSummaryView> {
+        self.get(&format!("/releases/{ring}?fields=summary"))
     }
 
     pub fn graph(&self, ring: &str, targets: &[String]) -> Result<Graph> {

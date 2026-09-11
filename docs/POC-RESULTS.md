@@ -85,6 +85,39 @@ shared libraries on disk) and drives `pacman -U` with URLs from the release.
 * Everything the client knows is available as `--json`, which is the shape an MCP
   server would expose.
 
+## Benchmark: promotion at scale
+
+`tests/bench-promotion.sh 10000` seeds a local worker with 10,000 synthetic packages
+(average 18 MB each — roughly the 275 GB / ~15k packages ratio of a ring today —
+40 files, 8 requirements) in an `edge` release and measures the operations that
+replace "copy the directory tree". Local D1/R2 (miniflare) on a laptop; staging
+adds network latency but the same work.
+
+| Operation | 10,000 packages (≈176 GB of package data) |
+|---|---|
+| Promote `edge → rc` | **37 ms**, 0 bytes moved |
+| Promote `rc → stable` | **27 ms**, 0 bytes moved |
+| Render + sign + upload `omarchy.db` / `omarchy.files` from the index | 512 ms (987 KB / 2.1 MB) |
+| Dependency closure query (2,000-package closure) | 132 ms |
+| Release listing the client downloads for `status` | 2.9 MB in 49 ms (`?fields=summary`) |
+| `pacman -Sy` against the generated database | 172 ms, 10,000 packages listed |
+| Same promotion against the live staging worker (2 packages) | 350–430 ms — the network floor |
+
+Against the current process as described in the migration outline (three ~275 GB
+trees, promotion = copy + re-upload, **30–60 minutes**):
+
+| | Today | Pool + index |
+|---|---|---|
+| Promotion time | 30–60 min | well under a second (index write + network round trip) |
+| Bytes moved per promotion | ~275 GB | 0 |
+| Storage for edge + rc + stable | ~825 GB (3 trees) | ~275 GB + the packages that differ between rings |
+| Database generation | `repo-add` reads every archive | rendered from the index, no package reads |
+
+The promotion cost depends on the number of packages in the selection, not on
+their size: the 10,000-package release above carries the same 176 GB whether it is
+promoted once or a hundred times. Storage numbers are derived from the model (one
+object per sha256), not measured on 275 GB.
+
 ## What is not covered by the POC
 
 * The Arch mirror side (core/extra) is not in the index; the client warns when a
@@ -104,4 +137,5 @@ shared libraries on disk) and drives `pacman -U` with URLs from the release.
 tests/e2e-pacman.sh   # local file:// mirror, pacman in a container
 tests/e2e-worker.sh   # local worker (wrangler dev), publish → promote → render → pacman
 tests/e2e-client.sh   # thin client: safe vs blocked systems, real upgrade in a container
+tests/bench-promotion.sh 10000   # promotion / render / pacman -Sy at scale
 ```

@@ -139,10 +139,11 @@ impl Api {
         Ok(Self::check(resp)?.json()?)
     }
 
+    /// Release view with file lists (needed for `<repo>.files`).
     pub fn release(&self, ring: &str) -> Result<ReleaseView, RepoError> {
         let resp = self
             .http
-            .get(self.url(&format!("/releases/{ring}")))
+            .get(self.url(&format!("/releases/{ring}?include=files")))
             .send()?;
         Ok(Self::check(resp)?.json()?)
     }

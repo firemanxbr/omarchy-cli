@@ -12,7 +12,7 @@
  *   PUT  /api/v1/pool/:sha256/sig      raw detached signature
  *   POST /api/v1/packages              manifest JSON → index rows
  *   GET  /api/v1/packages/:sha256
- *   GET  /api/v1/releases/:ring        head release + manifests
+ *   GET  /api/v1/releases/:ring        head release + manifests (?fields=summary for a light list, ?include=files for file lists)
  *   GET  /api/v1/releases/:ring/history
  *   POST /api/v1/releases              create / promote a release
  *   PUT  /api/v1/releases/:id/artifacts/:kind?repo=&arch=   generated db upload
@@ -94,7 +94,7 @@ async function api(method: string, path: string, url: URL, request: Request, env
     return requireAuth(request, env) ?? handleCreateRelease(request, env);
   }
   if ((m = path.match(/^\/releases\/([a-z]+)$/)) && method === "GET") {
-    return handleGetRelease(m[1], env);
+    return handleGetRelease(m[1], url, env);
   }
   if ((m = path.match(/^\/releases\/([a-z]+)\/history$/)) && method === "GET") {
     return handleReleaseHistory(m[1], env);

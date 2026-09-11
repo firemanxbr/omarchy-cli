@@ -130,9 +130,9 @@ pub fn run(cli: Cli) -> Result<i32> {
 }
 
 fn search(config: &Config, api: &Api, query: &str, json: bool) -> Result<i32> {
-    let view = api.release(&config.ring)?;
+    let view = api.release_summary(&config.ring)?;
     let q = query.to_lowercase();
-    let hits: Vec<&PackageManifest> = view
+    let hits: Vec<&crate::api::PackageSummary> = view
         .packages
         .iter()
         .filter(|m| {
@@ -192,7 +192,7 @@ fn info(config: &Config, api: &Api, package: &str, json: bool) -> Result<i32> {
 }
 
 fn list(config: &Config, api: &Api) -> Result<i32> {
-    let view = api.release(&config.ring)?;
+    let view = api.release_summary(&config.ring)?;
     let local = LocalDb::load(&config.root)?;
     for m in &view.packages {
         if let Some(p) = local.get(&m.name) {
@@ -208,7 +208,7 @@ fn list(config: &Config, api: &Api) -> Result<i32> {
 }
 
 fn status(config: &Config, api: &Api, json: bool) -> Result<i32> {
-    let view = api.release(&config.ring)?;
+    let view = api.release_summary(&config.ring)?;
     let pinned = state::load(&config.root)?;
     let local = LocalDb::load(&config.root)?;
     let mut updates = Vec::new();

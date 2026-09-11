@@ -147,6 +147,18 @@ You can also point the client at any rootfs by hand:
 OMARCHY_API=https://pkgs.firemanxbr.org omarchy-cli --root target/rootfs-2021 check xz
 ```
 
+## Benchmark
+
+```bash
+tests/bench-promotion.sh [N]    # default 10000
+```
+
+Seeds a throwaway local worker with N synthetic packages (`tests/bench/seed.py`
+generates the SQL; D1 caps statements at 100 KB so rows are batched) in an `edge`
+release, then times `promote`, `render`, the closure query, the release listing and
+— when a container runtime is present — `pacman -Sy` against the generated
+database. Results for N = 10,000 are recorded in [POC-RESULTS.md](POC-RESULTS.md).
+
 ## Cloudflare (staging)
 
 The staging worker runs at `https://pkgs.firemanxbr.org` with a real D1 database and

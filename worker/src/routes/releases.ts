@@ -1,6 +1,6 @@
 import { isRing, json, type Env, type Ring } from "../index";
 import { artifactKey } from "../r2";
-import { releaseManifests, releaseSummary, ringHead, type ReleaseRow } from "../db";
+import { releaseManifests, releaseSummary, ringHead, type ManifestDetail, type ReleaseRow } from "../db";
 
 interface CreateRelease {
   ring: string;
@@ -31,12 +31,18 @@ export async function handleCreateRelease(request: Request, env: Env): Promise<R
   const parent = await ringHead(env, ring);
   const base = source ?? parent;
 
-  const added: number[] = [];
-  for (const sha of body.add ?? []) {
-    const row = await env.DB.prepare("SELECT id FROM packages WHERE sha256 = ?").bind(sha).first<{ id: number }>();
-    if (!row) return json({ error: `package ${sha} is not indexed` }, 404);
-    added.push(row.id);
-  }
+  const add = body.add ?? [];
+  const found = add.length
+    ? (
+        await env.DB.prepare("SELECT id, sha256 FROM packages WHERE sha256 IN (SELECT value FROM json_each(?))")
+          .bind(JSON.stringify(add))
+          .all<{ id: number; sha256: string }>()
+      ).results
+    : [];
+  const bySha = new Map(found.map((r) => [r.sha256, r.id]));
+  const missing = add.filter((sha) => !bySha.has(sha));
+  if (missing.length) return json({ error: `packages not indexed: ${missing.join(", ")}` }, 404);
+  const added: number[] = add.map((sha) => bySha.get(sha)!);
 
   const seqRow = await env.DB.prepare("SELECT COALESCE(MAX(seq), 0) + 1 AS seq FROM releases WHERE ring = ?")
     .bind(ring)
@@ -79,8 +85,10 @@ export async function handleCreateRelease(request: Request, env: Env): Promise<R
   return json({ release, ...(await releaseSummary(env, id)) }, 201);
 }
 
-export async function handleGetRelease(ring: string, env: Env): Promise<Response> {
+export async function handleGetRelease(ring: string, url: URL, env: Env): Promise<Response> {
   if (!isRing(ring)) return json({ error: "unknown ring" }, 404);
+  const detail: ManifestDetail =
+    url.searchParams.get("include") === "files" ? "files" : url.searchParams.get("fields") === "summary" ? "summary" : "default";
   const head = await ringHead(env, ring);
   if (!head) return json({ error: `ring ${ring} has no release yet` }, 404);
   const artifacts = await env.DB.prepare(
@@ -92,7 +100,7 @@ export async function handleGetRelease(ring: string, env: Env): Promise<Response
     release: head,
     ...(await releaseSummary(env, head.id)),
     artifacts: artifacts.results,
-    packages: await releaseManifests(env, head.id),
+    packages: await releaseManifests(env, head.id, detail),
   });
 }
 

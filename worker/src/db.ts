@@ -20,7 +20,26 @@ export async function ringHead(env: Env, ring: Ring): Promise<ReleaseRow | null>
     .first<ReleaseRow>();
 }
 
-export async function releaseManifests(env: Env, releaseId: number): Promise<unknown[]> {
+/**
+ * Manifests of a release. File lists dominate manifest size (a 10k-package
+ * release is ~22 MB with them, ~5 MB without) and only `pkg-repo render`
+ * needs them, so they are stripped unless `includeFiles` is set.
+ */
+export type ManifestDetail = "summary" | "default" | "files";
+
+export async function releaseManifests(env: Env, releaseId: number, detail: ManifestDetail = "default"): Promise<unknown[]> {
+  if (detail === "summary") {
+    // Enough for status / list / search: ~100 bytes per package instead of ~800.
+    const rows = await env.DB.prepare(
+      `SELECT p.name, p.version, p.arch, p.filename, p.sha256, p.size_download, p.size_installed,
+              json_extract(p.manifest_json, '$.description') AS description
+         FROM release_packages rp JOIN packages p ON p.id = rp.package_id
+        WHERE rp.release_id = ? ORDER BY p.name, p.arch`,
+    )
+      .bind(releaseId)
+      .all();
+    return rows.results;
+  }
   const rows = await env.DB.prepare(
     `SELECT p.manifest_json FROM release_packages rp
        JOIN packages p ON p.id = rp.package_id
@@ -28,7 +47,11 @@ export async function releaseManifests(env: Env, releaseId: number): Promise<unk
   )
     .bind(releaseId)
     .all<{ manifest_json: string }>();
-  return rows.results.map((r) => JSON.parse(r.manifest_json));
+  return rows.results.map((r) => {
+    const m = JSON.parse(r.manifest_json) as { files?: unknown };
+    if (detail !== "files") delete m.files;
+    return m;
+  });
 }
 
 export async function releaseSummary(env: Env, releaseId: number): Promise<{ package_count: number; size_download: number }> {

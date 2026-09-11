@@ -102,6 +102,9 @@ pacman-key --lsign-key poc@omarchy.invalid >/dev/null 2>&1
 echo "--- pacman -Sy"; pacman --config /repo/pacman.conf -Sy
 echo "--- pacman -Sl omarchy"; pacman --config /repo/pacman.conf -Sl omarchy
 echo "--- pacman -Sp zlib xz"; pacman --config /repo/pacman.conf -Sp zlib xz
+echo "--- pacman -Fy && -Fl xz (files database must carry file lists)"
+pacman --config /repo/pacman.conf -Fy >/dev/null
+pacman --config /repo/pacman.conf -Fl xz | grep -q 'usr/bin/xz$' || { echo "files database is empty"; exit 1; }
 echo "--- pacman -Sw xz && -U"; pacman --config /repo/pacman.conf -Sw --noconfirm xz >/dev/null
 pacman --config /repo/pacman.conf -U --noconfirm /var/cache/pacman/pkg/xz-5.8.4-1-x86_64.pkg.tar.zst 2>&1 | grep -E "upgrading|installing|error"
 pacman -Q xz
