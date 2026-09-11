@@ -1,0 +1,18 @@
+[package]
+name = "pkg-resolver"
+description = "SAT-based dependency resolution (resolvo) against the edge repository and the locally installed state"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+pkg-manifest = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+# SAT solver used by rattler/pixi.
+resolvo = "0.10"
+
+[lints]
+workspace = true

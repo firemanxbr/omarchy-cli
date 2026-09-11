@@ -1,0 +1,24 @@
+{
+  "name": "omarchy-repo-worker",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Edge repository API for omarchy-cli (Cloudflare Workers + D1 + R2)",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "db:migrate:local": "wrangler d1 migrations apply omarchy-repo --local",
+    "db:migrate:remote": "wrangler d1 migrations apply omarchy-repo --remote",
+    "schema:sync": "cargo run -q -p pkg-extract -- schema > src/manifest.schema.json"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.22.0",
+    "@cloudflare/workers-types": "^5.20260911.1",
+    "typescript": "^5.9.0",
+    "vitest": "^4.1.0",
+    "wrangler": "^4.131.1"
+  }
+}

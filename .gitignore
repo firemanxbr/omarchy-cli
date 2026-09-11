@@ -1,0 +1,6 @@
+/target
+**/*.rs.bk
+worker/node_modules
+worker/.wrangler
+worker/dist
+.DS_Store

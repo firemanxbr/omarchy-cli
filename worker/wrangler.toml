@@ -1,0 +1,32 @@
+name = "omarchy-repo"
+main = "src/index.ts"
+compatibility_date = "2026-09-01"
+account_id = "34f1918ac9ca522150a1830ea9b61a40"
+
+# Custom domain on firemanxbr.org (zone must exist in this account).
+routes = [
+  { pattern = "pkgs.firemanxbr.org", custom_domain = true }
+]
+
+[observability]
+enabled = true
+
+# Metadata: package graph. Create with `wrangler d1 create omarchy-repo`
+# and paste the returned database_id below.
+[[d1_databases]]
+binding = "DB"
+database_name = "omarchy-repo"
+database_id = "REPLACE_WITH_D1_ID"
+migrations_dir = "migrations"
+
+# Binary objects: `<sha256>.pkg.tar.zst` + `<sha256>.sig`.
+# Create with `wrangler r2 bucket create omarchy-packages`.
+[[r2_buckets]]
+binding = "PACKAGES"
+bucket_name = "omarchy-packages"
+
+[vars]
+DEFAULT_CHANNEL = "stable"
+
+# Secrets (set with `wrangler secret put <NAME>`):
+#   PUBLISH_TOKEN  — bearer token required by the CI publisher on PUT /api/v1/packages

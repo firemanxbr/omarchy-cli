@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "PackageManifest",
+  "description": "Metadata extracted from a built package.\n\nThe manifest merges two sources of truth:\n\n* declarative metadata from `.PKGINFO` (name, version, `depends=`, `provides=`, ...);\n* ABI facts extracted from the ELF objects shipped in the package\n  (`DT_SONAME` → [`provides`](Self::provides), `DT_NEEDED` + version needs →\n  [`requires`](Self::requires)).\n\nELF data refines the declarative dependencies; it never replaces them, because\nscripts, data files and `dlopen()`-loaded plugins are invisible to the ELF loader.",
+  "type": "object",
+  "properties": {
+    "arch": {
+      "type": "string"
+    },
+    "backup": {
+      "description": "Paths that must be preserved on upgrade/removal (`backup=` in `.PKGINFO`).",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "conflicts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/DependencyRule"
+      }
+    },
+    "description": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "files": {
+      "description": "Absolute paths of every file installed by the package, used for collision\ndetection and `owns` queries. Directories end with `/`.",
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "string"
+      }
+    },
+    "licenses": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "name": {
+      "type": "string"
+    },
+    "optional": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/DependencyRule"
+      }
+    },
+    "provides": {
+      "description": "Capabilities this package satisfies. Always includes `name=version`.\nExample: `libssl.so=3-64`, `openssl=3.3.1-1`, `web-browser`.",
+      "type": "array",
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/DependencyRule"
+      }
+    },
+    "replaces": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/DependencyRule"
+      }
+    },
+    "requires": {
+      "description": "Hard runtime requirements. Example: `libc.so.6`, `libc.so.6(GLIBC_2.38)`,\n`python>=3.12`.",
+      "type": "array",
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/DependencyRule"
+      }
+    },
+    "schema_version": {
+      "description": "Schema version of this document. See [`MANIFEST_SCHEMA_VERSION`].",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "sha256": {
+      "description": "Hex-encoded SHA-256 of the `.pkg.tar.zst` archive.",
+      "type": "string"
+    },
+    "size_download": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    },
+    "size_installed": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    },
+    "url": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "version": {
+      "description": "Full version string in Arch format: `[epoch:]pkgver-pkgrel`.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "name",
+    "version",
+    "arch",
+    "size_installed",
+    "size_download",
+    "sha256"
+  ],
+  "$defs": {
+    "DependencyRule": {
+      "description": "A single dependency or capability.\n\nThe optional `symbol_version` captures glibc-style symbol version needs\n(`libc.so.6(GLIBC_2.38)`) that come from the ELF `.gnu.version_r` section.",
+      "type": "string"
+    }
+  }
+}

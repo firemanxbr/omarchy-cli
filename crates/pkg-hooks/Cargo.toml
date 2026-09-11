@@ -1,0 +1,15 @@
+[package]
+name = "pkg-hooks"
+description = "Parser and executor for libalpm-compatible .hook files"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[lints]
+workspace = true
