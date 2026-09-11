@@ -14,6 +14,12 @@ export GNUPGHOME
 PORT="${OMARCHY_E2E_PORT:-8790}"
 IMAGE="docker.io/library/archlinux:base"
 RUNTIME="$(command -v podman || command -v docker)"
+# How the container reaches the worker on the host.
+if [[ "$RUNTIME" == *podman* ]]; then
+  HOST_FROM_CONTAINER="host.containers.internal"; RUN_EXTRA=()
+else
+  HOST_FROM_CONTAINER="host.docker.internal"; RUN_EXTRA=(--add-host=host.docker.internal:host-gateway)
+fi
 export OMARCHY_API="http://127.0.0.1:$PORT"
 export OMARCHY_PUBLISH_TOKEN="e2e-token"
 
@@ -75,7 +81,7 @@ for f in omarchy.db omarchy.db.sig omarchy.files "zlib-1:1.3.2-3-x86_64.pkg.tar.
   code=$(curl -s -o /dev/null -w '%{http_code}' "$OMARCHY_API/stable/os/x86_64/$f")
   [[ "$code" == 200 ]] || { echo "unexpected $code for $f"; exit 1; }
 done
-curl -s -H 'Range: bytes=0-3' "$OMARCHY_API/stable/os/x86_64/zlib-1:1.3.2-3-x86_64.pkg.tar.zst" | xxd -p | grep -q '^28b52ffd$' || { echo "range request broken"; exit 1; }
+[[ "$(curl -s -H 'Range: bytes=0-3' "$OMARCHY_API/stable/os/x86_64/zlib-1:1.3.2-3-x86_64.pkg.tar.zst" | od -An -tx1 | tr -d ' \n')" == "28b52ffd" ]] || { echo "range request broken"; exit 1; }
 echo "databases, signatures, package blobs and Range requests OK"
 
 step "pacman in $IMAGE against the worker mirror"
@@ -86,7 +92,7 @@ Architecture = x86_64
 SigLevel = Required DatabaseRequired
 
 [omarchy]
-Server = http://host.containers.internal:$PORT/stable/os/\$arch
+Server = http://$HOST_FROM_CONTAINER:$PORT/stable/os/\$arch
 CONF
 cat > "$E2E/check.sh" <<'CHECK'
 set -euo pipefail
@@ -100,6 +106,6 @@ echo "--- pacman -Sw xz && -U"; pacman --config /repo/pacman.conf -Sw --noconfir
 pacman --config /repo/pacman.conf -U --noconfirm /var/cache/pacman/pkg/xz-5.8.4-1-x86_64.pkg.tar.zst 2>&1 | grep -E "upgrading|installing|error"
 pacman -Q xz
 CHECK
-"$RUNTIME" run --rm --platform linux/amd64 -v "$E2E:/repo:ro" "$IMAGE" bash /repo/check.sh
+"$RUNTIME" run --rm --platform linux/amd64 ${RUN_EXTRA[@]+"${RUN_EXTRA[@]}"} -v "$E2E:/repo:ro" "$IMAGE" bash /repo/check.sh
 
 step "OK — pacman consumed a release served by the worker"

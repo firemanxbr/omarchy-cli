@@ -12,8 +12,10 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
-CI (`.github/workflows/ci.yml`) runs exactly these plus the worker typecheck on every
-push and pull request.
+CI (`.github/workflows/ci.yml`) runs exactly these on x86_64 **and** arm64 runners,
+plus the worker typecheck, on every push and pull request. The three end-to-end
+scripts below also run in GitHub Actions (`.github/workflows/e2e.yml`) on native
+x86_64 runners, where the Arch container needs no emulation.
 
 ## Rust crates
 

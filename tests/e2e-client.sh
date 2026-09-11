@@ -25,7 +25,11 @@ export_rootfs() { # image dest
   rm -rf "$2" && mkdir -p "$2"
   local cid
   cid="$("$RUNTIME" create --platform linux/amd64 "$1" true)"
-  "$RUNTIME" export "$cid" | tar -x -C "$2" --include 'var/lib/pacman/local/*' --include 'usr/lib/lib*.so*' 2>/dev/null || true
+  if tar --version 2>/dev/null | grep -q GNU; then
+    "$RUNTIME" export "$cid" | tar -x -C "$2" --wildcards 'var/lib/pacman/local/*' 'usr/lib/lib*.so*' 2>/dev/null || true
+  else
+    "$RUNTIME" export "$cid" | tar -x -C "$2" --include 'var/lib/pacman/local/*' --include 'usr/lib/lib*.so*' 2>/dev/null || true
+  fi
   "$RUNTIME" rm "$cid" >/dev/null
 }
 
@@ -54,13 +58,23 @@ json="$("$CLI" --root "$ROOT/target/rootfs-2021" --json check xz || true)"
 grep -q '"severity": "blocker"' <<<"$json"
 echo "blocked as expected — pacman was never invoked"
 
-if command -v cargo-zigbuild >/dev/null 2>&1; then
-  step "Cross-compile and run 'omarchy-cli upgrade' inside $CURRENT"
+LINUX_BIN=""
+if [[ "$(uname -s)/$(uname -m)" == "Linux/x86_64" ]]; then
+  step "Native Linux build for the container"
+  cargo build -q --release -p omarchy-cli
+  LINUX_BIN="$ROOT/target/release/omarchy-cli"
+elif command -v cargo-zigbuild >/dev/null 2>&1; then
+  step "Cross-compile for x86_64-unknown-linux-musl"
   rustup target add x86_64-unknown-linux-musl >/dev/null 2>&1 || true
   cargo zigbuild -q --release --target x86_64-unknown-linux-musl -p omarchy-cli
+  LINUX_BIN="$ROOT/target/x86_64-unknown-linux-musl/release/omarchy-cli"
+fi
+
+if [[ -n "$LINUX_BIN" ]]; then
+  step "Run 'omarchy-cli upgrade' inside $CURRENT"
   E="$ROOT/target/e2e-client"
   rm -rf "$E" && mkdir -p "$E"
-  cp "$ROOT/target/x86_64-unknown-linux-musl/release/omarchy-cli" "$E/"
+  cp "$LINUX_BIN" "$E/omarchy-cli"
   cp "$PUBKEY" "$E/omarchy-poc.pub.asc"
   cat > "$E/check.sh" <<CHECK
 set -euo pipefail
@@ -68,7 +82,7 @@ pacman-key --init >/dev/null 2>&1
 pacman-key --add /repo/omarchy-poc.pub.asc >/dev/null 2>&1
 pacman-key --lsign-key poc@omarchy.invalid >/dev/null 2>&1
 export OMARCHY_API=$OMARCHY_API
-# pacman 7's seccomp download sandbox cannot run under x86_64 emulation.
+# pacman 7's seccomp download sandbox cannot run under x86_64 emulation (harmless natively).
 sed -i 's/^#DisableSandboxSyscalls/DisableSandboxSyscalls/' /etc/pacman.conf
 grep -q '^DisableSandboxSyscalls' /etc/pacman.conf || sed -i '0,/^\\[options\\]/s//[options]\\nDisableSandboxSyscalls/' /etc/pacman.conf
 echo "--- status"; /repo/omarchy-cli status
@@ -79,7 +93,7 @@ echo "--- upgrade again"; /repo/omarchy-cli upgrade --noconfirm | grep -q 'Nothi
 CHECK
   "$RUNTIME" run --rm --platform linux/amd64 -v "$E:/repo:ro" "$CURRENT" bash /repo/check.sh
 else
-  step "cargo-zigbuild not installed; skipping the in-container upgrade (brew install zig && cargo install cargo-zigbuild)"
+  step "No Linux build available; skipping the in-container upgrade (brew install zig && cargo install cargo-zigbuild)"
 fi
 
 step "OK — thin client: release awareness, ABI safety check, pacman-driven upgrade"
