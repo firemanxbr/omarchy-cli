@@ -91,7 +91,9 @@ for f in omarchy-packages-stable.db omarchy-packages-stable.db.sig omarchy-packa
 done
 [[ "$(curl -s -H 'Range: bytes=0-3' "$OMARCHY_API/pool/x86_64/zlib-1:1.3.2-3-x86_64.pkg.tar.zst" | od -An -tx1 | tr -d ' \n')" == "28b52ffd" ]] || { echo "range request broken"; exit 1; }
 curl -s "$OMARCHY_API/api/v1/stats" | grep -q '"kind":"render"' || { echo "render event missing from stats"; exit 1; }
-curl -s "$OMARCHY_API/" | grep -q "One pool, three rings" || { echo "dashboard not served"; exit 1; }
+curl -s "$OMARCHY_API/" | grep -q "One pool, three rings" || {
+  echo "dashboard not served; response:"; curl -s -i "$OMARCHY_API/" | head -c 600; echo
+  echo "--- worker log tail ---"; tail -20 "$E2E/wrangler.log"; exit 1; }
 echo "databases, signatures, package blobs, Range requests, stats and dashboard OK"
 
 step "pacman in $IMAGE against the worker mirror"

@@ -54,6 +54,26 @@ jobs:
       - name: Promote
         run: target/release/pkg-repo promote --from "${{ steps.rings.outputs.from }}" --to "${{ steps.rings.outputs.to }}" --note "${{ steps.rings.outputs.note }}"
       - name: Render
-        run: target/release/pkg-repo render --ring "${{ steps.rings.outputs.to }}" --sign "$OMARCHY_GPG_KEYID"
-      - name: Health check the target ring
-        run: tests/health-check.sh "${{ steps.rings.outputs.to }}"
+        run: |
+          for arch in x86_64 aarch64; do
+            target/release/pkg-repo render --ring "${{ steps.rings.outputs.to }}" --arch "$arch" --sign "$OMARCHY_GPG_KEYID"
+          done
+      - name: Health check the target ring (x86_64)
+        run: tests/health-check.sh "${{ steps.rings.outputs.to }}" x86_64
+  health-aarch64:
+    needs: promote
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.1
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p pkg-repo
+      - name: Decide ring
+        id: rings
+        run: |
+          if [[ "${{ github.event_name }}" == "schedule" ]]; then
+            if [[ "${{ github.event.schedule }}" == "0 7 * * 1" ]]; then echo "to=stable" >> "$GITHUB_OUTPUT"; else echo "to=rc" >> "$GITHUB_OUTPUT"; fi
+          else echo "to=${{ github.event.inputs.to }}" >> "$GITHUB_OUTPUT"; fi
+      - run: tests/health-check.sh "${{ steps.rings.outputs.to }}" aarch64

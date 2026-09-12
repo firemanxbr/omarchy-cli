@@ -26,7 +26,7 @@ interface Manifest {
 }
 
 const OPS = [">=", "<=", "=", ">", "<"];
-export const SOURCES = ["core", "extra", "multilib", "packages"] as const;
+export const SOURCES = ["core", "extra", "multilib", "alarm", "packages"] as const;
 
 /** Parses the Arch dependency syntax the Rust side serializes rules as. */
 export function parseRule(s: string): Rule {
@@ -45,7 +45,7 @@ export function parseRule(s: string): Rule {
 
 /**
  * Registers a manifest whose archive is already in the pool. `?source=` records
- * provenance (core / extra / multilib / packages — the last one being OPR builds). File lists are kept inside
+ * provenance (core / extra / multilib / alarm / packages — the last one being OPR builds). File lists are kept inside
  * manifest_json only — the normalized package_files table is not populated
  * for mirror-scale imports (it would be ~95% of all rows).
  */

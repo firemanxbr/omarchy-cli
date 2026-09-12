@@ -15,7 +15,15 @@ env:
 
 jobs:
   health:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
@@ -24,4 +32,4 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release -p pkg-repo
       - run: |
-          for ring in edge rc stable; do tests/health-check.sh "$ring" || true; done
+          for ring in edge rc stable; do tests/health-check.sh "$ring" "${{ matrix.arch }}" || true; done

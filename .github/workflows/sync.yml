@@ -9,8 +9,8 @@ on:
   workflow_dispatch:
     inputs:
       sources:
-        description: "Space-separated sources to sync"
-        default: "core multilib extra"
+        description: "Space-separated source ids (see SOURCES in the job), or 'all'"
+        default: "all"
       limit:
         description: "Max new packages per source (0 = all)"
         default: "0"
@@ -45,19 +45,36 @@ jobs:
       - name: Sync sources
         run: |
           set -euo pipefail
-          SOURCES="${{ github.event.inputs.sources || 'core multilib extra' }}"
+          # id | source | arch | directory holding <db>.db and the packages | db name
+          SOURCES='
+          core-x86_64      core      x86_64  https://mirror.omarchy.org/core/os/x86_64      core
+          multilib-x86_64  multilib  x86_64  https://mirror.omarchy.org/multilib/os/x86_64  multilib
+          extra-x86_64     extra     x86_64  https://mirror.omarchy.org/extra/os/x86_64     extra
+          packages-x86_64  packages  x86_64  https://pkgs.omarchy.org/edge/x86_64           omarchy
+          core-aarch64     core      aarch64 http://os.archlinuxarm.org/aarch64/core        core
+          alarm-aarch64    alarm     aarch64 http://os.archlinuxarm.org/aarch64/alarm       alarm
+          extra-aarch64    extra     aarch64 http://os.archlinuxarm.org/aarch64/extra       extra
+          packages-aarch64 packages  aarch64 https://pkgs.omarchy.org/edge/aarch64          omarchy
+          '
+          WANT="${{ github.event.inputs.sources || 'all' }}"
           LIMIT="${{ github.event.inputs.limit || '1500' }}"
           status=0
-          for source in $SOURCES; do
-            echo "::group::sync $source"
-            target/release/pkg-repo sync --source "$source" --ring edge --limit "$LIMIT" \
-              --concurrency "${{ github.event.inputs.concurrency || '6' }}" --work-dir "$RUNNER_TEMP/sync" || status=$?
+          while read -r id source arch base db; do
+            [[ -z "$id" ]] && continue
+            if [[ "$WANT" != "all" ]] && ! grep -qw "$id" <<<"$WANT"; then continue; fi
+            echo "::group::sync $id"
+            target/release/pkg-repo sync --source "$source" --arch "$arch" --base-url "$base" --db-name "$db" \
+              --ring edge --limit "$LIMIT" --concurrency "${{ github.event.inputs.concurrency || '6' }}" \
+              --work-dir "$RUNNER_TEMP/sync" || status=$?
             echo "::endgroup::"
-          done
+          done <<<"$SOURCES"
           exit $status
       - name: Render edge databases
         if: always()
-        run: target/release/pkg-repo render --ring edge --sign "$OMARCHY_GPG_KEYID"
+        run: |
+          for arch in x86_64 aarch64; do
+            target/release/pkg-repo render --ring edge --arch "$arch" --sign "$OMARCHY_GPG_KEYID"
+          done
       - name: Report failure
         if: failure()
         run: |
