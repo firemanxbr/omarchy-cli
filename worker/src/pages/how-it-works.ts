@@ -73,6 +73,11 @@ const BODY = String.raw`
   </section>
 
   <section>
+    <h2>Security, with the graph</h2>
+    <p class="sub">Every three hours the objects the rings serve are matched against the Arch Security Tracker (exact, Arch's own versions), the Debian Security Tracker (same upstream projects, for what Arch has not triaged yet — with a confidence level, never as a certainty), CISA KEV and EPSS. Because the index knows what every binary loads, an advisory on a library also marks what <em>uses</em> it: the <a href="/security">Security page</a> shows the ring, the package page shows the chain, the graph marks the nodes.</p>
+  </section>
+
+  <section>
     <h2>Why one <code>Server =</code> is enough</h2>
     <p class="sub">Today an Omarchy machine talks to several repositories, each with its own mirror, cadence and failure modes. Here they are one set of databases per ring, generated from the same index, on both architectures.</p>
     <div class="howto">

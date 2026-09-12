@@ -19,6 +19,9 @@
  *   PUT  /api/v1/releases/:id/artifacts/:kind?repo=&arch=
  *   GET  /api/v1/search?q=&ring=&arch=          package search within a ring
  *   GET  /api/v1/package/:name[/files]?ring=&arch=  package page data: rings, manifest, edges
+ *   GET  /api/v1/security?ring=&arch=             open advisories in a ring and what they expose
+ *   PUT  /api/v1/security/advisories|matches       vulnerability data from the Security workflow
+ *   POST /api/v1/security/prune?before=
  *   GET  /api/v1/graph?targets=a,b&ring=stable
  *   POST /api/v1/events   GET /api/v1/events       activity log
  *   GET  /api/v1/stats                             everything the dashboard shows
@@ -35,6 +38,7 @@ import { handleGetPackage, handleKnownPackages, handlePostPackage } from "./rout
 import { handleCreateRelease, handleGetRelease, handleReleaseHistory, handlePutArtifact } from "./routes/releases";
 import { handleGraph } from "./routes/graph";
 import { handlePackage, handlePackageFiles, handleSearch } from "./routes/search";
+import { handlePrune, handlePutAdvisories, handlePutMatches, handleSecurity } from "./routes/security";
 import { handleGetEvents, handlePostEvent } from "./routes/events";
 import { handleServiceStatus, handleStats } from "./routes/stats";
 import { handleGc, handleUnreferenced } from "./routes/gc";
@@ -44,6 +48,7 @@ import { howItWorksHtml } from "./pages/how-it-works";
 import { statusHtml } from "./pages/status";
 import { apiDocsHtml } from "./pages/api-docs";
 import { packageHtml, packagesHtml } from "./pages/packages";
+import { securityHtml } from "./pages/security";
 import { DASHBOARD_HOST, LEGACY_DASHBOARD_HOST, version } from "./meta";
 import { handleStatic } from "./routes/static";
 import { requireAuth } from "./auth";
@@ -99,6 +104,7 @@ export default {
       if (path === "/status") return html(statusHtml(env.POOL_URL, version(env)));
       if (path === "/api" || path === "/api/") return html(apiDocsHtml(env.POOL_URL, version(env)));
       if (path === "/packages") return html(packagesHtml(env.POOL_URL, version(env)));
+      if (path === "/security") return html(securityHtml(env.POOL_URL, version(env)));
       if (path.startsWith("/package/")) return html(packageHtml(decodeURIComponent(path.slice("/package/".length)), env.POOL_URL, version(env)));
       return json({ error: "not found" }, 404);
     } catch (err) {
@@ -131,6 +137,10 @@ async function api(method: string, path: string, url: URL, request: Request, env
   if (method === "GET" && path === "/status") return handleServiceStatus(env);
   if (method === "GET" && path === "/graph") return handleGraph(url, env);
   if (method === "GET" && path === "/search") return handleSearch(url, env);
+  if (method === "GET" && path === "/security") return handleSecurity(url, env);
+  if (method === "PUT" && path === "/security/advisories") return requireAuth(request, env) ?? handlePutAdvisories(request, env);
+  if (method === "PUT" && path === "/security/matches") return requireAuth(request, env) ?? handlePutMatches(request, env);
+  if (method === "POST" && path === "/security/prune") return requireAuth(request, env) ?? handlePrune(url, env);
   if ((m = path.match(/^\/package\/([A-Za-z0-9@._+-]+)$/)) && method === "GET") return handlePackage(m[1], url, env);
   if ((m = path.match(/^\/package\/([A-Za-z0-9@._+-]+)\/files$/)) && method === "GET") return handlePackageFiles(m[1], url, env);
   if (method === "GET" && path === "/events") return handleGetEvents(url, env);

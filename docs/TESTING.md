@@ -203,6 +203,25 @@ dependency closure through `/api/v1/graph?arch=`). Posts an `abi` event with the
 counts and the first blockers; exits 2 on any blocker, 1 if a batch could not be
 checked. Runs in a few seconds; `Promote` runs it for both architectures.
 
+## Security matching
+
+```bash
+curl -sfL https://security.archlinux.org/issues/all.json -o arch.json
+curl -sfL https://security-tracker.debian.org/tracker/data/json -o debian.json
+curl -sfL https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json -o kev.json
+curl -sfL https://epss.cyentia.com/epss_scores-current.csv.gz | gunzip -c > epss.csv
+pkg-repo security --arch-tracker arch.json --debian debian.json --kev kev.json --epss epss.csv --dry-run
+```
+
+The dry run prints the vulnerable matches by source and confidence and samples of
+the Debian `name-version` matches (ours vs Debian's fixed version) to eyeball the
+heuristics; without `--dry-run` it writes to the index and posts a `security`
+event. The decisions are unit-tested in `crates/pkg-repo/src/security.rs`
+(`cargo test -p pkg-repo security`): version comparison against Arch advisories,
+Debian filling only what Arch does not cover, the upstream-version extraction
+and the name-collision rejection. `tests/e2e-worker.sh` puts an advisory on the
+zlib fixture and checks the ring report and the KEV flag.
+
 ## Promotion gate
 
 `pkg-repo gate --from <ring> --to <ring> [--soak-days N] [--dry-run]` reads the

@@ -9,6 +9,7 @@
 pub mod client;
 pub mod desc;
 pub mod gate;
+pub mod security;
 pub mod sign;
 pub mod sync;
 pub mod syncdb;
@@ -32,6 +33,8 @@ pub enum RepoError {
     Api { status: u16, body: String },
     #[error("extraction failed: {0}")]
     Extract(#[from] pkg_extract::ExtractError),
+    #[error("invalid JSON: {0}")]
+    Json(#[from] serde_json::Error),
     #[error("{file}: sha256 mismatch (upstream {expected}, downloaded {actual})")]
     Integrity {
         file: String,

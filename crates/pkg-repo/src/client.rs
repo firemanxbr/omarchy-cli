@@ -537,6 +537,40 @@ impl Api {
         })
     }
 
+    /// `PUT` a JSON body to an authenticated endpoint, retrying on 5xx.
+    pub fn put_json(
+        &self,
+        path: &str,
+        body: &serde_json::Value,
+    ) -> Result<serde_json::Value, RepoError> {
+        with_retry("put_json", || {
+            let resp = self
+                .http
+                .put(self.url(path))
+                .bearer_auth(&self.token)
+                .json(body)
+                .send()?;
+            Ok(Self::check(resp)?.json()?)
+        })
+    }
+
+    /// `POST` a JSON body to an authenticated endpoint, retrying on 5xx.
+    pub fn post_json(
+        &self,
+        path: &str,
+        body: &serde_json::Value,
+    ) -> Result<serde_json::Value, RepoError> {
+        with_retry("post_json", || {
+            let resp = self
+                .http
+                .post(self.url(path))
+                .bearer_auth(&self.token)
+                .json(body)
+                .send()?;
+            Ok(Self::check(resp)?.json()?)
+        })
+    }
+
     /// Records a dashboard event. Under GitHub Actions the payload gains a
     /// `ci` object (run id and URL, job, runner architecture) so the dashboard
     /// can link every line of activity to the run that produced it.
