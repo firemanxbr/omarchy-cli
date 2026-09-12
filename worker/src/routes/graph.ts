@@ -33,12 +33,17 @@ export async function handleGraph(url: URL, env: Env): Promise<Response> {
        -- took a 29k-package ring past 30 s.
        sel(package_id) AS MATERIALIZED (SELECT rp.package_id FROM release_packages rp JOIN packages p ON p.id = rp.package_id
                             WHERE rp.release_id = ?1 AND (?4 IS NULL OR p.repo_arch = ?4)),
+       -- The closure follows what pacman follows: declared dependencies
+       -- (package names, or declared capabilities such as libcrypto.so=3-64),
+       -- never the sonames a binary loads. A package that bundles its own
+       -- libc.so.6 would otherwise "provide" it and pull half the ring in.
        closure(package_id) AS (
          SELECT p.id FROM packages p JOIN sel ON sel.package_id = p.id
           WHERE p.name IN (SELECT value FROM json_each(?2))
          UNION
          SELECT pv.package_id FROM closure c
            JOIN package_requires rq ON rq.package_id = c.package_id AND rq.kind = 'depends'
+                AND rq.symbol_version IS NULL AND rq.requirement NOT GLOB '*.so.[0-9]*'
            JOIN package_provides pv ON pv.capability = rq.requirement
            JOIN sel ON sel.package_id = pv.package_id
        )
