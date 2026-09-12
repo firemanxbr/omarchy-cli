@@ -82,6 +82,13 @@ request (see [CONTRIBUTING.md](CONTRIBUTING.md)), and keep
       allow more than one `[repo]` section per source and ring end to end through
       `render` and the mirror route (e.g. `omarchy-t2`).
 
+## Upstream findings worth reporting
+
+- [ ] **Arch Linux ARM ships x86_64 binaries in aarch64-labelled packages**:
+      `gtpin`, `intel-oneapi-*`, `openai-codex-desktop` in `extra` need
+      `GLIBC_2.2.5` (an x86_64 symbol version); the ABI gate found them on
+      2026-09-12. They cannot run on aarch64; report to ALARM.
+
 ## Housekeeping
 
 - [ ] Rotate the staging key (`docs/omarchy-staging.pub.asc`, expires 2027-09-12)
