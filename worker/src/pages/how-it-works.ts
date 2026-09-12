@@ -7,41 +7,40 @@ import type { RunningVersion } from "../meta";
 
 /** Flow diagram in the page's own palette (inline SVG, scales with the column). */
 const DIAGRAM = String.raw`
-<svg viewBox="0 0 1180 470" xmlns="http://www.w3.org/2000/svg" font-family="JetBrains Mono, ui-monospace, monospace" font-size="12.5">
+<svg viewBox="0 0 1320 470" xmlns="http://www.w3.org/2000/svg" font-family="JetBrains Mono, ui-monospace, monospace" font-size="12">
   <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#8b93b8"/></marker></defs>
   <style>
     .box{fill:#1f2230;stroke:#2a2e3f;stroke-width:1.2}.src{fill:#13141c;stroke:#2a2e3f}.green{stroke:#9ece6a}.blue{stroke:#7aa2f7}.amber{stroke:#e0af68}
-    .t{fill:#c0caf5;font-family:Geist,sans-serif;font-weight:600;font-size:15px}.s{fill:#a9b1d6}.d{fill:#8b93b8;font-size:11.5px}.g{fill:#9ece6a}.b{fill:#7aa2f7}
+    .t{fill:#c0caf5;font-family:Geist,sans-serif;font-weight:600;font-size:15px}.s{fill:#a9b1d6}.d{fill:#8b93b8;font-size:11px}.g{fill:#9ece6a}
     .ln{fill:none;stroke:#8b93b8;stroke-width:1.4;marker-end:url(#a)}
   </style>
   <!-- sources -->
-  <rect class="box src" x="20" y="30" width="230" height="64" rx="3"/><text class="t" x="34" y="54">Arch Linux · x86_64</text><text class="s" x="34" y="76">core · extra · multilib</text><text class="d" x="34" y="90">mirror.omarchy.org · archlinux keyring</text>
-  <rect class="box src" x="20" y="110" width="230" height="64" rx="3"/><text class="t" x="34" y="134">Arch Linux ARM · aarch64</text><text class="s" x="34" y="156">core · extra · alarm</text><text class="d" x="34" y="170">os.archlinuxarm.org · ALARM keyring</text>
-  <rect class="box src" x="20" y="190" width="230" height="64" rx="3"/><text class="t" x="34" y="214">Omarchy (OPR) · both</text><text class="s" x="34" y="236">edge / rc / stable channels</text><text class="d" x="34" y="250">pkgs.omarchy.org · Omarchy key</text>
-  <rect class="box src" x="20" y="270" width="230" height="64" rx="3"/><text class="t" x="34" y="294">chaotic-aur · x86_64 <tspan class="d">optional</tspan></text><text class="s" x="34" y="316">prebuilt AUR, only unclaimed names</text><text class="d" x="34" y="330">builds.garudalinux.org · chaotic key</text>
-  <path class="ln" d="M250 302 L318 302 L318 142 L340 142"/>
-  <text class="d" x="20" y="362">upstream repositories, read every hour</text>
+  <rect class="box src" x="20" y="30" width="300" height="66" rx="3"/><text class="t" x="34" y="52">Arch Linux · x86_64</text><text class="s" x="34" y="72">core · extra · multilib</text><text class="d" x="34" y="88">mirror.omarchy.org · Arch keyring</text>
+  <rect class="box src" x="20" y="110" width="300" height="66" rx="3"/><text class="t" x="34" y="132">Arch Linux ARM · aarch64</text><text class="s" x="34" y="152">core · extra · alarm</text><text class="d" x="34" y="168">os.archlinuxarm.org · ALARM keyring</text>
+  <rect class="box src" x="20" y="190" width="300" height="66" rx="3"/><text class="t" x="34" y="212">Omarchy (OPR) · both</text><text class="s" x="34" y="232">edge / rc / stable channels</text><text class="d" x="34" y="248">pkgs.omarchy.org · Omarchy key</text>
+  <rect class="box src" x="20" y="270" width="300" height="66" rx="3"/><text class="t" x="34" y="292">chaotic-aur · x86_64 <tspan class="d">optional</tspan></text><text class="s" x="34" y="312">prebuilt AUR, unclaimed names only</text><text class="d" x="34" y="328">builds.garudalinux.org · chaotic key</text>
+  <text class="d" x="20" y="366">upstream repositories, read every hour</text>
+  <path class="ln" d="M320 63 L350 63 L350 140 L378 140"/><path class="ln" d="M320 143 L350 143 L350 140 L378 140"/><path class="ln" d="M320 223 L350 223 L350 140 L378 140"/><path class="ln" d="M320 303 L350 303 L350 140 L378 140"/>
   <!-- verify -->
-  <path class="ln" d="M250 62 L318 62 L318 142 L340 142"/><path class="ln" d="M250 142 L340 142"/><path class="ln" d="M250 222 L318 222 L318 142 L340 142"/>
-  <rect class="box amber" x="342" y="104" width="190" height="76" rx="3"/><text class="t" x="356" y="130">Verify</text><text class="s" x="356" y="150">sha256 from the upstream db</text><text class="s" x="356" y="166">signature by the project's key</text>
+  <rect class="box amber" x="380" y="98" width="230" height="84" rx="3"/><text class="t" x="394" y="124">Verify</text><text class="s" x="394" y="146">sha256 from the upstream db</text><text class="s" x="394" y="164">signature by the project's key</text>
+  <path class="ln" d="M610 140 L658 140"/>
   <!-- pool + index -->
-  <path class="ln" d="M532 142 L600 142"/>
-  <rect class="box green" x="602" y="34" width="280" height="96" rx="3"/><text class="t" x="616" y="60">Pool · R2</text><text class="s" x="616" y="80">one object per sha256, immutable</text><text class="s" x="616" y="96">the package and its upstream .sig</text><text class="d" x="616" y="118">pool.firemanxbr.org/&lt;arch&gt;/</text>
-  <rect class="box blue" x="602" y="150" width="280" height="100" rx="3"/><text class="t" x="616" y="176">Index · D1</text><text class="s" x="616" y="196">manifests, dependencies, provides,</text><text class="s" x="616" y="212">sonames each binary loads, file lists</text><text class="d" x="616" y="236">pkgs.firemanxbr.org/api/v1</text>
+  <rect class="box green" x="660" y="34" width="330" height="96" rx="3"/><text class="t" x="674" y="58">Pool · R2</text><text class="s" x="674" y="80">one object per sha256, immutable</text><text class="s" x="674" y="98">the package and its upstream .sig</text><text class="d" x="674" y="118">pool.firemanxbr.org/&lt;arch&gt;/</text>
+  <rect class="box blue" x="660" y="150" width="330" height="104" rx="3"/><text class="t" x="674" y="174">Index · D1</text><text class="s" x="674" y="196">manifests, dependencies, provides,</text><text class="s" x="674" y="214">loaded sonames, file lists</text><text class="d" x="674" y="240">pkgs.firemanxbr.org/api/v1</text>
   <!-- rings -->
-  <path class="ln" d="M882 194 L938 194"/>
-  <rect class="box" x="940" y="40" width="228" height="58" rx="3"/><text class="t" x="954" y="62">edge</text><text class="s" x="954" y="82">follows upstream, hourly</text>
-  <rect class="box" x="940" y="120" width="228" height="58" rx="3"/><text class="t" x="954" y="142">rc</text><text class="s" x="954" y="162">daily · health + ABI checks</text>
-  <rect class="box green" x="940" y="200" width="228" height="58" rx="3"/><text class="t" x="954" y="222">stable <tspan class="g" font-size="11">recommended</tspan></text><text class="s" x="954" y="242">one-day soak · automatic rollback</text>
-  <path class="ln" d="M1054 98 L1054 118"/><path class="ln" d="M1054 178 L1054 198"/>
-  <text class="d" x="940" y="284">a ring is a pinned selection in the index;</text><text class="d" x="940" y="298">promotion = index write, no bytes copied</text>
+  <path class="ln" d="M990 202 L1015 202 L1015 189 L1038 189"/>
+  <rect class="box" x="1040" y="40" width="260" height="58" rx="3"/><text class="t" x="1054" y="62">edge</text><text class="s" x="1054" y="84">follows upstream, hourly</text>
+  <rect class="box" x="1040" y="120" width="260" height="58" rx="3"/><text class="t" x="1054" y="142">rc</text><text class="s" x="1054" y="164">daily · health + ABI checks</text>
+  <rect class="box green" x="1040" y="200" width="260" height="58" rx="3"/><text class="t" x="1054" y="222">stable <tspan class="g" font-size="11">recommended</tspan></text><text class="s" x="1054" y="244">one-day soak · auto rollback</text>
+  <path class="ln" d="M1170 98 L1170 118"/><path class="ln" d="M1170 178 L1170 198"/>
+  <text class="d" x="1040" y="284">a ring = a pinned selection;</text><text class="d" x="1040" y="298">promotion = index write, no bytes copied</text>
   <!-- render -->
-  <rect class="box" x="602" y="300" width="280" height="70" rx="3"/><text class="t" x="616" y="324">Render + sign</text><text class="s" x="616" y="344">omarchy-&lt;source&gt;-&lt;ring&gt;.db and .files</text><text class="s" x="616" y="360">per arch, stored beside the packages</text>
-  <path class="ln" d="M940 229 L910 229 L910 335 L882 335"/>
-  <text class="d" x="602" y="396">GitHub Actions runs every step; each run is linked from the journal</text>
+  <rect class="box" x="660" y="300" width="330" height="70" rx="3"/><text class="t" x="674" y="324">Render + sign</text><text class="s" x="674" y="344">omarchy-&lt;source&gt;-&lt;ring&gt;.db + .files</text><text class="s" x="674" y="360">per arch, beside the packages</text>
+  <path class="ln" d="M1040 229 L1015 229 L1015 335 L992 335"/>
+  <text class="d" x="660" y="396">GitHub Actions runs every step; each run is linked from the journal</text>
   <!-- user -->
-  <path class="ln" d="M602 335 L580 335 L580 421 L562 421"/>
-  <rect class="box green" x="270" y="388" width="290" height="66" rx="3"/><text class="t" x="284" y="412">Your machine · pacman</text><text class="s" x="284" y="432">[omarchy-core-stable] → pool/$arch</text><text class="d" x="284" y="447">plain HTTP, static files, any pacman</text>
+  <path class="ln" d="M660 335 L640 335 L640 421 L632 421"/>
+  <rect class="box green" x="330" y="388" width="300" height="66" rx="3"/><text class="t" x="344" y="410">Your machine · pacman</text><text class="s" x="344" y="430">[omarchy-core-stable] → pool/$arch</text><text class="d" x="344" y="446">plain HTTP, static files, any pacman</text>
   <text class="d" x="20" y="412">one Server = line,</text><text class="d" x="20" y="427">both architectures,</text><text class="d" x="20" y="442">the ring you choose</text>
 </svg>`;
 
