@@ -160,33 +160,54 @@ export async function handleSecurity(url: URL, env: Env): Promise<Response> {
   }
 
   // Exposure: packages in the ring that depend on a vulnerable one — by
-  // declared name, or by loading a library it provides.
+  // declared name, or by loading a library it provides. Two indexed joins
+  // (package_requires.requirement is indexed) unioned; an OR in the join
+  // condition would scan the whole requires table.
+  // Only confident advisories (exact, name-version) propagate: a name-only
+  // one on glibc would mark the whole ring as exposed and say nothing.
+  const confident = vulnerable.filter((v) => (v.advisories as { match: string }[]).some((a) => a.match !== "name-only"));
   const exposure = new Map<string, { declared: number; loads: number }>();
   let exposedTotal = 0;
-  if (vulnerable.length) {
+  if (confident.length) {
+    const ids = JSON.stringify(confident.map((v) => v.id));
     const ex = await env.DB.prepare(
-      `SELECT v.name AS vuln, COUNT(DISTINCT CASE WHEN rq.requirement = v.name THEN rq.package_id END) AS declared,
-              COUNT(DISTINCT CASE WHEN rq.requirement != v.name THEN rq.package_id END) AS loads
-         FROM packages v
-         JOIN package_provides pv ON pv.package_id = v.id
-         JOIN package_requires rq ON rq.kind = 'depends' AND (rq.requirement = pv.capability OR rq.requirement = v.name)
-         JOIN release_packages rp ON rp.package_id = rq.package_id AND rp.release_id = ?1
-         JOIN packages d ON d.id = rq.package_id AND d.repo_arch = ?2 AND d.id != v.id
-        WHERE v.id IN (SELECT value FROM json_each(?3))
-        GROUP BY v.name`,
+      `SELECT vuln, SUM(declared) AS declared, SUM(loads) AS loads FROM (
+         SELECT v.name AS vuln, COUNT(DISTINCT rq.package_id) AS declared, 0 AS loads
+           FROM packages v
+           JOIN package_requires rq ON rq.requirement = v.name AND rq.kind = 'depends'
+           JOIN release_packages rp ON rp.package_id = rq.package_id AND rp.release_id = ?1
+           JOIN packages d ON d.id = rq.package_id AND d.repo_arch = ?2 AND d.id != v.id
+          WHERE v.id IN (SELECT value FROM json_each(?3)) GROUP BY v.name
+         UNION ALL
+         SELECT v.name, 0, COUNT(DISTINCT rq.package_id)
+           FROM packages v
+           JOIN package_provides pv ON pv.package_id = v.id AND pv.capability != v.name
+           JOIN package_requires rq ON rq.requirement = pv.capability AND rq.kind = 'depends'
+           JOIN release_packages rp ON rp.package_id = rq.package_id AND rp.release_id = ?1
+           JOIN packages d ON d.id = rq.package_id AND d.repo_arch = ?2 AND d.id != v.id
+          WHERE v.id IN (SELECT value FROM json_each(?3)) GROUP BY v.name
+       ) GROUP BY vuln`,
     )
-      .bind(head.id, arch, JSON.stringify(vulnerable.map((v) => v.id)))
+      .bind(head.id, arch, ids)
       .all<{ vuln: string; declared: number; loads: number }>();
     for (const r of ex.results) exposure.set(r.vuln, { declared: r.declared, loads: r.loads });
     const total = await env.DB.prepare(
-      `SELECT COUNT(DISTINCT rq.package_id) AS n
-         FROM packages v JOIN package_provides pv ON pv.package_id = v.id
-         JOIN package_requires rq ON rq.kind = 'depends' AND (rq.requirement = pv.capability OR rq.requirement = v.name)
-         JOIN release_packages rp ON rp.package_id = rq.package_id AND rp.release_id = ?1
-         JOIN packages d ON d.id = rq.package_id AND d.repo_arch = ?2 AND d.id != v.id
-        WHERE v.id IN (SELECT value FROM json_each(?3))`,
+      `SELECT COUNT(*) AS n FROM (
+         SELECT rq.package_id FROM packages v
+           JOIN package_requires rq ON rq.requirement = v.name AND rq.kind = 'depends'
+           JOIN release_packages rp ON rp.package_id = rq.package_id AND rp.release_id = ?1
+           JOIN packages d ON d.id = rq.package_id AND d.repo_arch = ?2 AND d.id != v.id
+          WHERE v.id IN (SELECT value FROM json_each(?3))
+         UNION
+         SELECT rq.package_id FROM packages v
+           JOIN package_provides pv ON pv.package_id = v.id AND pv.capability != v.name
+           JOIN package_requires rq ON rq.requirement = pv.capability AND rq.kind = 'depends'
+           JOIN release_packages rp ON rp.package_id = rq.package_id AND rp.release_id = ?1
+           JOIN packages d ON d.id = rq.package_id AND d.repo_arch = ?2 AND d.id != v.id
+          WHERE v.id IN (SELECT value FROM json_each(?3))
+       )`,
     )
-      .bind(head.id, arch, JSON.stringify(vulnerable.map((v) => v.id)))
+      .bind(head.id, arch, ids)
       .first<{ n: number }>();
     exposedTotal = total?.n ?? 0;
   }
