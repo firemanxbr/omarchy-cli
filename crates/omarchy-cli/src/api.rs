@@ -95,8 +95,30 @@ impl Api {
     }
 
     /// Full manifests (without file lists) — needed for the safety check.
-    pub fn release(&self, ring: &str) -> Result<ReleaseView> {
-        self.get(&format!("/releases/{ring}"))
+    /// Full manifests of one architecture, paged (500 per request) and pinned
+    /// to the release the first page returned.
+    pub fn release(&self, ring: &str, arch: &str) -> Result<ReleaseView> {
+        let mut view: Option<ReleaseView> = None;
+        let mut offset = 0usize;
+        loop {
+            let pin = view
+                .as_ref()
+                .map(|v| format!("&release_id={}", v.release.id))
+                .unwrap_or_default();
+            let page: ReleaseView = self.get(&format!(
+                "/releases/{ring}?arch={arch}&limit=500&offset={offset}{pin}"
+            ))?;
+            let got = page.packages.len();
+            match &mut view {
+                None => view = Some(page),
+                Some(v) => v.packages.extend(page.packages),
+            }
+            offset += got;
+            if got < 500 {
+                break;
+            }
+        }
+        view.ok_or_else(|| anyhow::anyhow!("no page returned for {ring}"))
     }
 
     /// Light listing for status / list / search.

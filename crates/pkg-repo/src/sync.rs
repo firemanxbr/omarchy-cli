@@ -223,6 +223,8 @@ fn post_sync_event(
             "bytes_uploaded": report.bytes_uploaded,
             "removed": report.removed,
             "deferred": report.deferred,
+            "concurrency": opts.concurrency,
+            "throughput_bps": throughput(report.bytes_uploaded, started),
             "verified_against": opts.keyring.as_ref().map(|k| k.file_name().map(|f| f.to_string_lossy().into_owned())),
             "failed": report.failed.iter().map(|(f, e)| serde_json::json!({"file": f, "error": e})).collect::<Vec<_>>(),
             "release_id": release_id,
@@ -341,6 +343,16 @@ fn import_one(
     let _ = std::fs::remove_file(&archive);
     let _ = std::fs::remove_file(&sig);
     result
+}
+
+/// Bytes per second over the whole run (0 when nothing was uploaded).
+fn throughput(bytes: u64, started: Instant) -> u64 {
+    let secs = started.elapsed().as_secs();
+    if bytes == 0 || secs == 0 {
+        0
+    } else {
+        bytes / secs
+    }
 }
 
 #[allow(clippy::cast_precision_loss)] // display only

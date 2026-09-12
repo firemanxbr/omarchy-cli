@@ -543,13 +543,11 @@ fn releases(remote: &Remote, ring: &str) -> Result<()> {
 fn render(remote: &Remote, ring: &str, arch: &str, key: Option<&str>) -> Result<()> {
     let api = Api::new(&remote.api, &remote.token)?;
     let started = Instant::now();
-    let view = api.release(ring)?;
+    let view = api.release(ring, arch)?;
 
     let mut by_source: BTreeMap<String, Vec<PackageManifest>> = BTreeMap::new();
     for p in view.packages {
-        if p.repo_arch == arch {
-            by_source.entry(p.source).or_default().push(p.manifest);
-        }
+        by_source.entry(p.source).or_default().push(p.manifest);
     }
 
     let tmp = tempfile_dir()?;
