@@ -114,7 +114,7 @@ pub fn run(cli: Cli) -> Result<i32> {
             apply(&config, &plan, dry_run, noconfirm, None)
         }
         Command::Upgrade { dry_run, noconfirm } => {
-            let view = api.release(&config.ring)?;
+            let view = api.release(&config.ring, &config.arch)?;
             let local = LocalDb::load(&config.root)?;
             let candidates: Vec<PackageManifest> = view
                 .packages
@@ -174,7 +174,7 @@ fn search(config: &Config, api: &Api, query: &str, json: bool) -> Result<i32> {
 }
 
 fn info(config: &Config, api: &Api, package: &str, json: bool) -> Result<i32> {
-    let view = api.release(&config.ring)?;
+    let view = api.release(&config.ring, &config.arch)?;
     let Some(m) = view
         .packages
         .iter()

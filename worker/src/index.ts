@@ -13,7 +13,7 @@
  *   POST /api/v1/packages?source=core              manifest JSON → index rows
  *   POST /api/v1/packages/known                    which sha256s are already indexed
  *   GET  /api/v1/packages/:sha256
- *   GET  /api/v1/releases/:ring[?fields=summary|include=files]
+ *   GET  /api/v1/releases/:ring[?fields=summary|include=files][&arch=&limit=&offset=&release_id=]
  *   GET  /api/v1/releases/:ring/history
  *   POST /api/v1/releases                          create / promote / roll back
  *   PUT  /api/v1/releases/:id/artifacts/:kind?repo=&arch=

@@ -32,7 +32,7 @@ export async function handlePutPool(sha256: string, url: URL, request: Request, 
     });
     return json({ sha256, key, size: object?.size ?? 0, status: "stored" }, 201);
   } catch (err) {
-    return json({ error: "integrity check failed", detail: String(err) }, 422);
+    return r2PutError(err);
   }
 }
 
@@ -75,4 +75,17 @@ export async function handleMultipartComplete(key: string, uploadId: string, req
   const upload = env.PACKAGES.resumeMultipartUpload(key, uploadId);
   const object = await upload.complete(body.parts);
   return json({ key, size: object.size, status: "stored" }, 201);
+}
+
+/**
+ * A failed `put` with a `sha256` option is either a checksum mismatch (the
+ * upload is wrong: 422, do not retry) or an R2-side error such as
+ * `internal error (10001)` (503: the publisher retries with backoff).
+ */
+export function r2PutError(err: unknown): Response {
+  const detail = String(err);
+  if (/checksum|sha256|mismatch|integrity/i.test(detail)) {
+    return json({ error: "integrity check failed", detail }, 422);
+  }
+  return json({ error: "storage error, retry", detail }, 503, { "retry-after": "5" });
 }

@@ -17,6 +17,9 @@ pub const SINGLE_PUT_MAX: u64 = 90 * 1024 * 1024;
 pub const PART_SIZE: u64 = 64 * 1024 * 1024;
 const ATTEMPTS: u32 = 4;
 
+/// Manifests per request when reading a release (the worker caps at 1000).
+const RELEASE_PAGE: u64 = 500;
+
 #[derive(Clone)]
 pub struct Api {
     base: String,
@@ -87,6 +90,20 @@ pub struct Event {
 #[derive(Debug, Deserialize)]
 struct EventsView {
     events: Vec<Event>,
+}
+
+/// The GitHub Actions run this process belongs to, if any.
+fn ci_context() -> Option<serde_json::Value> {
+    let run_id = std::env::var("GITHUB_RUN_ID").ok()?;
+    let server = std::env::var("GITHUB_SERVER_URL").unwrap_or_else(|_| "https://github.com".into());
+    let repo = std::env::var("GITHUB_REPOSITORY").unwrap_or_default();
+    Some(serde_json::json!({
+        "run_id": run_id,
+        "run_url": format!("{server}/{repo}/actions/runs/{run_id}"),
+        "workflow": std::env::var("GITHUB_WORKFLOW").ok(),
+        "job": std::env::var("GITHUB_JOB").ok(),
+        "runner_arch": std::env::var("RUNNER_ARCH").ok(),
+    }))
 }
 
 #[derive(Debug, Deserialize)]
@@ -424,14 +441,45 @@ impl Api {
         })
     }
 
-    /// Release view with file lists (needed for `<repo>.files`).
-    pub fn release(&self, ring: &str) -> Result<ReleaseView, RepoError> {
-        with_retry("release", || {
-            let resp = self
-                .http
-                .get(self.url(&format!("/releases/{ring}?include=files")))
-                .send()?;
-            Ok(Self::check(resp)?.json()?)
+    /// Release view of one architecture with file lists (needed for
+    /// `<repo>.files`), fetched in pages of `RELEASE_PAGE` manifests and pinned
+    /// to the release the first page returned, so a ring that moves on
+    /// mid-render cannot mix two selections.
+    pub fn release(&self, ring: &str, arch: &str) -> Result<ReleaseView, RepoError> {
+        let mut view: Option<ReleaseView> = None;
+        let mut offset = 0u64;
+        // The first page always exists (an empty ring is a 404 from the API).
+        loop {
+            let mut query = vec![
+                ("include", "files".to_owned()),
+                ("arch", arch.to_owned()),
+                ("limit", RELEASE_PAGE.to_string()),
+                ("offset", offset.to_string()),
+            ];
+            if let Some(v) = &view {
+                query.push(("release_id", v.release.id.to_string()));
+            }
+            let page: ReleaseView = with_retry("release", || {
+                let resp = self
+                    .http
+                    .get(self.url(&format!("/releases/{ring}")))
+                    .query(&query)
+                    .send()?;
+                Ok(Self::check(resp)?.json()?)
+            })?;
+            let got = page.packages.len() as u64;
+            match &mut view {
+                None => view = Some(page),
+                Some(v) => v.packages.extend(page.packages),
+            }
+            offset += got;
+            if got < RELEASE_PAGE {
+                break;
+            }
+        }
+        view.ok_or_else(|| RepoError::Api {
+            status: 0,
+            body: "no page returned".into(),
         })
     }
 
@@ -489,13 +537,29 @@ impl Api {
         })
     }
 
+    /// Records a dashboard event. Under GitHub Actions the payload gains a
+    /// `ci` object (run id and URL, job, runner architecture) so the dashboard
+    /// can link every line of activity to the run that produced it.
     pub fn post_event(&self, event: &serde_json::Value) -> Result<(), RepoError> {
+        let mut event = event.clone();
+        if let Some(ci) = ci_context() {
+            let payload = event
+                .as_object_mut()
+                .map(|o| o.entry("payload").or_insert_with(|| serde_json::json!({})));
+            if let Some(serde_json::Value::Object(p)) = payload {
+                p.insert("ci".into(), ci);
+            } else if let Some(p) = payload {
+                if p.is_null() {
+                    *p = serde_json::json!({ "ci": ci });
+                }
+            }
+        }
         with_retry("post_event", || {
             let resp = self
                 .http
                 .post(self.url("/events"))
                 .bearer_auth(&self.token)
-                .json(event)
+                .json(&event)
                 .send()?;
             Self::check(resp).map(|_| ())
         })

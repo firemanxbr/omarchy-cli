@@ -28,25 +28,44 @@ export async function ringHead(env: Env, ring: Ring): Promise<ReleaseRow | null>
  */
 export type ManifestDetail = "summary" | "default" | "files";
 
-export async function releaseManifests(env: Env, releaseId: number, detail: ManifestDetail = "default"): Promise<unknown[]> {
+/** A window over a release's packages: an architecture, and a page of rows. */
+export interface ManifestWindow {
+  arch?: string | null;
+  offset?: number;
+  limit?: number;
+}
+
+/**
+ * Packages of a release, ordered by (name, arch). A whole 15k-package ring
+ * with file lists is far more than one Worker invocation can hold, so callers
+ * page through it (`limit`/`offset`) and usually ask for one architecture.
+ */
+export async function releaseManifests(
+  env: Env,
+  releaseId: number,
+  detail: ManifestDetail = "default",
+  window: ManifestWindow = {},
+): Promise<unknown[]> {
+  const arch = window.arch ?? null;
+  const page = window.limit ? ` LIMIT ${Math.floor(window.limit)} OFFSET ${Math.floor(window.offset ?? 0)}` : "";
   if (detail === "summary") {
     // Enough for status / list / search: ~100 bytes per package instead of ~800.
     const rows = await env.DB.prepare(
       `SELECT p.name, p.version, p.arch, p.repo_arch, p.filename, p.sha256, p.size_download, p.size_installed, p.source,
               json_extract(p.manifest_json, '$.description') AS description
          FROM release_packages rp JOIN packages p ON p.id = rp.package_id
-        WHERE rp.release_id = ? ORDER BY p.name, p.arch`,
+        WHERE rp.release_id = ?1 AND (?2 IS NULL OR p.repo_arch = ?2) ORDER BY p.name, p.arch${page}`,
     )
-      .bind(releaseId)
+      .bind(releaseId, arch)
       .all();
     return rows.results;
   }
   const rows = await env.DB.prepare(
     `SELECT p.id, p.manifest_json, p.source, p.repo_arch FROM release_packages rp
        JOIN packages p ON p.id = rp.package_id
-      WHERE rp.release_id = ? ORDER BY p.name, p.arch`,
+      WHERE rp.release_id = ?1 AND (?2 IS NULL OR p.repo_arch = ?2) ORDER BY p.name, p.arch${page}`,
   )
-    .bind(releaseId)
+    .bind(releaseId, arch)
     .all<{ id: number; manifest_json: string; source: string; repo_arch: string }>();
   const out = rows.results.map((r) => {
     const m = JSON.parse(r.manifest_json) as { files?: unknown; source?: string; repo_arch?: string };

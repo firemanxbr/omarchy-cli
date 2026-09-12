@@ -33,11 +33,6 @@ pub enum ExtractError {
     MissingPkgInfo,
     #[error("invalid .PKGINFO: {0}")]
     PkgInfo(#[from] pkginfo::PkgInfoError),
-    #[error("ELF parse error in {path}: {source}")]
-    Elf {
-        path: String,
-        source: goblin::error::Error,
-    },
 }
 
 /// Entries larger than this are listed but not inspected: buffering a multi-GB
@@ -147,7 +142,10 @@ fn scan_archive(path: &Path) -> Result<ArchiveScan, ExtractError> {
         match elf::inspect(&bytes) {
             Ok(Some(facts)) => scan.elf.push((path, facts)),
             Ok(None) => {}
-            Err(source) => return Err(ExtractError::Elf { path, source }),
+            // ELF magic but not a loadable object (payload templates, test
+            // fixtures, truncated stubs): nothing can link against it, so it
+            // contributes no facts. Not an error for the package.
+            Err(error) => tracing::warn!(path, %error, "unparseable ELF entry skipped"),
         }
     }
     Ok(scan)

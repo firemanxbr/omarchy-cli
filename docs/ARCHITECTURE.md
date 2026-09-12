@@ -58,7 +58,7 @@ Migrations live in `worker/migrations/`.
 | `PUT /api/v1/pool/:sha256?filename=` · `…/multipart` | pool upload (R2 verifies the sha256; multipart for large archives) |
 | `POST /api/v1/packages?source=core` | index a manifest with its provenance |
 | `POST /api/v1/packages/known` | which sha256s the index already has (the sync's diff) |
-| `GET /api/v1/releases/:ring` · `/history` | current release, package list, lineage |
+| `GET /api/v1/releases/:ring` · `/history` | current release, package list, lineage. `?fields=summary` is small; full manifests are paged (`?arch=&limit=≤1000&offset=&release_id=` — above 2000 packages an unpaged request is refused with 413, since a 15k-package ring with file lists exceeds one Worker invocation) |
 | `POST /api/v1/releases` | create / promote / roll back a release |
 | `PUT /api/v1/releases/:id/artifacts/:kind?repo=` | store a rendered database beside the packages |
 | `GET /api/v1/graph?targets=a,b&ring=stable` | dependency subgraph for the client's safety check |

@@ -100,22 +100,56 @@ export async function handleCreateRelease(request: Request, env: Env): Promise<R
   return json({ release, ...(await releaseSummary(env, id)) }, 201);
 }
 
+/** Above this many manifests a caller must page (`limit`/`offset`). */
+const MAX_UNPAGED = 2000;
+const MAX_PAGE = 1000;
+
+/**
+ * The ring's current release (or `release_id=` — one of its earlier releases,
+ * so a paging client stays on one release while the ring moves on) and its
+ * packages. `arch=` narrows to one architecture; `limit=`/`offset=` page
+ * through the manifests in (name, arch) order. Summaries are small and never
+ * need paging; manifests do once a ring holds more than MAX_UNPAGED packages.
+ */
 export async function handleGetRelease(ring: string, url: URL, env: Env): Promise<Response> {
   if (!isRing(ring)) return json({ error: "unknown ring" }, 404);
   const detail: ManifestDetail =
     url.searchParams.get("include") === "files" ? "files" : url.searchParams.get("fields") === "summary" ? "summary" : "default";
-  const head = await ringHead(env, ring);
-  if (!head) return json({ error: `ring ${ring} has no release yet` }, 404);
+  const arch = url.searchParams.get("arch");
+  if (arch !== null && !isRepoArch(arch)) return json({ error: "unknown arch" }, 400);
+  const pinned = url.searchParams.get("release_id");
+  const release = pinned
+    ? await env.DB.prepare("SELECT * FROM releases WHERE id = ? AND ring = ?").bind(Number(pinned), ring).first<ReleaseRow>()
+    : await ringHead(env, ring);
+  if (!release) return json({ error: pinned ? `release ${pinned} is not a ${ring} release` : `ring ${ring} has no release yet` }, 404);
+
+  const total = await env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM release_packages rp JOIN packages p ON p.id = rp.package_id
+      WHERE rp.release_id = ?1 AND (?2 IS NULL OR p.repo_arch = ?2)`,
+  )
+    .bind(release.id, arch)
+    .first<{ n: number }>();
+  const limitParam = url.searchParams.get("limit");
+  const limit = limitParam ? Math.min(Math.max(1, Number(limitParam)), MAX_PAGE) : 0;
+  const offset = Math.max(0, Number(url.searchParams.get("offset") ?? 0));
+  if (!limit && detail !== "summary" && (total?.n ?? 0) > MAX_UNPAGED) {
+    return json(
+      { error: `release has ${total?.n} manifests; page with ?limit=<=${MAX_PAGE}&offset=&release_id=${release.id}`, total: total?.n },
+      413,
+    );
+  }
   const artifacts = await env.DB.prepare(
     "SELECT repo, arch, kind, size, created_at FROM release_artifacts WHERE release_id = ?",
   )
-    .bind(head.id)
+    .bind(release.id)
     .all();
+  const packages = await releaseManifests(env, release.id, detail, { arch, offset, limit });
   return json({
-    release: head,
-    ...(await releaseSummary(env, head.id)),
+    release,
+    ...(await releaseSummary(env, release.id)),
     artifacts: artifacts.results,
-    packages: await releaseManifests(env, head.id, detail),
+    page: { arch, offset, limit: limit || null, returned: packages.length, total: total?.n ?? 0 },
+    packages,
   });
 }
 
