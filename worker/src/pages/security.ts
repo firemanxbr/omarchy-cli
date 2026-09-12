@@ -75,7 +75,7 @@ const SCRIPT = String.raw`
     }).catch(function (e) { $("#updated").textContent = "failed: " + e; });
   }
   load();
-  liveStats(function () {}, 60000);
+  liveStats(function () {}, 120000);
 `;
 
 export function securityHtml(poolUrl: string, version: RunningVersion): string {

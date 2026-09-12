@@ -114,6 +114,18 @@ tracker's mistake or a name collision: open an issue with the package and the
 advisory id shown on the package page; the `same_project` heuristic in
 `crates/pkg-repo/src/security.rs` is where collisions are rejected.
 
+## Known limits
+
+* **D1 under a bulk import.** Importing a whole repository (thousands of
+  manifests with file lists) makes the index the bottleneck: reads can hit
+  D1's per-query CPU limit ("exceeded its CPU time limit and was reset") and
+  `wrangler d1 migrations apply` in a release can fail on it — re-run the job.
+  pacman is never affected (packages and databases are static objects on R2);
+  the dashboard shows the index as *degraded* on its status pill. GET responses
+  of the API are cached at the edge for their `max-age` (30 s for stats, 60 s
+  for search and package pages, 120 s for security), so viewers do not multiply
+  the load; the pages poll every 60–120 s and retry transient errors.
+
 ## Kill switch
 
 ```bash

@@ -160,8 +160,8 @@ export async function handleStats(env: Env): Promise<Response> {
  */
 export async function handleServiceStatus(env: Env): Promise<Response> {
   const t0 = Date.now();
-  const index = await env.DB.prepare("SELECT COUNT(*) AS n FROM ring_heads")
-    .first<{ n: number }>()
+  const timeout = new Promise<never>((_, reject) => setTimeout(() => reject(new Error("index did not answer within 5 s")), 5000));
+  const index = await Promise.race([env.DB.prepare("SELECT COUNT(*) AS n FROM ring_heads").first<{ n: number }>(), timeout])
     .then((r) => ({ ok: true, ms: Date.now() - t0, rings: r?.n ?? 0 }))
     .catch((e: unknown) => ({ ok: false, ms: Date.now() - t0, error: String(e) }));
   // The most recently rendered database is an object the pipeline guarantees;

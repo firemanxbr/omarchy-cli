@@ -95,7 +95,7 @@ const SCRIPT = String.raw`
     };
   });
   draw();
-  liveStats(function (d) { data = d; draw(); }, 30000);
+  liveStats(function (d) { data = d; draw(); }, 120000);
 `;
 
 export function getStartedHtml(poolUrl: string, version: RunningVersion): string {
