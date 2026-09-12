@@ -1,0 +1,30 @@
+# Maintainer: Omarchy packaging <https://github.com/firemanxbr/omarchy-pool>
+# The factory's smoke test: a small C program that must build on every
+# architecture the pool serves.
+pkgname=hello
+pkgver=2.12.2
+pkgrel=1
+pkgdesc="GNU Hello: prints a friendly greeting (the factory's smoke test)"
+arch=(x86_64 aarch64)
+url="https://www.gnu.org/software/hello/"
+license=(GPL-3.0-or-later)
+depends=(glibc)
+source=("https://ftp.gnu.org/gnu/hello/hello-$pkgver.tar.gz")
+sha256sums=('5a9a996dc292cc24dcf411cee87e92f6aae5b8d13bd9c6819b4c7a9dce0818ab')
+
+build() {
+  cd "hello-$pkgver"
+  ./configure --prefix=/usr
+  make
+}
+
+check() {
+  cd "hello-$pkgver"
+  make check
+}
+
+package() {
+  cd "hello-$pkgver"
+  make DESTDIR="$pkgdir" install
+  rm -rf "$pkgdir/usr/share/info/dir"
+}

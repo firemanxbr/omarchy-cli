@@ -1,0 +1,7 @@
+# Who approves what the factory builds. A new PKGBUILD needs a review from
+# its group's owners before it is merged (and therefore queued); after that,
+# version bumps of an already approved package flow without a human.
+factory/pkgbuilds/community/   @firemanxbr
+factory/pkgbuilds/omarchy/     @firemanxbr
+factory/worker/                @firemanxbr
+worker/src/routes/factory.ts   @firemanxbr

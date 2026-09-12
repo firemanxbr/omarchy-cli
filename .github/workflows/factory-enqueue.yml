@@ -1,0 +1,55 @@
+name: Factory enqueue
+
+# A PKGBUILD merged into main is an approved build: every package directory
+# touched by the push is queued for its architectures at this exact commit.
+# Review happens on the pull request (CODEOWNERS of factory/pkgbuilds/<group>);
+# this only tells the brain what to build.
+
+on:
+  push:
+    branches: [main]
+    paths: ["factory/pkgbuilds/**/PKGBUILD"]
+  workflow_dispatch:
+    inputs:
+      package:
+        description: "group/name to (re)build at this commit"
+        required: true
+      override:
+        description: Build even if an upstream source ships this name
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  enqueue:
+    name: Queue changed PKGBUILDs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 2 }
+      - name: Enqueue
+        env:
+          OMARCHY_API: ${{ vars.OMARCHY_API }}
+          OMARCHY_PUBLISH_TOKEN: ${{ secrets.OMARCHY_PUBLISH_TOKEN }}
+          OVERRIDE: ${{ inputs.override || 'false' }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${{ inputs.package }}" ]]; then
+            dirs="factory/pkgbuilds/${{ inputs.package }}"
+          else
+            dirs="$(git diff --name-only HEAD~1 HEAD -- 'factory/pkgbuilds/*/*/PKGBUILD' | xargs -rn1 dirname | sort -u)"
+          fi
+          [[ -n "$dirs" ]] || { echo "no PKGBUILD changed"; exit 0; }
+          for dir in $dirs; do
+            [[ -f "$dir/PKGBUILD" ]] || { echo "::warning::$dir has no PKGBUILD (removed?)"; continue; }
+            group="$(basename "$(dirname "$dir")")"; name="$(basename "$dir")"
+            eval "$(factory/bin/pkgbuild-meta "$dir/PKGBUILD")"   # META_ARCHES, META_VERSION
+            echo "$group/$name $META_VERSION → $META_ARCHES"
+            curl -sS --fail-with-body -X POST "$OMARCHY_API/api/v1/factory/enqueue" \
+              -H "authorization: Bearer $OMARCHY_PUBLISH_TOKEN" -H "content-type: application/json" \
+              --data "$(jq -n --arg n "$name" --arg g "$group" --arg r "$GITHUB_SHA" --arg v "$META_VERSION" --argjson a "$META_ARCHES" --argjson o "$OVERRIDE" \
+                '{name:$n, group:$g, pkgbuild_ref:$r, version:$v, arches:$a, reason:"pkgbuild-changed", override:$o}')"
+            echo
+          done

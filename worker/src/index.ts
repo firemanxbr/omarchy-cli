@@ -22,6 +22,8 @@
  *   GET  /api/v1/security?ring=&arch=             open advisories in a ring and what they expose
  *   PUT  /api/v1/security/advisories|matches       vulnerability data from the Security workflow
  *   POST /api/v1/security/prune?before=
+ *   GET  /api/v1/factory · POST /factory/{claim,requests,enqueue} · /factory/tasks/:id/{heartbeat,complete,fail,cancel}
+ *                                                  the factory's brain: requests, build tasks, pull-based workers
  *   GET  /api/v1/graph?targets=a,b&ring=stable
  *   POST /api/v1/events   GET /api/v1/events       activity log
  *   GET  /api/v1/stats                             everything the dashboard shows
@@ -39,6 +41,11 @@ import { handleCreateRelease, handleGetRelease, handleReleaseHistory, handlePutA
 import { handleGraph } from "./routes/graph";
 import { handlePackage, handlePackageFiles, handleSearch } from "./routes/search";
 import { handlePrune, handlePutAdvisories, handlePutMatches, handleSecurity } from "./routes/security";
+import {
+  handleApproveRequest, handleCancelTask, handleClaim, handleComplete, handleCreateRequest, handleEnqueue, handleFactory, handleFail,
+  handleHeartbeat, handleRejectRequest, handleTask,
+} from "./routes/factory";
+import { requireFactoryAuth } from "./auth";
 import { handleGetEvents, handlePostEvent } from "./routes/events";
 import { handleServiceStatus, handleStats } from "./routes/stats";
 import { handleGc, handleUnreferenced } from "./routes/gc";
@@ -66,6 +73,8 @@ export interface Env {
   POOL_DEPLOYED_AT?: string;
   /** Fine-grained GitHub token (Actions: read and write) for the pool's own scheduler. */
   GITHUB_TOKEN?: string;
+  /** Bearer token build workers present to the factory endpoints. */
+  FACTORY_TOKEN?: string;
 }
 
 
@@ -175,6 +184,17 @@ async function api(method: string, path: string, url: URL, request: Request, env
   if (method === "GET" && path === "/graph") return handleGraph(url, env);
   if (method === "GET" && path === "/search") return handleSearch(url, env);
   if (method === "GET" && path === "/security") return handleSecurity(url, env);
+  if (method === "GET" && path === "/factory") return handleFactory(env);
+  if ((m = path.match(/^\/factory\/tasks\/(\d+)$/)) && method === "GET") return handleTask(Number(m[1]), env);
+  if (method === "POST" && path === "/factory/claim") return requireFactoryAuth(request, env) ?? handleClaim(request, env);
+  if ((m = path.match(/^\/factory\/tasks\/(\d+)\/heartbeat$/)) && method === "POST") return requireFactoryAuth(request, env) ?? handleHeartbeat(Number(m[1]), request, env);
+  if ((m = path.match(/^\/factory\/tasks\/(\d+)\/complete$/)) && method === "POST") return requireFactoryAuth(request, env) ?? handleComplete(Number(m[1]), request, env);
+  if ((m = path.match(/^\/factory\/tasks\/(\d+)\/fail$/)) && method === "POST") return requireFactoryAuth(request, env) ?? handleFail(Number(m[1]), request, env);
+  if ((m = path.match(/^\/factory\/tasks\/(\d+)\/cancel$/)) && method === "POST") return requireAuth(request, env) ?? handleCancelTask(Number(m[1]), env);
+  if (method === "POST" && path === "/factory/requests") return requireAuth(request, env) ?? handleCreateRequest(request, env);
+  if ((m = path.match(/^\/factory\/requests\/(\d+)\/approve$/)) && method === "POST") return requireAuth(request, env) ?? handleApproveRequest(Number(m[1]), request, env);
+  if ((m = path.match(/^\/factory\/requests\/(\d+)\/reject$/)) && method === "POST") return requireAuth(request, env) ?? handleRejectRequest(Number(m[1]), request, env);
+  if (method === "POST" && path === "/factory/enqueue") return requireAuth(request, env) ?? handleEnqueue(request, env);
   if (method === "PUT" && path === "/security/advisories") return requireAuth(request, env) ?? handlePutAdvisories(request, env);
   if (method === "PUT" && path === "/security/matches") return requireAuth(request, env) ?? handlePutMatches(request, env);
   if (method === "POST" && path === "/security/prune") return requireAuth(request, env) ?? handlePrune(url, env);

@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Prints shell assignments describing a PKGBUILD without sourcing it as root
+# on the caller's machine: META_ARCHES (JSON, the pool's architectures the
+# package builds for; `any` builds once on x86_64) and META_VERSION.
+set -euo pipefail
+f="${1:?PKGBUILD path}"
+# A throwaway bash sources the file with functions neutralised; PKGBUILDs are
+# reviewed code, but this keeps a stray command from running here.
+IFS=$'\t' read -r arches pkgver pkgrel epoch < <(bash -c '
+  set -u; shopt -s expand_aliases
+  for fn in prepare build check package pkgver; do eval "$fn() { :; }"; done
+  source "$1" >/dev/null 2>&1 || true
+  printf "%s\t%s\t%s\t%s\n" "${arch[*]:-}" "${pkgver:-}" "${pkgrel:-1}" "${epoch:-}"' _ "$f")
+list='[]'
+for a in $arches; do
+  case "$a" in
+    any) list='["x86_64"]'; break ;;
+    x86_64|aarch64) list="$(jq -c --arg a "$a" '. + [$a]' <<<"$list")" ;;
+  esac
+done
+version="${pkgver}-${pkgrel}"; [[ -n "$epoch" ]] && version="$epoch:$version"
+printf 'META_ARCHES=%q\nMETA_VERSION=%q\n' "$list" "$version"
