@@ -34,7 +34,10 @@ PKGBUILD reviewed and merged ──▶ pool: build_requests / build_tasks (D1)
    `aarch64` to `arch=`; keep a header saying where it came from). CODEOWNERS
    of the group review it — that review *is* the approval. Merging it into
    `main` runs `factory-enqueue.yml`, which queues one task per architecture
-   at that exact commit. Optionally, a request can be recorded first so the
+   at that exact commit. The same workflow runs hourly from the pool's
+   scheduler as a reconcile — every PKGBUILD version on `main` without a
+   task (`GET /api/v1/factory/built`) is queued — so nothing depends on a
+   push event arriving. Optionally, a request can be recorded first so the
    dashboard shows what is waiting: `POST /api/v1/factory/requests`.
 3. **After that: automatic.** A version bump of an already approved PKGBUILD
    is queued the same way when merged. The bump itself comes from a pull
@@ -99,7 +102,7 @@ The factory touches the pool through four things, all versioned in the API:
 | The factory uses | Meaning |
 |---|---|
 | `GET /api/v1/package/:name` | who ships a name already (the guard) |
-| `POST /api/v1/factory/{requests,enqueue}` · `/requests/:id/{approve,reject}` · `/tasks/:id/cancel` (publish token) | maintainers and the enqueue workflow |
+| `POST /api/v1/factory/{requests,enqueue}` · `/requests/:id/{approve,reject}` · `/tasks/:id/cancel` (publish token) · `GET /factory/built` | maintainers and the enqueue workflow |
 | `POST /api/v1/factory/claim` · `/tasks/:id/{heartbeat,complete,fail}` (factory token) | the worker protocol |
 | `pkg-repo publish --source factory --ring edge --arch …` · `pkg-repo render` | how a result enters the pool: as a source like any other |
 
