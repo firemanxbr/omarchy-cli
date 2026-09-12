@@ -14,7 +14,7 @@ members = [
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-repository = "https://github.com/firemanxbr/omarchy-cli"
+repository = "https://github.com/firemanxbr/omarchy-pool"
 rust-version = "1.85"
 
 [workspace.dependencies]

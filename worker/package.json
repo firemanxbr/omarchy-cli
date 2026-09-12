@@ -2,7 +2,7 @@
   "name": "omarchy-repo-worker",
   "version": "0.1.0",
   "private": true,
-  "description": "Edge repository API for omarchy-cli (Cloudflare Workers + D1 + R2)",
+  "description": "Omarchy pool: index API, releases and dashboard (Cloudflare Workers + D1 + R2)",
   "license": "MIT",
   "type": "module",
   "scripts": {

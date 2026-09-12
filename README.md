@@ -1,9 +1,12 @@
-# omarchy-cli
+# omarchy-pool
 
-Proof of concept for the [Omarchy](https://omarchy.org) repository migration:
+The package pool for the [Omarchy](https://omarchy.org) repository migration:
 an **immutable package pool** on Cloudflare R2, an **index** on D1 where `edge`,
-`rc` and `stable` are pinned selections, **generated, signed pacman databases**,
-and a **thin client** that understands releases and blocks unsafe partial upgrades.
+`rc` and `stable` are pinned selections, **generated, signed pacman databases**
+served statically, a **publisher** that syncs Arch, Arch Linux ARM and Omarchy
+packages into it with upstream signature verification, a public **dashboard**, and
+a **thin client** (`omarchy-cli`) that understands releases and blocks unsafe
+partial upgrades.
 
 * Packages stay unmodified `makepkg` output — no new format, no new build tool.
 * Promoting a release is an index write, not a 275 GB copy.

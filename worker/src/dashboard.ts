@@ -100,12 +100,12 @@ const HTML = String.raw`<!doctype html>
   <a class="brand" href="/"><span class="mark">▣</span> omarchy packaging <span class="muted">/ staging</span></a>
   <nav>
     <a href="/api/v1/stats">API</a>
-    <a href="https://github.com/firemanxbr/omarchy-cli">Source</a>
-    <a href="https://github.com/firemanxbr/omarchy-cli/blob/main/docs/POC-RESULTS.md">POC results</a>
+    <a href="https://github.com/firemanxbr/omarchy-pool">Source</a>
+    <a href="https://github.com/firemanxbr/omarchy-pool/blob/main/docs/POC-RESULTS.md">POC results</a>
   </nav>
   <span class="spacer"></span>
   <span id="status">loading…</span>
-  <a class="btn" href="https://github.com/firemanxbr/omarchy-cli/blob/main/docs/ARCHITECTURE.md">How it works</a>
+  <a class="btn" href="https://github.com/firemanxbr/omarchy-pool/blob/main/docs/ARCHITECTURE.md">How it works</a>
 </header>
 
 <main>
@@ -144,7 +144,7 @@ const HTML = String.raw`<!doctype html>
   <span>Omarchy packaging staging · pool + index proof of concept</span>
   <a href="__POOL_URL__/x86_64/">pool</a>
   <a href="/api/v1/events">events</a>
-  <a href="https://github.com/firemanxbr/omarchy-cli/blob/main/docs/TESTING.md">reproduce</a>
+  <a href="https://github.com/firemanxbr/omarchy-pool/blob/main/docs/TESTING.md">reproduce</a>
   <span id="generated"></span>
 </footer>
 
