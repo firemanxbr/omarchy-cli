@@ -15,6 +15,11 @@ routes = [
 [observability]
 enabled = true
 
+# The pool's own scheduler (src/scheduler.ts): every ten minutes, dispatch the
+# workflows GitHub's cron has not run on time. Needs the GITHUB_TOKEN secret.
+[triggers]
+crons = ["*/10 * * * *"]
+
 # Metadata: package graph. Create with `wrangler d1 create omarchy-repo`
 # and paste the returned database_id below.
 [[d1_databases]]
@@ -40,3 +45,4 @@ POOL_DEPLOYED_AT = ""
 
 # Secrets (set with `wrangler secret put <NAME>`):
 #   PUBLISH_TOKEN  — bearer token required by the CI publisher on PUT /api/v1/packages
+#   GITHUB_TOKEN   — fine-grained token, Actions: read and write on the repository, for the scheduler

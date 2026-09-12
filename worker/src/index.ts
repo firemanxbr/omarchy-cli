@@ -52,6 +52,7 @@ import { securityHtml } from "./pages/security";
 import { DASHBOARD_HOST, LEGACY_DASHBOARD_HOST, version } from "./meta";
 import { handleStatic } from "./routes/static";
 import { requireAuth } from "./auth";
+import { runScheduler } from "./scheduler";
 
 export interface Env {
   DB: D1Database;
@@ -63,6 +64,8 @@ export interface Env {
   POOL_VERSION?: string;
   POOL_COMMIT?: string;
   POOL_DEPLOYED_AT?: string;
+  /** Fine-grained GitHub token (Actions: read and write) for the pool's own scheduler. */
+  GITHUB_TOKEN?: string;
 }
 
 
@@ -111,6 +114,11 @@ export default {
       console.error(err);
       return json({ error: "internal error", detail: String(err) }, 500);
     }
+  },
+
+  /** Cloudflare cron trigger (every ten minutes): dispatch overdue workflows. */
+  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(runScheduler(env).then((log) => console.log(log.join("\n"))));
   },
 } satisfies ExportedHandler<Env>;
 

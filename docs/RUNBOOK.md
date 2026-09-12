@@ -114,6 +114,25 @@ tracker's mistake or a name collision: open an issue with the package and the
 advisory id shown on the package page; the `same_project` heuristic in
 `crates/pkg-repo/src/security.rs` is where collisions are rejected.
 
+## The pool's own scheduler
+
+GitHub's cron is best-effort (on 2026-09-12 it delayed the hourly sync by an
+hour and never started the half-hourly metrics). A Cloudflare cron trigger on
+the worker (`src/scheduler.ts`, every ten minutes) reads each workflow's recent
+runs and dispatches the ones that are overdue — intervals for sync (60 min),
+metrics (30 min) and security (3 h); daily slots for promote (06:00 edge→rc,
+09:00 rc→stable), health (08:30) and the Sunday GC — never doubling a run that
+is queued or in progress, and giving GitHub's own cron ten minutes' head start.
+Each dispatch is a `dispatch` line in the journal. It needs the worker secret
+`GITHUB_TOKEN` (fine-grained, this repository, *Actions: read and write*):
+
+```bash
+cd worker && npx wrangler secret put GITHUB_TOKEN < ~/.cache/omarchy-cli-poc/github-token
+```
+
+Without the secret the trigger logs "idle" and the workflow files' own
+schedules are all there is.
+
 ## Known limits
 
 * **D1 under a bulk import.** Importing a whole repository (thousands of
