@@ -123,3 +123,10 @@ with dependency graph · OPR channels per ring, chaotic-aur as optional repo ·
 security layer (Arch + Debian trackers, KEV, EPSS, confidence levels, exposure
 through the graph, fast-track of fixes, `omarchy-cli security`) · paged release
 view and linear release creation at 30k packages · edge-cached API reads.
+
+## Factory findings (2026-09-12)
+
+- OPR aarch64 `omarchy` cannot be installed in a clean Arch Linux ARM container: `unable to satisfy dependency 'hyprland' required by omarchy` although `omarchy-packages-edge` serves `hyprland 0.56.2-3` for aarch64 (version constraint?). Anything depending on `omarchy` (flea) cannot be built for aarch64 until that is understood.
+- The OPR ships most names for aarch64 too; what is missing there is mostly `-debug` packages, x86-only drivers/kernels/nvidia, proprietary binaries (dropbox, spotify, cursor, lmstudio…) and a few Omarchy tools (omakade, omapresent, omareel, omarchy-herdr, schist, flea, hey-cli, vi, pinta). Their PKGBUILDs are not in the AUR except hey-cli, vi, flea.
+- An `any` package is stored once per architecture directory (sha256 is unique in the index), so an `any` PKGBUILD builds once per architecture.
+

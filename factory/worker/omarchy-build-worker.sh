@@ -56,15 +56,6 @@ inside() {
     grep -q "^$opt" /etc/pacman.conf || sed -i "0,/^\[options\]/s//[options]\n$opt/" /etc/pacman.conf
   done
   pacman-key --init >/dev/null 2>&1 || true
-  # Dependencies resolve against what the pool's edge serves for this
-  # architecture — the OPR (omarchy, quickshell…) and earlier factory builds
-  # — on top of the image's own mirrors. A throwaway container trusts the
-  # pool over HTTPS; nothing built here is installed anywhere else.
-  for repo in omarchy-packages-edge omarchy-factory-edge; do
-    if curl -sfI --max-time 20 "$pool/$arch/$repo.db" >/dev/null; then
-      printf '\n[%s]\nSigLevel = Optional TrustAll\nServer = %s/$arch\n' "$repo" "$pool" >> /etc/pacman.conf
-    fi
-  done
   pacman -Syu --noconfirm --needed base-devel git sudo namcap >/dev/null
   useradd -m -s /bin/bash builder
   echo 'builder ALL=(ALL) NOPASSWD: /usr/bin/pacman' > /etc/sudoers.d/builder
@@ -75,6 +66,26 @@ inside() {
   git -C /build/src remote add origin "$REPO_URL"
   git -C /build/src fetch -q --depth 1 origin "$ref"
   git -C /build/src checkout -q FETCH_HEAD
+
+  # Dependencies resolve against what the pool's edge serves for this
+  # architecture — the OPR (omarchy, quickshell…) and earlier factory builds
+  # — on top of the image's own mirrors. The pool's key (in the checkout)
+  # verifies the databases; the packages are then checked against the
+  # sha256 those signed databases carry, so their upstream signatures need
+  # no keyring in this throwaway container.
+  local added=0
+  for repo in omarchy-packages-edge omarchy-factory-edge; do
+    if curl -sfI --max-time 20 "$pool/$arch/$repo.db" >/dev/null; then
+      printf '\n[%s]\nSigLevel = DatabaseRequired DatabaseTrustedOnly PackageNever\nServer = %s/$arch\n' "$repo" "$pool" >> /etc/pacman.conf
+      added=1
+    fi
+  done
+  if [[ $added == 1 ]]; then
+    pacman-key --add /build/src/docs/omarchy-staging.pub.asc >/dev/null 2>&1
+    local poolkey; poolkey="$(gpg --homedir /etc/pacman.d/gnupg --with-colons --show-keys /build/src/docs/omarchy-staging.pub.asc 2>/dev/null | awk -F: '$1=="fpr"{print $10; exit}')"
+    pacman-key --lsign-key "$poolkey" >/dev/null 2>&1
+    pacman -Sy >/dev/null
+  fi
   [[ -f "/build/src/factory/pkgbuilds/$group/$name/PKGBUILD" ]] || { echo "no PKGBUILD at factory/pkgbuilds/$group/$name in $ref"; exit 3; }
   # Build outside the checkout: build tools walk up the tree (cargo finds the
   # pool's own workspace Cargo.toml above factory/).
