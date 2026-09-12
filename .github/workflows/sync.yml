@@ -84,17 +84,19 @@ jobs:
                  --keyring "$keyring" --ring "$ring" --limit "$LIMIT" "${args[@]}" \
                  --concurrency "${{ github.event.inputs.concurrency || '6' }}" \
                  --work-dir "$RUNNER_TEMP/sync" | tee "$RUNNER_TEMP/sync-$id.log"; then :; else status=$?; fi
-            grep -q "^release id" "$RUNNER_TEMP/sync-$id.log" && touched="$touched $ring/$arch"
+            grep -q "^release id" "$RUNNER_TEMP/sync-$id.log" && touched="$touched $ring"
             echo "::endgroup::"
           done <<<"$SOURCES"
           echo "TOUCHED=$(tr ' ' '\n' <<<"$touched" | sort -u | tr '\n' ' ')" >> "$GITHUB_ENV"
           exit $status
       - name: Render the rings that changed
+        # A new release is the head for both architectures, so both are
+        # rendered even when only one architecture's source moved.
         if: always()
         run: |
-          for ra in $TOUCHED; do
-            target/release/pkg-repo render --ring "${ra%/*}" --arch "${ra#*/}" --sign "$OMARCHY_GPG_KEYID"
-          done
+          for ring in $TOUCHED; do for arch in x86_64 aarch64; do
+            target/release/pkg-repo render --ring "$ring" --arch "$arch" --sign "$OMARCHY_GPG_KEYID"
+          done; done
           [[ -z "$TOUCHED" ]] && echo "nothing changed; nothing to render" || true
       - name: Report failure
         if: failure()
