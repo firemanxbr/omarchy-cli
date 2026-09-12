@@ -40,7 +40,13 @@ export async function handlePutPoolSig(sha256: string, url: URL, request: Reques
   const t = target(url);
   if (t instanceof Response) return t;
   if (!request.body) return json({ error: "empty body" }, 400);
-  if (!(await env.PACKAGES.head(packageKey(t.repoArch, t.filename)))) return json({ error: "archive not in pool" }, 404);
+  const archive = await env.PACKAGES.head(packageKey(t.repoArch, t.filename));
+  if (!archive) return json({ error: "archive not in pool" }, 404);
+  // A signature belongs to exact bytes. The pool keeps the first object
+  // stored under a filename, so a signature of a rebuild with different
+  // content would break verification of what is actually served.
+  const storedSha = archive.checksums.sha256 ? [...new Uint8Array(archive.checksums.sha256)].map((b) => b.toString(16).padStart(2, "0")).join("") : null;
+  if (storedSha && storedSha !== sha256) return json({ error: `the pool serves ${storedSha} under ${t.filename}; a signature for ${sha256} does not apply`, stored: storedSha }, 409);
   const bytes = await request.arrayBuffer();
   await env.PACKAGES.put(signatureKey(t.repoArch, t.filename), bytes, { httpMetadata: { cacheControl: IMMUTABLE } });
   await env.DB.prepare("UPDATE packages SET has_signature = 1 WHERE sha256 = ? AND repo_arch = ?").bind(sha256, t.repoArch).run();

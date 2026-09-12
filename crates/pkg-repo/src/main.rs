@@ -543,6 +543,21 @@ fn publish(
         let manifest = pkg_extract::extract_manifest(archive)
             .with_context(|| format!("inspecting {}", archive.display()))?;
         let sha = manifest.sha256.clone();
+        // The pool keeps the first object stored under a filename (the same
+        // rule the sync applies to upstream rebuilds): a rebuild of the same
+        // version pins what is already there instead of failing on the
+        // size/sha mismatch.
+        let (_, by_filename) = api.known_with_filenames(&[], &[manifest.filename.clone()], arch)?;
+        let sha = match by_filename.get(&manifest.filename) {
+            Some(stored) if *stored != sha => {
+                eprintln!(
+                    "{} {} already in pool under {} with different content; pinning the stored object",
+                    manifest.name, manifest.version, manifest.filename
+                );
+                stored.clone()
+            }
+            _ => sha,
+        };
         if api.is_indexed(&sha)? {
             eprintln!(
                 "{} {} already in pool, skipping upload",

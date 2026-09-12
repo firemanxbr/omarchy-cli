@@ -242,15 +242,20 @@ export async function handleComplete(id: number, request: Request, env: Env): Pr
   if (!b.worker || !b.sha256 || !b.filename) return json({ error: "worker, sha256 and filename are required" }, 400);
   const task = await owned(env, id, b.worker);
   if (task instanceof Response) return task;
-  const indexed = await env.DB.prepare("SELECT 1 FROM packages WHERE sha256 = ?").bind(b.sha256).first();
+  // The result must be in the pool. A rebuild of a version already stored
+  // under the same filename pins the stored object (pkg-repo publish), so
+  // the filename settles which sha256 the pool actually serves.
+  const indexed = await env.DB.prepare("SELECT sha256 FROM packages WHERE sha256 = ? OR (filename = ? AND repo_arch = ?) ORDER BY sha256 = ? DESC LIMIT 1")
+    .bind(b.sha256, b.filename, task.arch, b.sha256)
+    .first<{ sha256: string }>();
   if (!indexed) return json({ error: "publish the package to the pool first (pkg-repo publish --source factory), then complete" }, 409);
   await env.DB.prepare(
     "UPDATE build_tasks SET status = 'done', finished_at = ?, result_sha256 = ?, result_filename = ?, result_version = ?, duration_ms = ?, log_tail = ?, lease_owner = NULL, lease_expires_at = NULL WHERE id = ?",
   )
-    .bind(now(), b.sha256, b.filename, b.version ?? null, b.duration_ms ?? null, (b.log_tail ?? "").slice(-4000), id)
+    .bind(now(), indexed.sha256, b.filename, b.version ?? null, b.duration_ms ?? null, (b.log_tail ?? "").slice(-4000), id)
     .run();
   await env.DB.prepare("UPDATE build_workers SET last_seen = ?, current_task = NULL, builds_done = builds_done + 1 WHERE id = ?").bind(now(), b.worker).run();
-  await event(env, "build", "ok", `${task.name} ${b.version ?? ""} built for ${task.arch} by ${b.worker}${b.duration_ms ? " in " + Math.round(b.duration_ms / 60000) + " min" : ""}`, { task: id, arch: task.arch, sha256: b.sha256, filename: b.filename, worker: b.worker, attempts: task.attempts, duration_ms: b.duration_ms ?? null });
+  await event(env, "build", "ok", `${task.name} ${b.version ?? ""} built for ${task.arch} by ${b.worker}${b.duration_ms ? " in " + Math.round(b.duration_ms / 60000) + " min" : ""}`, { task: id, arch: task.arch, sha256: indexed.sha256, filename: b.filename, worker: b.worker, attempts: task.attempts, duration_ms: b.duration_ms ?? null });
   return json({ task: id, status: "done" });
 }
 
@@ -260,8 +265,10 @@ export async function handleFail(id: number, request: Request, env: Env): Promis
   const task = await owned(env, id, b.worker);
   if (task instanceof Response) return task;
   const exhausted = task.attempts >= task.max_attempts;
+  // A requeued task goes behind its peers (priority + 10) so one broken
+  // PKGBUILD does not hold the queue.
   await env.DB.prepare(
-    `UPDATE build_tasks SET status = ?, finished_at = ?, error = ?, log_tail = ?, duration_ms = ?, lease_owner = NULL, lease_expires_at = NULL WHERE id = ?`,
+    `UPDATE build_tasks SET status = ?, finished_at = ?, error = ?, log_tail = ?, duration_ms = ?, lease_owner = NULL, lease_expires_at = NULL, priority = priority + 10 WHERE id = ?`,
   )
     .bind(exhausted ? "failed" : "queued", exhausted ? now() : null, (b.error ?? "build failed").slice(0, 2000), (b.log_tail ?? "").slice(-4000), b.duration_ms ?? null, id)
     .run();
@@ -277,7 +284,7 @@ export async function requeueExpiredLeases(env: Env): Promise<number> {
     .all<{ id: number; name: string; arch: string; lease_owner: string; attempts: number; max_attempts: number }>();
   for (const t of expired.results) {
     const exhausted = t.attempts >= t.max_attempts;
-    await env.DB.prepare("UPDATE build_tasks SET status = ?, finished_at = ?, error = ?, lease_owner = NULL, lease_expires_at = NULL WHERE id = ? AND status = 'leased'")
+    await env.DB.prepare("UPDATE build_tasks SET status = ?, finished_at = ?, error = ?, lease_owner = NULL, lease_expires_at = NULL, priority = priority + 10 WHERE id = ? AND status = 'leased'")
       .bind(exhausted ? "failed" : "queued", exhausted ? now() : null, `lease by ${t.lease_owner} expired`, t.id)
       .run();
     await env.DB.prepare("UPDATE build_workers SET current_task = NULL WHERE id = ? AND current_task = ?").bind(t.lease_owner, t.id).run();

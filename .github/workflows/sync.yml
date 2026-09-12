@@ -63,7 +63,7 @@ jobs:
           packages-x86_64     packages  x86_64  edge   https://pkgs.omarchy.org/edge/x86_64                     omarchy     $K/omarchy.gpg       -
           packages-x86_64-rc  packages  x86_64  rc     https://pkgs.omarchy.org/rc/x86_64                       omarchy     $K/omarchy.gpg       -
           packages-x86_64-st  packages  x86_64  stable https://pkgs.omarchy.org/stable/x86_64                   omarchy     $K/omarchy.gpg       -
-          chaotic-x86_64      chaotic   x86_64  edge   https://builds.garudalinux.org/repos/chaotic-aur/x86_64  chaotic-aur $K/chaotic.gpg       core,extra,multilib,packages
+          chaotic-x86_64      chaotic   x86_64  edge   https://builds.garudalinux.org/repos/chaotic-aur/x86_64  chaotic-aur $K/chaotic.gpg       core,extra,multilib,packages,factory
           core-aarch64        core      aarch64 edge   http://os.archlinuxarm.org/aarch64/core                  core        $K/archlinuxarm.gpg  -
           alarm-aarch64       alarm     aarch64 edge   http://os.archlinuxarm.org/aarch64/alarm                 alarm       $K/archlinuxarm.gpg  -
           extra-aarch64       extra     aarch64 edge   http://os.archlinuxarm.org/aarch64/extra                 extra       $K/archlinuxarm.gpg  -

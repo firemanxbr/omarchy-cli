@@ -58,6 +58,7 @@ const BODY = String.raw`
       <tr><td>Arch Linux ARM</td><td>aarch64</td><td><code>core</code> <code>extra</code> <code>alarm</code></td><td><code>archlinuxarm-keyring</code></td></tr>
       <tr><td>Omarchy Package Repository (OPR)</td><td>x86_64 · aarch64</td><td><code>omarchy</code> — the OPR's own <code>edge</code> / <code>rc</code> / <code>stable</code> channel goes into the matching ring</td><td>Omarchy's signing key</td></tr>
       <tr><td>chaotic-aur <span class="muted">(optional)</span></td><td>x86_64</td><td><code>chaotic-aur</code>: prebuilt AUR packages; only names no other source provides, so Arch and the OPR always win</td><td><code>chaotic-keyring</code></td></tr>
+      <tr><td>The factory</td><td>x86_64 · aarch64</td><td><code>factory</code>: what no source above ships — built from PKGBUILDs reviewed in the repository by ephemeral workers that pull tasks from the pool; today, the OPR names that exist only for x86_64, built for aarch64 (<a href="/factory">Factory</a>)</td><td>the pool's own key</td></tr>
     </tbody></table></div>
   </section>
 
@@ -119,6 +120,7 @@ Server = https://pool.firemanxbr.org/$arch
       <tr><td>Index</td><td>A D1 (SQLite) database: one row per package object with its manifest, dependency edges, sonames; releases and ring heads; every event the pipeline records.</td></tr>
       <tr><td>API + this site</td><td>One Cloudflare Worker serving <code>/api/v1</code> and these pages.</td></tr>
       <tr><td>Pipeline</td><td>GitHub Actions workflows: sync (hourly), promote (daily, evidence-gated), health (daily), GC (weekly), metrics (every 30 min), release (every merge). Their runs are linked from the journal.</td></tr>
+      <tr><td>Factory</td><td>The build queue lives in the index (requests, tasks, leases); workers are containers anywhere — a laptop, a GitHub-hosted runner — that claim a task, build it in a fresh Arch container, sign, publish into <code>edge</code> and report. A lease that expires goes back to the queue.</td></tr>
       <tr><td>Tools</td><td><code>pkg-repo</code> (publisher: sync, promote, gate, render), <code>pkg-extract</code> (manifests), <code>omarchy-cli</code> (thin client) — Rust, built for both architectures on every release.</td></tr>
     </tbody></table></div>
   </section>
