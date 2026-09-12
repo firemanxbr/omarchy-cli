@@ -611,6 +611,153 @@ fn chrono_now() -> String {
     format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}Z")
 }
 
+// ---------- fast-track ----------
+
+pub struct FastTrackOptions<'a> {
+    /// Ring to fix (`rc` or `stable`).
+    pub ring: &'a str,
+    /// Ring whose clean, newer objects are pulled in (`edge`).
+    pub from: &'a str,
+    /// Lowest severity worth skipping the soak for.
+    pub min_severity: &'a str,
+    pub dry_run: bool,
+}
+
+#[derive(Debug, Default)]
+pub struct FastTrackReport {
+    /// `(name, arch, vulnerable version, clean version)`.
+    pub fixes: Vec<(String, String, String, String)>,
+    pub release: Option<(u64, u64)>,
+}
+
+fn severity_rank(s: &str) -> u8 {
+    match s {
+        "critical" => 0,
+        "high" => 1,
+        "medium" => 2,
+        "low" => 3,
+        _ => 4,
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct SecurityRow {
+    name: String,
+    version: String,
+    worst: String,
+    kev: bool,
+    advisories: Vec<SecurityAdvisory>,
+    fixed_in: Vec<FixedIn>,
+}
+#[derive(Debug, Deserialize)]
+struct SecurityAdvisory {
+    #[serde(rename = "match")]
+    r#match: String,
+}
+#[derive(Debug, Deserialize)]
+struct FixedIn {
+    ring: String,
+    version: String,
+}
+#[derive(Debug, Deserialize)]
+struct SecurityView {
+    vulnerable: Vec<SecurityRow>,
+}
+
+/// Which packages of `ring` a fast-track would replace: an open advisory we
+/// are confident about (exact or name-version; never name-only alone), of at
+/// least `min_severity` or exploited in the wild, and a version with no open
+/// advisory already served by `from` that is newer than the vulnerable one.
+fn fast_track_candidates(
+    view: &SecurityView,
+    opts: &FastTrackOptions<'_>,
+) -> Vec<(String, String, String)> {
+    view.vulnerable
+        .iter()
+        .filter(|v| v.advisories.iter().any(|a| a.r#match != "name-only"))
+        .filter(|v| v.kev || severity_rank(&v.worst) <= severity_rank(opts.min_severity))
+        .filter_map(|v| {
+            let clean = v.fixed_in.iter().find(|f| f.ring == opts.from)?;
+            vercmp(&clean.version, &v.version)
+                .is_gt()
+                .then(|| (v.name.clone(), v.version.clone(), clean.version.clone()))
+        })
+        .collect()
+}
+
+/// Pulls the clean versions of vulnerable packages from `from` into `ring`
+/// as one release (an index write), skipping the soak. The caller renders,
+/// health-checks and rolls back like any promotion.
+pub fn fast_track(api: &Api, opts: &FastTrackOptions<'_>) -> Result<FastTrackReport, RepoError> {
+    let mut report = FastTrackReport::default();
+    let mut add = Vec::new();
+    for arch in ["x86_64", "aarch64"] {
+        let view: SecurityView = serde_json::from_value(
+            api.get_json(&format!("/security?ring={}&arch={arch}", opts.ring))?,
+        )?;
+        let candidates = fast_track_candidates(&view, opts);
+        if candidates.is_empty() {
+            continue;
+        }
+        let Some(from) = api.release_summary(opts.from)? else {
+            continue;
+        };
+        for (name, vulnerable, clean) in candidates {
+            if let Some(obj) = from
+                .packages
+                .iter()
+                .find(|p| p.name == name && p.repo_arch == arch && p.version == clean)
+            {
+                add.push(obj.sha256.clone());
+                report
+                    .fixes
+                    .push((name, arch.to_owned(), vulnerable, clean));
+            }
+        }
+    }
+    for (name, arch, vulnerable, clean) in &report.fixes {
+        println!("fast-track {name} ({arch}): {vulnerable} → {clean}");
+    }
+    if report.fixes.is_empty() {
+        println!("{}: nothing to fast-track", opts.ring);
+        return Ok(report);
+    }
+    if opts.dry_run {
+        return Ok(report);
+    }
+    let names: Vec<String> = report
+        .fixes
+        .iter()
+        .map(|f| format!("{} {}→{}", f.0, f.2, f.3))
+        .collect();
+    let note = format!(
+        "security fast-track from {}: {}",
+        opts.from,
+        names.join(", ")
+    );
+    let created = api.create_release(&crate::client::ReleaseRequest {
+        ring: opts.ring,
+        add: &add,
+        remove: &[],
+        note: Some(&note),
+        ..crate::client::ReleaseRequest::default()
+    })?;
+    report.release = Some((created.release.id, created.release.seq));
+    println!(
+        "release id {} (#{})",
+        created.release.id, created.release.seq
+    );
+    api.post_event(&serde_json::json!({
+        "kind": "fasttrack",
+        "ring": opts.ring,
+        "source": opts.from,
+        "status": "ok",
+        "summary": format!("{}#{}: {} security fix(es) pulled from {} without the soak", opts.ring, created.release.seq, report.fixes.len(), opts.from),
+        "payload": { "release_id": created.release.id, "fixes": report.fixes.iter().map(|f| serde_json::json!({"name": f.0, "arch": f.1, "from": f.2, "to": f.3})).collect::<Vec<_>>() }
+    }))?;
+    Ok(report)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -742,6 +889,77 @@ mod tests {
         assert!(same_project("1.2-1", "3.0-1")); // small numbers: never rejected
         assert!(!same_project("1.5-1", "20240101-1")); // date-based vs semver
         assert!(same_project("git-1", "1.0-1")); // no leading number: keep
+    }
+
+    #[test]
+    fn fast_track_picks_confident_fixed_newer_packages() {
+        let row =
+            |name: &str, version: &str, worst: &str, kev: bool, m: &str, fixed: &[(&str, &str)]| {
+                SecurityRow {
+                    name: name.into(),
+                    version: version.into(),
+                    worst: worst.into(),
+                    kev,
+                    advisories: vec![SecurityAdvisory { r#match: m.into() }],
+                    fixed_in: fixed
+                        .iter()
+                        .map(|(r, v)| FixedIn {
+                            ring: (*r).into(),
+                            version: (*v).into(),
+                        })
+                        .collect(),
+                }
+            };
+        let view = SecurityView {
+            vulnerable: vec![
+                row(
+                    "libxml2",
+                    "2.15.4-1",
+                    "high",
+                    false,
+                    "exact",
+                    &[("edge", "2.15.5-1")],
+                ), // yes
+                row("grub", "2:2.14-1", "high", false, "exact", &[]), // no clean version anywhere
+                row("nano", "8.0-1", "low", false, "exact", &[("edge", "8.1-1")]), // below min severity
+                row(
+                    "sudo",
+                    "1.9-1",
+                    "low",
+                    true,
+                    "exact",
+                    &[("edge", "1.9.1-1")],
+                ), // low but exploited: yes
+                row(
+                    "zlib",
+                    "1.3-1",
+                    "critical",
+                    false,
+                    "name-only",
+                    &[("edge", "1.4-1")],
+                ), // name-only: never
+                row("xz", "5.8-1", "high", false, "exact", &[("rc", "5.9-1")]), // clean only in rc, not edge
+                row(
+                    "git",
+                    "2.50-1",
+                    "high",
+                    false,
+                    "name-version",
+                    &[("edge", "2.50-1")],
+                ), // same version: no
+            ],
+        };
+        let opts = FastTrackOptions {
+            ring: "stable",
+            from: "edge",
+            min_severity: "medium",
+            dry_run: true,
+        };
+        let got: Vec<String> = fast_track_candidates(&view, &opts)
+            .into_iter()
+            .map(|c| c.0)
+            .collect();
+        assert_eq!(got, ["libxml2", "sudo"]);
     }
 
     #[test]

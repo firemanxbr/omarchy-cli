@@ -66,7 +66,13 @@ pub enum Command {
         dry_run: bool,
         #[arg(long)]
         noconfirm: bool,
+        /// Only packages the ring flags with an open advisory (and any package
+        /// the ring serves a clean newer version of), nothing else.
+        #[arg(long)]
+        security_only: bool,
     },
+    /// Installed packages with an open advisory, and where a fixed version is.
+    Security,
     /// Searches the ring's release by name or description.
     Search { query: String },
     /// Shows a package as published in the ring's release.
@@ -113,14 +119,33 @@ pub fn run(cli: Cli) -> Result<i32> {
             print_plan(&plan, json);
             apply(&config, &plan, dry_run, noconfirm, None)
         }
-        Command::Upgrade { dry_run, noconfirm } => {
+        Command::Upgrade {
+            dry_run,
+            noconfirm,
+            security_only,
+        } => {
             let view = api.release(&config.ring, &config.arch)?;
             let local = LocalDb::load(&config.root)?;
+            // --security-only: what the ring's own report says is worth fixing
+            // now — an installed package whose current version has an open
+            // advisory and which the ring serves a clean newer version of.
+            let only: Option<std::collections::HashSet<String>> = if security_only {
+                let report = api.security(&config.ring, &config.arch)?;
+                Some(
+                    installed_security(&report, &local)
+                        .into_iter()
+                        .map(|v| v.name)
+                        .collect(),
+                )
+            } else {
+                None
+            };
             let candidates: Vec<PackageManifest> = view
                 .packages
                 .into_iter()
                 .filter(|p| same_arch(&config, p.repo_arch.as_deref()))
                 .map(|p| p.manifest)
+                .filter(|m| only.as_ref().is_none_or(|set| set.contains(&m.name)))
                 .filter(|m| {
                     local
                         .get(&m.name)
@@ -138,6 +163,7 @@ pub fn run(cli: Cli) -> Result<i32> {
             apply(&config, &plan, dry_run, noconfirm, Some(pin))
         }
         Command::Search { query } => search(&config, &api, &query, json),
+        Command::Security => security(&config, &api, json),
         Command::Info { package } => info(&config, &api, &package, json),
         Command::List => list(&config, &api),
     }
@@ -209,6 +235,105 @@ fn info(config: &Config, api: &Api, package: &str, json: bool) -> Result<i32> {
         .collect();
     println!("ABI needs    : {}", abi.join("  "));
     println!("Mirror       : {}", config.package_url(&m.filename));
+    Ok(0)
+}
+
+/// The ring's vulnerable packages that are installed here at a version the
+/// advisory still applies to (the ring may already serve a clean one).
+fn installed_security(
+    report: &crate::api::SecurityView,
+    local: &LocalDb,
+) -> Vec<crate::api::VulnerablePackage> {
+    report
+        .vulnerable
+        .iter()
+        .filter(|v| {
+            local
+                .get(&v.name)
+                .is_some_and(|p| vercmp(&p.version, &v.version).is_le())
+        })
+        .cloned()
+        .collect()
+}
+
+fn security(config: &Config, api: &Api, json: bool) -> Result<i32> {
+    let report = api.security(&config.ring, &config.arch)?;
+    let local = LocalDb::load(&config.root)?;
+    let summary = api.release_summary(&config.ring)?;
+    let mine = installed_security(&report, &local);
+    // Which of them does this ring already serve a newer, clean version of?
+    let serves_clean = |v: &crate::api::VulnerablePackage| {
+        v.fixed_in.iter().any(|f| f.ring == config.ring)
+            || summary.packages.iter().any(|p| {
+                p.name == v.name
+                    && same_arch(config, p.repo_arch.as_deref())
+                    && vercmp(&p.version, &v.version).is_gt()
+            })
+    };
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "ring": report.ring, "arch": report.arch, "advisories_updated_at": report.updated_at,
+                "installed_vulnerable": mine.iter().map(|v| serde_json::json!({
+                    "name": v.name, "installed": local.get(&v.name).map(|p| p.version.clone()), "worst": v.worst, "kev": v.kev, "epss": v.epss,
+                    "advisories": v.advisories, "fixed_in": v.fixed_in, "upgrade_fixes_it": serves_clean(v),
+                })).collect::<Vec<_>>(),
+            }))?
+        );
+        return Ok(0);
+    }
+    println!(
+        "Ring       : {} ({})   advisories refreshed {}",
+        report.ring,
+        report.arch,
+        report.updated_at.as_deref().unwrap_or("never")
+    );
+    if mine.is_empty() {
+        println!("No installed package has an open advisory in this ring's report.");
+        return Ok(0);
+    }
+    println!("Installed packages with an open advisory: {}", mine.len());
+    for v in &mine {
+        let installed = local
+            .get(&v.name)
+            .map(|p| p.version.clone())
+            .unwrap_or_default();
+        let cves: Vec<&str> = v
+            .advisories
+            .iter()
+            .flat_map(|a| a.cves.iter().map(String::as_str))
+            .collect();
+        let confidence: std::collections::BTreeSet<&str> =
+            v.advisories.iter().map(|a| a.confidence.as_str()).collect();
+        println!(
+            "  {:<9} {:<26} {:<20} {}{}",
+            v.worst.to_uppercase(),
+            v.name,
+            installed,
+            if v.kev {
+                "EXPLOITED IN THE WILD · "
+            } else {
+                ""
+            },
+            cves.join(", ")
+        );
+        println!(
+            "            confidence {} · {}",
+            confidence.into_iter().collect::<Vec<_>>().join(", "),
+            if serves_clean(v) {
+                "this ring serves a fixed version: run `omarchy-cli upgrade --security-only`"
+                    .to_owned()
+            } else if let Some(f) = v.fixed_in.first() {
+                format!(
+                    "fixed version in {} ({}); the fast-track brings it here after its checks",
+                    f.ring, f.version
+                )
+            } else {
+                "no fixed version in any ring yet".to_owned()
+            }
+        );
+    }
     Ok(0)
 }
 

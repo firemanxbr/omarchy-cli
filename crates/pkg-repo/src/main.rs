@@ -7,7 +7,7 @@ use clap::{Args, Parser, Subcommand};
 use pkg_manifest::{PackageManifest, RepoIndex};
 use pkg_repo::client::{Api, ReleaseRequest};
 use pkg_repo::gate::{self, GateOptions};
-use pkg_repo::security::{self, SecurityOptions};
+use pkg_repo::security::{self, FastTrackOptions, SecurityOptions};
 use pkg_repo::sync::{self, SyncOptions};
 use pkg_repo::{build_database, sign, Flavor};
 
@@ -226,6 +226,22 @@ enum Command {
         #[command(flatten)]
         args: SecurityArgs,
     },
+    /// Pulls clean versions of packages with open advisories from `--from` into
+    /// `--ring` as one release, skipping the soak (render and verify afterwards).
+    FastTrack {
+        #[command(flatten)]
+        remote: Remote,
+        #[arg(long)]
+        ring: String,
+        #[arg(long, default_value = "edge")]
+        from: String,
+        /// Lowest severity fast-tracked (exploited-in-the-wild always is).
+        #[arg(long, default_value = "medium")]
+        min_severity: String,
+        /// Print the candidates without creating a release.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Records an event for the dashboard (health checks, gates, notes).
     Event {
         #[command(flatten)]
@@ -248,6 +264,7 @@ enum Command {
     },
 }
 
+#[allow(clippy::too_many_lines)] // one arm per subcommand, each a one-liner
 fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -318,6 +335,29 @@ fn main() -> Result<()> {
         Command::Head { remote, ring } => head(&remote, &ring),
         Command::Gate { remote, args } => run_gate(&remote, &args),
         Command::Security { remote, args } => run_security(&remote, args),
+        Command::FastTrack {
+            remote,
+            ring,
+            from,
+            min_severity,
+            dry_run,
+        } => {
+            let api = Api::new(&remote.api, &remote.token)?;
+            let report = security::fast_track(
+                &api,
+                &FastTrackOptions {
+                    ring: &ring,
+                    from: &from,
+                    min_severity: &min_severity,
+                    dry_run,
+                },
+            )?;
+            // Exit 3 when there was nothing to do, so a workflow can skip the render.
+            if report.fixes.is_empty() {
+                std::process::exit(3);
+            }
+            Ok(())
+        }
         Command::Render {
             remote,
             ring,
