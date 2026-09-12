@@ -24,8 +24,9 @@ pub struct Release {
 pub struct IndexedManifest {
     #[serde(default, rename = "source")]
     _source: Option<String>,
-    #[serde(default, rename = "repo_arch")]
-    _repo_arch: Option<String>,
+    /// Architecture of the upstream repository the package came from.
+    #[serde(default)]
+    pub repo_arch: Option<String>,
     #[serde(flatten)]
     pub manifest: PackageManifest,
 }
@@ -47,6 +48,8 @@ pub struct PackageSummary {
     pub size_download: u64,
     pub size_installed: u64,
     pub description: Option<String>,
+    #[serde(default)]
+    pub repo_arch: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -101,7 +104,10 @@ impl Api {
         self.get(&format!("/releases/{ring}?fields=summary"))
     }
 
-    pub fn graph(&self, ring: &str, targets: &[String]) -> Result<Graph> {
-        self.get(&format!("/graph?ring={ring}&targets={}", targets.join(",")))
+    pub fn graph(&self, ring: &str, arch: &str, targets: &[String]) -> Result<Graph> {
+        self.get(&format!(
+            "/graph?ring={ring}&arch={arch}&targets={}",
+            targets.join(",")
+        ))
     }
 }

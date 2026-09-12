@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 190" width="1240" height="190" font-family="-apple-system, 'Segoe UI', Inter, Helvetica, Arial, sans-serif">
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#8A8A8A"/></marker></defs>
+<rect width="1240" height="190" fill="white"/>
+<rect x="40" y="36" width="212" height="88" rx="12" fill="#EBEBE6" stroke="#9A9A94" stroke-width="1.3"/>
+<text x="146.0" y="69.0" text-anchor="middle" font-size="17" font-weight="600" fill="#333333">Pull request</text>
+<text x="146.0" y="89.0" text-anchor="middle" font-size="12.5" fill="#555555">CI (x86_64 + aarch64) and E2E</text>
+<text x="146.0" y="106.0" text-anchor="middle" font-size="12.5" fill="#555555">must pass · squash merge</text>
+<rect x="280" y="36" width="212" height="88" rx="12" fill="#ECEBFE" stroke="#6B5BD6" stroke-width="1.3"/>
+<text x="386.0" y="69.0" text-anchor="middle" font-size="17" font-weight="600" fill="#3F2FA0">Next version</text>
+<text x="386.0" y="89.0" text-anchor="middle" font-size="12.5" fill="#5A4BC4">last tag + patch · release:minor</text>
+<text x="386.0" y="106.0" text-anchor="middle" font-size="12.5" fill="#5A4BC4">or release:major label bumps</text>
+<rect x="520" y="36" width="212" height="88" rx="12" fill="#ECEBFE" stroke="#6B5BD6" stroke-width="1.3"/>
+<text x="626.0" y="69.0" text-anchor="middle" font-size="17" font-weight="600" fill="#3F2FA0">Build</text>
+<text x="626.0" y="89.0" text-anchor="middle" font-size="12.5" fill="#5A4BC4">pkg-repo, omarchy-cli, pkg-extract</text>
+<text x="626.0" y="106.0" text-anchor="middle" font-size="12.5" fill="#5A4BC4">for x86_64 and aarch64</text>
+<rect x="760" y="36" width="212" height="88" rx="12" fill="#ECEBFE" stroke="#6B5BD6" stroke-width="1.3"/>
+<text x="866.0" y="69.0" text-anchor="middle" font-size="17" font-weight="600" fill="#3F2FA0">GitHub release</text>
+<text x="866.0" y="89.0" text-anchor="middle" font-size="12.5" fill="#5A4BC4">tag vX.Y.Z · notes from the merged</text>
+<text x="866.0" y="106.0" text-anchor="middle" font-size="12.5" fill="#5A4BC4">pull requests · tarballs + key</text>
+<rect x="1000" y="36" width="212" height="88" rx="12" fill="#E3F2DA" stroke="#6EA84F" stroke-width="1.3"/>
+<text x="1106.0" y="69.0" text-anchor="middle" font-size="17" font-weight="600" fill="#2E6B1E">Deploy</text>
+<text x="1106.0" y="89.0" text-anchor="middle" font-size="12.5" fill="#3F7F2C">wrangler deploy, POOL_VERSION set</text>
+<text x="1106.0" y="106.0" text-anchor="middle" font-size="12.5" fill="#3F7F2C">the dashboard shows what runs</text>
+<path d="M 252 80.0 L 280 80.0" fill="none" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+<path d="M 492 80.0 L 520 80.0" fill="none" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+<path d="M 732 80.0 L 760 80.0" fill="none" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+<path d="M 972 80.0 L 1000 80.0" fill="none" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+<text x="620.0" y="176" text-anchor="middle" font-size="12" fill="#777">release.yml — every merge into main is a release; versions start at v0.0.1 and grow one step at a time</text>
+</svg>

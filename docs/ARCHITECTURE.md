@@ -74,7 +74,7 @@ serves data. Decisions are made by the publisher (`pkg-repo`) and the client.
 | Workflow | Schedule | What it does |
 |---|---|---|
 | `sync.yml` | hourly | `pkg-repo sync` for every source in its table — Arch `core`/`extra`/`multilib` (x86_64, from `mirror.omarchy.org`), Arch Linux ARM `core`/`extra`/`alarm` (aarch64), the OPR `omarchy` repo (both) — each package's upstream signature verified against that project's keyring before it enters the pool; then render `edge` per architecture |
-| `promote.yml` | daily edge→rc, Mondays rc→stable (needs approval), or manual | index write, render both architectures, health check |
+| `promote.yml` | daily: edge→rc 06:00 UTC, rc→stable 09:00 UTC; or manual | evidence-driven (below): fresh health + ABI of the source ring on both architectures → gate → index write → render → health of the target → automatic rollback if that fails |
 | `health.yml` | daily, x86_64 and aarch64 runners | real pacman per ring and architecture: `-Sy`, list, signed download → `health` event |
 | `gc.yml` | weekly | delete pool objects the last 3 releases of every ring do not reference (7-day grace for imports in flight) |
 | `ci.yml`, `e2e.yml` | every pull request | fmt, clippy, tests and the worker typecheck on x86_64 and aarch64; real pacman end to end through a local worker |
@@ -82,6 +82,38 @@ serves data. Decisions are made by the publisher (`pkg-repo`) and the client.
 
 Every step posts an event; https://omarchy-pool.firemanxbr.org renders them.
 Operations, trust model and the kill switch are in [RUNBOOK.md](RUNBOOK.md).
+
+#### Promotion by evidence, not by calendar
+
+![Promotion gates](diagrams/promotion-gates.svg)
+
+A promotion happens when the recorded evidence says the source ring is good,
+and is undone automatically when the target ring turns out not to be:
+
+1. **Evidence.** On both architectures, a real pacman syncs the source ring and
+   downloads a signed package (`health` event), and `omarchy-cli` runs the
+   ELF-level safety check on every upgrade the ring would apply to the official
+   Arch / Arch Linux ARM base image (`abi` event, blockers = unsatisfiable symbol
+   versions).
+2. **Gate** (`pkg-repo gate`). Per architecture: the latest health of the source
+   ring is recent and not an error; no health inside the soak window failed
+   (0 days into `rc`, 3 days into `stable`); a recent ABI check found no blocker.
+   A ring with nothing rendered for an architecture is not evidence against it.
+   If the target already serves the source's head there is nothing to promote.
+   The verdict and its reasons are a `gate` event.
+3. **Promote, render, verify.** The index write records the previous head; the
+   databases are rendered and signed for both architectures; the target ring gets
+   the same health check on both.
+4. **Automatic rollback.** If that health check fails, the ring is pointed back at
+   the previous release (another index write), re-rendered, and a `rollback` event
+   says which release failed and which one was restored. Otherwise a `promote`
+   event confirms it.
+
+Stable moves without a human by default; the repository variable
+`STABLE_ENVIRONMENT=stable` puts the GitHub environment with its required reviewer
+back in front of step 3.
+
+![Release pipeline](diagrams/release-pipeline.svg)
 
 ### Architectures
 

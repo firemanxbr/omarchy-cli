@@ -1,12 +1,15 @@
 //! Promotion gate: decides from recorded evidence whether `from` may be
 //! promoted into `to`, instead of by the calendar.
 //!
-//! The evidence is the `health` events the pipeline posts — a real pacman
-//! syncing the ring per architecture. For every architecture the latest health
-//! of `from` must be recent and not an error, and no health of `from` inside
-//! the soak window may have failed. A ring with nothing rendered for an
-//! architecture (`warn`) is not evidence against it. When the head of `to`
-//! already came from the head of `from`, there is nothing to promote.
+//! The evidence is what the pipeline records per architecture: `health`
+//! events (a real pacman syncing the ring) and `abi` events (the ELF-level
+//! safety check of the upgrades the ring would apply to a reference system).
+//! For every architecture the latest health of `from` must be recent and not
+//! an error, no health of `from` inside the soak window may have failed, and
+//! a recent ABI check must not have found blockers. A ring with nothing
+//! rendered for an architecture (`warn`) is not evidence against it. When the
+//! head of `to` already came from the head of `from`, there is nothing to
+//! promote.
 
 use crate::client::{Api, Event};
 use crate::RepoError;
@@ -50,6 +53,8 @@ pub struct ArchEvidence {
     pub latest_age_hours: Option<f64>,
     pub checks_in_window: usize,
     pub errors_in_window: usize,
+    /// Status of the latest recent `abi` check of `from`, if any was recorded.
+    pub abi_status: Option<String>,
 }
 
 #[derive(Debug)]
@@ -58,7 +63,8 @@ pub struct GateReport {
     pub evidence: Vec<ArchEvidence>,
 }
 
-/// Pure decision: `events` are health events (any ring), `now` unix seconds.
+/// Pure decision: `events` are `health` and `abi` events (any ring), `now`
+/// unix seconds.
 #[must_use]
 pub fn evaluate(
     events: &[Event],
@@ -81,9 +87,11 @@ pub fn evaluate(
                     && e.source.as_deref() == Some(arch.as_str())
             })
             .collect();
-        of_arch.sort_by(|a, b| b.id.cmp(&a.id));
+        of_arch.sort_by_key(|e| std::cmp::Reverse(e.id));
         let latest = of_arch.first().copied();
-        let latest_age = latest.and_then(|e| parse_iso8601(&e.created_at)).map(|t| now - t);
+        let latest_age = latest
+            .and_then(|e| parse_iso8601(&e.created_at))
+            .map(|t| now - t);
         let in_window: Vec<&Event> = of_arch
             .iter()
             .copied()
@@ -94,7 +102,10 @@ pub fn evaluate(
         match latest {
             None => reasons.push(format!("{arch}: no health check of {} recorded", opts.from)),
             Some(e) if e.status == "error" => {
-                reasons.push(format!("{arch}: latest health of {} failed — {}", opts.from, e.summary));
+                reasons.push(format!(
+                    "{arch}: latest health of {} failed — {}",
+                    opts.from, e.summary
+                ));
             }
             Some(_) => {
                 if latest_age.is_none_or(|age| age > max_age) {
@@ -111,6 +122,22 @@ pub fn evaluate(
                 opts.from, opts.soak_days
             ));
         }
+        // ABI: the latest recent check decides; an old or missing one is not evidence.
+        let abi = events
+            .iter()
+            .filter(|e| {
+                e.kind == "abi"
+                    && e.ring.as_deref() == Some(opts.from)
+                    && e.source.as_deref() == Some(arch.as_str())
+                    && parse_iso8601(&e.created_at).is_some_and(|t| now - t <= max_age)
+            })
+            .max_by_key(|e| e.id);
+        if let Some(e) = abi.filter(|e| e.status == "error") {
+            reasons.push(format!(
+                "{arch}: ABI check of {} failed — {}",
+                opts.from, e.summary
+            ));
+        }
         evidence.push(ArchEvidence {
             arch: arch.clone(),
             latest_status: latest.map(|e| e.status.clone()),
@@ -118,6 +145,7 @@ pub fn evaluate(
             latest_age_hours: latest_age.map(|s| s as f64 / 3600.0),
             checks_in_window: in_window.len(),
             errors_in_window: errors,
+            abi_status: abi.map(|e| e.status.clone()),
         });
     }
 
@@ -142,8 +170,14 @@ pub fn evaluate(
 
 /// Fetches the evidence, decides, records a `gate` event and prints the report.
 pub fn run(api: &Api, opts: &GateOptions<'_>) -> Result<GateReport, RepoError> {
-    let events = api.events("health", 200)?;
-    let from_head = api.history(opts.from)?.releases.iter().find(|r| r.is_head != 0).map(|r| r.id);
+    let mut events = api.events("health", 200)?;
+    events.extend(api.events("abi", 200)?);
+    let from_head = api
+        .history(opts.from)?
+        .releases
+        .iter()
+        .find(|r| r.is_head != 0)
+        .map(|r| r.id);
     let to_source = api
         .history(opts.to)?
         .releases
@@ -154,23 +188,36 @@ pub fn run(api: &Api, opts: &GateOptions<'_>) -> Result<GateReport, RepoError> {
     let report = evaluate(&events, now, from_head, to_source, opts);
 
     let (status, summary) = match &report.verdict {
-        Verdict::Promote => ("ok", format!("{} → {}: evidence OK, promoting", opts.from, opts.to)),
-        Verdict::Skip(why) => ("warn", format!("{} → {}: nothing to promote — {why}", opts.from, opts.to)),
+        Verdict::Promote => (
+            "ok",
+            format!("{} → {}: evidence OK, promoting", opts.from, opts.to),
+        ),
+        Verdict::Skip(why) => (
+            "warn",
+            format!("{} → {}: nothing to promote — {why}", opts.from, opts.to),
+        ),
         Verdict::Block(reasons) => (
             "error",
-            format!("{} → {}: blocked — {}", opts.from, opts.to, reasons.join("; ")),
+            format!(
+                "{} → {}: blocked — {}",
+                opts.from,
+                opts.to,
+                reasons.join("; ")
+            ),
         ),
     };
     println!("{summary}");
     for e in &report.evidence {
         println!(
-            "  {:<8} latest {} ({}) · {} check(s) in {} day(s), {} failed",
+            "  {:<8} health {} ({}) · {} check(s) in {} day(s), {} failed · abi {}",
             e.arch,
             e.latest_status.as_deref().unwrap_or("none"),
-            e.latest_age_hours.map_or("n/a".to_owned(), |h| format!("{h:.1} h ago")),
+            e.latest_age_hours
+                .map_or("n/a".to_owned(), |h| format!("{h:.1} h ago")),
             e.checks_in_window,
             opts.soak_days,
-            e.errors_in_window
+            e.errors_in_window,
+            e.abi_status.as_deref().unwrap_or("not checked")
         );
     }
     if opts.dry_run {
@@ -190,6 +237,7 @@ pub fn run(api: &Api, opts: &GateOptions<'_>) -> Result<GateReport, RepoError> {
             "evidence": report.evidence.iter().map(|e| serde_json::json!({
                 "arch": e.arch, "latest_status": e.latest_status, "latest_age_hours": e.latest_age_hours,
                 "checks_in_window": e.checks_in_window, "errors_in_window": e.errors_in_window,
+                "abi_status": e.abi_status,
             })).collect::<Vec<_>>(),
         }
     }))?;
@@ -205,26 +253,37 @@ fn now_unix() -> i64 {
 
 /// `YYYY-MM-DDTHH:MM:SS[.fff]Z` → unix seconds (what D1 records).
 #[must_use]
-pub fn parse_iso8601(s: &str) -> Option<i64> {
-    let b = s.as_bytes();
-    if b.len() < 19 || b[4] != b'-' || b[7] != b'-' || b[10] != b'T' || b[13] != b':' || b[16] != b':' {
+pub fn parse_iso8601(text: &str) -> Option<i64> {
+    let bytes = text.as_bytes();
+    if bytes.len() < 19
+        || bytes[4] != b'-'
+        || bytes[7] != b'-'
+        || bytes[10] != b'T'
+        || bytes[13] != b':'
+        || bytes[16] != b':'
+    {
         return None;
     }
-    let n = |r: std::ops::Range<usize>| s.get(r)?.parse::<i64>().ok();
-    let (y, m, d) = (n(0..4)?, n(5..7)?, n(8..10)?);
-    let (hh, mm, ss) = (n(11..13)?, n(14..16)?, n(17..19)?);
-    if !(1..=12).contains(&m) || !(1..=31).contains(&d) || hh > 23 || mm > 59 || ss > 60 {
+    let field = |range: std::ops::Range<usize>| text.get(range)?.parse::<i64>().ok();
+    let (year, month, day) = (field(0..4)?, field(5..7)?, field(8..10)?);
+    let (hour, minute, second) = (field(11..13)?, field(14..16)?, field(17..19)?);
+    if !(1..=12).contains(&month)
+        || !(1..=31).contains(&day)
+        || hour > 23
+        || minute > 59
+        || second > 60
+    {
         return None;
     }
     // Days from civil (Howard Hinnant), proleptic Gregorian.
-    let y = if m <= 2 { y - 1 } else { y };
-    let era = y.div_euclid(400);
-    let yoe = y - era * 400;
-    let mp = (m + 9) % 12;
-    let doy = (153 * mp + 2) / 5 + d - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    let days = era * 146_097 + doe - 719_468;
-    Some(days * 86_400 + hh * 3_600 + mm * 60 + ss)
+    let year = if month <= 2 { year - 1 } else { year };
+    let era = year.div_euclid(400);
+    let year_of_era = year - era * 400;
+    let shifted_month = (month + 9) % 12;
+    let day_of_year = (153 * shifted_month + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    let days = era * 146_097 + day_of_era - 719_468;
+    Some(days * 86_400 + hour * 3_600 + minute * 60 + second)
 }
 
 #[cfg(test)]
@@ -232,9 +291,13 @@ mod tests {
     use super::*;
 
     fn ev(id: u64, ring: &str, arch: &str, status: &str, at: &str) -> Event {
+        kind_ev("health", id, ring, arch, status, at)
+    }
+
+    fn kind_ev(kind: &str, id: u64, ring: &str, arch: &str, status: &str, at: &str) -> Event {
         Event {
             id,
-            kind: "health".into(),
+            kind: kind.into(),
             ring: Some(ring.into()),
             source: Some(arch.into()),
             status: status.into(),
@@ -245,7 +308,7 @@ mod tests {
         }
     }
 
-    fn opts<'a>(arches: &'a [String], soak: u32) -> GateOptions<'a> {
+    fn opts(arches: &[String], soak: u32) -> GateOptions<'_> {
         GateOptions {
             from: "rc",
             to: "stable",
@@ -285,7 +348,10 @@ mod tests {
             ev(1, "rc", "x86_64", "ok", "2026-09-12T06:00:00Z"),
             ev(2, "rc", "aarch64", "warn", "2026-09-12T06:01:00Z"),
         ];
-        assert_eq!(evaluate(&events, NOW, Some(10), None, &opts(&arches, 3)).verdict, Verdict::Promote);
+        assert_eq!(
+            evaluate(&events, NOW, Some(10), None, &opts(&arches, 3)).verdict,
+            Verdict::Promote
+        );
     }
 
     #[test]
@@ -295,22 +361,31 @@ mod tests {
             ev(1, "rc", "x86_64", "ok", "2026-09-12T06:00:00Z"),
             ev(2, "rc", "aarch64", "error", "2026-09-12T06:01:00Z"),
         ];
-        let Verdict::Block(reasons) = evaluate(&failed, NOW, Some(10), None, &opts(&arches, 3)).verdict else {
+        let Verdict::Block(reasons) =
+            evaluate(&failed, NOW, Some(10), None, &opts(&arches, 3)).verdict
+        else {
             panic!("expected block")
         };
-        assert!(reasons.iter().any(|r| r.contains("aarch64: latest health of rc failed")));
+        assert!(reasons
+            .iter()
+            .any(|r| r.contains("aarch64: latest health of rc failed")));
 
         let stale = vec![
             ev(1, "rc", "x86_64", "ok", "2026-09-10T06:00:00Z"),
             ev(2, "rc", "aarch64", "ok", "2026-09-12T06:01:00Z"),
         ];
-        let Verdict::Block(reasons) = evaluate(&stale, NOW, Some(10), None, &opts(&arches, 3)).verdict else {
+        let Verdict::Block(reasons) =
+            evaluate(&stale, NOW, Some(10), None, &opts(&arches, 3)).verdict
+        else {
             panic!("expected block")
         };
         assert!(reasons[0].contains("older than 24 h"), "{reasons:?}");
 
         let missing = vec![ev(1, "rc", "x86_64", "ok", "2026-09-12T06:00:00Z")];
-        assert!(matches!(evaluate(&missing, NOW, Some(10), None, &opts(&arches, 3)).verdict, Verdict::Block(_)));
+        assert!(matches!(
+            evaluate(&missing, NOW, Some(10), None, &opts(&arches, 3)).verdict,
+            Verdict::Block(_)
+        ));
     }
 
     #[test]
@@ -325,8 +400,30 @@ mod tests {
         assert_eq!(r.evidence[0].errors_in_window, 1);
         assert!(matches!(r.verdict, Verdict::Block(_)));
         let r = evaluate(&events, NOW, Some(10), None, &opts(&arches, 0));
-        assert_eq!(r.evidence[0].errors_in_window, 0, "a zero-day window only sees the latest");
+        assert_eq!(
+            r.evidence[0].errors_in_window, 0,
+            "a zero-day window only sees the latest"
+        );
         assert_eq!(r.verdict, Verdict::Promote);
+    }
+
+    #[test]
+    fn recent_abi_blockers_block_but_old_ones_do_not() {
+        let arches = vec!["x86_64".to_owned()];
+        let mut events = vec![
+            ev(1, "rc", "x86_64", "ok", "2026-09-12T06:00:00Z"),
+            kind_ev("abi", 2, "rc", "x86_64", "error", "2026-09-12T06:05:00Z"),
+        ];
+        let r = evaluate(&events, NOW, Some(10), None, &opts(&arches, 0));
+        assert!(
+            matches!(&r.verdict, Verdict::Block(reasons) if reasons[0].contains("ABI check of rc failed"))
+        );
+        assert_eq!(r.evidence[0].abi_status.as_deref(), Some("error"));
+
+        events[1].created_at = "2026-09-01T06:05:00Z".into(); // stale: not evidence
+        let r = evaluate(&events, NOW, Some(10), None, &opts(&arches, 0));
+        assert_eq!(r.verdict, Verdict::Promote);
+        assert_eq!(r.evidence[0].abi_status, None);
     }
 
     #[test]

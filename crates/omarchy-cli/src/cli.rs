@@ -29,6 +29,9 @@ pub struct Cli {
     /// Filesystem root to inspect (testing against an exported rootfs).
     #[arg(long, global = true)]
     pub root: Option<PathBuf>,
+    /// Architecture to resolve within (`x86_64` | `aarch64`); defaults to this machine's.
+    #[arg(long, global = true)]
+    pub arch: Option<String>,
     /// Machine-readable output.
     #[arg(long, global = true)]
     pub json: bool,
@@ -88,6 +91,9 @@ pub fn run(cli: Cli) -> Result<i32> {
     if let Some(root) = cli.root {
         config.root = root;
     }
+    if let Some(arch) = cli.arch {
+        config.arch = arch;
+    }
     let api = Api::new(&config.api)?;
     let json = cli.json;
 
@@ -113,6 +119,7 @@ pub fn run(cli: Cli) -> Result<i32> {
             let candidates: Vec<PackageManifest> = view
                 .packages
                 .into_iter()
+                .filter(|p| same_arch(&config, p.repo_arch.as_deref()))
                 .map(|p| p.manifest)
                 .filter(|m| {
                     local
@@ -142,6 +149,7 @@ fn search(config: &Config, api: &Api, query: &str, json: bool) -> Result<i32> {
     let hits: Vec<&crate::api::PackageSummary> = view
         .packages
         .iter()
+        .filter(|m| same_arch(config, m.repo_arch.as_deref()))
         .filter(|m| {
             m.name.to_lowercase().contains(&q)
                 || m.description
@@ -170,6 +178,7 @@ fn info(config: &Config, api: &Api, package: &str, json: bool) -> Result<i32> {
     let Some(m) = view
         .packages
         .iter()
+        .filter(|p| same_arch(config, p.repo_arch.as_deref()))
         .map(|p| &p.manifest)
         .find(|m| m.name == package)
     else {
@@ -203,10 +212,18 @@ fn info(config: &Config, api: &Api, package: &str, json: bool) -> Result<i32> {
     Ok(0)
 }
 
+/// Rows of this machine's architecture (older indexes carried no `repo_arch`).
+fn same_arch(config: &Config, repo_arch: Option<&str>) -> bool {
+    repo_arch.is_none_or(|a| a == config.arch)
+}
+
 fn list(config: &Config, api: &Api) -> Result<i32> {
     let view = api.release_summary(&config.ring)?;
     let local = LocalDb::load(&config.root)?;
     for m in &view.packages {
+        if !same_arch(config, m.repo_arch.as_deref()) {
+            continue;
+        }
         if let Some(p) = local.get(&m.name) {
             let mark = match vercmp(&m.version, &p.version) {
                 std::cmp::Ordering::Greater => format!("  [update: {}]", m.version),
@@ -226,6 +243,9 @@ fn status(config: &Config, api: &Api, json: bool) -> Result<i32> {
     let mut updates = Vec::new();
     let mut tracked = 0;
     for m in &view.packages {
+        if !same_arch(config, m.repo_arch.as_deref()) {
+            continue;
+        }
         if let Some(p) = local.get(&m.name) {
             tracked += 1;
             if vercmp(&m.version, &p.version).is_gt() {
@@ -287,7 +307,7 @@ fn status(config: &Config, api: &Api, json: bool) -> Result<i32> {
 }
 
 fn plan_targets(config: &Config, api: &Api, targets: &[String]) -> Result<(Plan, u64)> {
-    let graph = api.graph(&config.ring, targets)?;
+    let graph = api.graph(&config.ring, &config.arch, targets)?;
     if !graph.missing_targets.is_empty() {
         bail!(
             "not in {} release: {}",

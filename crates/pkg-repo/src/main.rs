@@ -28,6 +28,26 @@ struct Remote {
     token: String,
 }
 
+#[derive(Args)]
+struct GateArgs {
+    #[arg(long)]
+    from: String,
+    #[arg(long)]
+    to: String,
+    /// Architectures that need evidence (repeatable).
+    #[arg(long = "arch", default_values_t = ["x86_64".to_owned(), "aarch64".to_owned()])]
+    arches: Vec<String>,
+    /// Days without a failed health check of `--from` required first.
+    #[arg(long, default_value_t = 0)]
+    soak_days: u32,
+    /// The latest health check of `--from` must be younger than this.
+    #[arg(long, default_value_t = 24)]
+    max_age_hours: u32,
+    /// Decide and print without recording a `gate` event.
+    #[arg(long)]
+    dry_run: bool,
+}
+
 #[derive(Subcommand)]
 enum Command {
     /// Renders `<repo>.db` and `<repo>.files` from a local `index.json`.
@@ -144,22 +164,8 @@ enum Command {
     Gate {
         #[command(flatten)]
         remote: Remote,
-        #[arg(long)]
-        from: String,
-        #[arg(long)]
-        to: String,
-        /// Architectures that need evidence (repeatable).
-        #[arg(long = "arch", default_values_t = ["x86_64".to_owned(), "aarch64".to_owned()])]
-        arches: Vec<String>,
-        /// Days without a failed health check of `--from` required first.
-        #[arg(long, default_value_t = 0)]
-        soak_days: u32,
-        /// The latest health check of `--from` must be younger than this.
-        #[arg(long, default_value_t = 24)]
-        max_age_hours: u32,
-        /// Decide and print without recording a `gate` event.
-        #[arg(long)]
-        dry_run: bool,
+        #[command(flatten)]
+        args: GateArgs,
     },
     /// Renders, signs and uploads the pacman databases of a ring's current release,
     /// one `omarchy-<source>-<ring>` repo per source.
@@ -272,39 +278,8 @@ fn main() -> Result<()> {
             note,
         } => rollback(&remote, &ring, to, note.as_deref()),
         Command::Releases { remote, ring } => releases(&remote, &ring),
-        Command::Head { remote, ring } => {
-            let api = Api::new(&remote.api, &remote.token)?;
-            match api.history(&ring)?.releases.iter().find(|r| r.is_head != 0) {
-                Some(head) => {
-                    println!("{}", head.id);
-                    Ok(())
-                }
-                None => std::process::exit(1),
-            }
-        }
-        Command::Gate {
-            remote,
-            from,
-            to,
-            arches,
-            soak_days,
-            max_age_hours,
-            dry_run,
-        } => {
-            let api = Api::new(&remote.api, &remote.token)?;
-            let report = gate::run(
-                &api,
-                &GateOptions {
-                    from: &from,
-                    to: &to,
-                    arches: &arches,
-                    soak_days,
-                    max_age_hours,
-                    dry_run,
-                },
-            )?;
-            std::process::exit(report.verdict.exit_code());
-        }
+        Command::Head { remote, ring } => head(&remote, &ring),
+        Command::Gate { remote, args } => run_gate(&remote, &args),
         Command::Render {
             remote,
             ring,
@@ -337,6 +312,33 @@ fn main() -> Result<()> {
             }))?;
             Ok(())
         }
+    }
+}
+
+fn run_gate(remote: &Remote, args: &GateArgs) -> Result<()> {
+    let api = Api::new(&remote.api, &remote.token)?;
+    let report = gate::run(
+        &api,
+        &GateOptions {
+            from: &args.from,
+            to: &args.to,
+            arches: &args.arches,
+            soak_days: args.soak_days,
+            max_age_hours: args.max_age_hours,
+            dry_run: args.dry_run,
+        },
+    )?;
+    std::process::exit(report.verdict.exit_code());
+}
+
+fn head(remote: &Remote, ring: &str) -> Result<()> {
+    let api = Api::new(&remote.api, &remote.token)?;
+    match api.history(ring)?.releases.iter().find(|r| r.is_head != 0) {
+        Some(head) => {
+            println!("{}", head.id);
+            Ok(())
+        }
+        None => std::process::exit(1),
     }
 }
 

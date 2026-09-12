@@ -15,6 +15,8 @@ pub struct Config {
     pub ring: String,
     /// Repository name as configured in pacman.conf (`[omarchy]`).
     pub repo: String,
+    /// Architecture this machine installs (`x86_64` | `aarch64`); defaults to the
+    /// architecture the binary runs on.
     pub arch: String,
     /// Filesystem root. Only change for testing against an exported rootfs.
     pub root: PathBuf,
@@ -28,7 +30,7 @@ impl Default for Config {
             pool: "https://pool.firemanxbr.org".into(),
             ring: "stable".into(),
             repo: "omarchy".into(),
-            arch: "x86_64".into(),
+            arch: std::env::consts::ARCH.into(),
             root: "/".into(),
         }
     }

@@ -82,7 +82,7 @@ export_rootfs() { # image dest
 step "Build client"
 cargo build -q -p omarchy-cli
 CLI="$ROOT/target/debug/omarchy-cli"
-CLI_ARGS=(--api "$OMARCHY_API" --pool "$OMARCHY_POOL")
+CLI_ARGS=(--api "$OMARCHY_API" --pool "$OMARCHY_POOL" --arch x86_64)   # the exported rootfs is x86_64 whatever the host
 
 step "Export rootfs slices (pacman db + libraries)"
 export_rootfs "$CURRENT" "$ROOT/target/rootfs-current"
