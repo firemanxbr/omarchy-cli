@@ -23,6 +23,8 @@ interface Manifest {
   conflicts?: string[];
   replaces?: string[];
   files?: string[];
+  /** The `.PKGINFO` fields as written by makepkg; `provides` there is what pacman resolves through. */
+  pkginfo?: { provides?: string[] };
 }
 
 const OPS = [">=", "<=", "=", ">", "<"];
@@ -84,12 +86,15 @@ export async function handlePostPackage(url: URL, request: Request, env: Env): P
   await env.DB.prepare("INSERT INTO package_file_lists (package_id, count, gz) VALUES (?, ?, ?)").bind(id, files.length, gz).run();
 
   const stmts: D1PreparedStatement[] = [];
+  // Declared provides (.PKGINFO, plus the package's own name) are what pacman
+  // resolves dependencies through; the rest are sonames found in the ELF files.
+  const declared = new Set([m.name, ...(m.pkginfo?.provides ?? []).map((raw) => parseRule(raw).name)]);
   const prov = env.DB.prepare(
-    "INSERT INTO package_provides (package_id, capability, version_constraint, symbol_version) VALUES (?, ?, ?, ?)",
+    "INSERT INTO package_provides (package_id, capability, version_constraint, symbol_version, declared) VALUES (?, ?, ?, ?, ?)",
   );
   for (const raw of m.provides ?? []) {
     const r = parseRule(raw);
-    stmts.push(prov.bind(id, r.name, r.constraint ? r.constraint.op + r.constraint.version : null, r.symbol_version));
+    stmts.push(prov.bind(id, r.name, r.constraint ? r.constraint.op + r.constraint.version : null, r.symbol_version, declared.has(r.name) ? 1 : 0));
   }
   const req = env.DB.prepare(
     "INSERT INTO package_requires (package_id, requirement, version_constraint, symbol_version, kind) VALUES (?, ?, ?, ?, ?)",

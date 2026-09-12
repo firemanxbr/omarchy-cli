@@ -119,7 +119,8 @@ export async function handlePackage(name: string, url: URL, env: Env): Promise<R
          JOIN packages p ON p.repo_arch = ?3
          JOIN release_packages rp ON rp.package_id = p.id AND rp.release_id = ?2
         WHERE p.name = cap.value
-           OR p.id IN (SELECT pv.package_id FROM package_provides pv WHERE pv.capability = cap.value)`,
+           OR p.id IN (SELECT pv.package_id FROM package_provides pv WHERE pv.capability = cap.value
+                        AND (pv.declared = 1 OR cap.value GLOB '*.so.[0-9]*'))`,
     )
       .bind(JSON.stringify(chunk), head.id, s.arch)
       .all<{ capability: string; name: string; version: string }>();
