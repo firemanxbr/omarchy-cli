@@ -102,6 +102,10 @@ grep -q "tested before they reach you" <<<"$dash_body" || {
 for p in /get-started /how-it-works /status /api; do
   body=$(curl -s "$OMARCHY_API$p"); grep -q "omarchy-pool" <<<"$body" || { echo "page $p not served"; exit 1; }
 done
+search_body=$(curl -s "$OMARCHY_API/api/v1/search?q=zlib&ring=stable")
+grep -q '"name":"zlib"' <<<"$search_body" || { echo "search did not find zlib: $search_body"; exit 1; }
+pkg_body=$(curl -s "$OMARCHY_API/api/v1/package/zlib?ring=stable")
+grep -q '"shown_ring":"stable"' <<<"$pkg_body" || { echo "package page data missing: $pkg_body"; exit 1; }
 status_body=$(curl -s "$OMARCHY_API/api/v1/status")
 grep -q '"state":"online"' <<<"$status_body" || { echo "service status not online: $status_body"; exit 1; }
 echo "databases, signatures, package blobs, Range requests, stats, pages and service status OK"

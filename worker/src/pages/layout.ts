@@ -60,6 +60,19 @@ const CSS = String.raw`
   .copy { position: absolute; right: 8px; top: 8px; font-size: 12px; color: var(--dim); cursor: pointer; border: 1px solid var(--line); padding: 1px 8px; background: var(--panel); }
   .copy:hover { color: var(--text); }
   footer .sep { color: var(--line); }
+  .searchbar { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; margin: 0 0 10px; }
+  .searchbar input { flex: 1 1 380px; font: inherit; font-size: 15px; padding: 9px 12px; background: var(--panel-2); color: var(--text); border: 1px solid var(--line); }
+  .searchbar input:focus { outline: none; border-color: var(--green); }
+  .searchbar .choice { margin: 0; }
+  .crumbs { color: var(--dim); font-size: 13px; margin: 0 0 6px; } .crumbs a { color: var(--muted); text-decoration: none; }
+  .meta { display: flex; flex-wrap: wrap; gap: 6px 10px; font-size: 13px; color: var(--muted); margin: 10px 0 36px; }
+  .meta .sep { color: var(--line); }
+  ul.plain { list-style: none; margin: 0; padding: 0; font-size: 13.5px; line-height: 1.8; }
+  ul.plain.cols { columns: 2; column-gap: 24px; } ul.plain li { break-inside: avoid; }
+  ul.plain a { text-decoration: none; color: var(--text); border-bottom: 1px dotted var(--dim); } ul.plain a:hover { color: var(--green); }
+  #graph svg { width: 100%; height: auto; display: block; } #graph a { cursor: pointer; } #graph a:hover rect { stroke-width: 2; }
+  .choice-btn { background: var(--panel-2); color: var(--muted); border: 1px solid var(--line); padding: 3px 10px; font: inherit; font-size: 12.5px; cursor: pointer; vertical-align: middle; margin-left: 8px; }
+  #files { max-height: 420px; overflow: auto; }
   footer .gh { font-size: 13px; }
   header .spacer { flex: 1; }
   .btn { background: var(--green); color: var(--green-ink); font-weight: 500; padding: 6px 14px; text-decoration: none; font-size: 14px; }
@@ -199,7 +212,7 @@ export interface PageOptions {
   title: string;
   description: string;
   /** Which nav entry is highlighted. */
-  active: "overview" | "get-started" | "pipeline" | "how-it-works";
+  active: "overview" | "packages" | "get-started" | "pipeline" | "how-it-works";
   body: string;
   script?: string;
   poolUrl: string;
@@ -208,6 +221,7 @@ export interface PageOptions {
 
 export const NAV: { key: PageOptions["active"]; href: string; label: string }[] = [
   { key: "overview", href: "/", label: "Overview" },
+  { key: "packages", href: "/packages", label: "Packages" },
   { key: "get-started", href: "/get-started", label: "Get started" },
   { key: "pipeline", href: "/#pipeline", label: "Pipeline" },
   { key: "how-it-works", href: "/how-it-works", label: "How it works" },

@@ -63,6 +63,7 @@ Migrations live in `worker/migrations/`.
 | `POST /api/v1/releases` | create / promote / roll back a release |
 | `PUT /api/v1/releases/:id/artifacts/:kind?repo=` | store a rendered database beside the packages |
 | `GET /api/v1/graph?targets=a,b&ring=stable` | dependency subgraph for the client's safety check |
+| `GET /api/v1/search?q=` · `/package/:name[/files]` | search within a ring; a package's versions per ring, manifest, forward edges (declared dependencies and loaded sonames resolved to providers) and reverse edges (declared, or by loading one of its libraries) — the package page and, later, CVE propagation |
 | `GET /api/v1/pool/unreferenced` · `POST /api/v1/pool/gc` | retention: what the last N releases do not reference |
 | `POST /api/v1/events` · `GET /api/v1/events` · `GET /api/v1/stats` | activity log and the dashboard's data |
 | `GET /` | the dashboard |
