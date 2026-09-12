@@ -315,6 +315,21 @@ export async function handleFactory(env: Env): Promise<Response> {
   );
 }
 
+/**
+ * Every (name, arch, version) the factory has a task for, with the latest
+ * status. The enqueue workflow reconciles the PKGBUILDs on main against
+ * this, so a merge nobody's push event announced (a bot's auto-merge, a
+ * deploy race) is still built within the hour.
+ */
+export async function handleBuilt(env: Env): Promise<Response> {
+  const rows = await env.DB.prepare(
+    `SELECT name, arch, version, status, pkgbuild_ref, id FROM build_tasks t
+      WHERE status != 'cancelled' AND id = (SELECT MAX(id) FROM build_tasks u WHERE u.name = t.name AND u.arch = t.arch AND u.version IS t.version AND u.status != 'cancelled')
+      ORDER BY name, arch, id`,
+  ).all();
+  return json({ built: rows.results }, 200, { "cache-control": "no-store" });
+}
+
 export async function handleTask(id: number, env: Env): Promise<Response> {
   const task = await env.DB.prepare("SELECT * FROM build_tasks WHERE id = ?").bind(id).first<TaskRow>();
   return task ? json({ task }) : json({ error: "no such task" }, 404);

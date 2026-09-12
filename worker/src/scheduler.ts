@@ -29,6 +29,7 @@ export const RULES: Rule[] = [
   { workflow: "sync.yml", every: 60 },
   { workflow: "metrics.yml", every: 30 },
   { workflow: "security.yml", every: 180 },
+  { workflow: "factory-enqueue.yml", every: 60 },
   { workflow: "promote.yml", at: { hour: 6, minute: 0 }, inputs: { from: "edge", to: "rc", note: "daily rc" } },
   { workflow: "promote.yml", at: { hour: 9, minute: 0 }, inputs: { from: "rc", to: "stable", note: "daily stable" } },
   { workflow: "health.yml", at: { hour: 8, minute: 30 } },

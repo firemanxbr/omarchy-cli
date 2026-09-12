@@ -43,7 +43,7 @@ import { handlePackage, handlePackageFiles, handleSearch } from "./routes/search
 import { handlePrune, handlePutAdvisories, handlePutMatches, handleSecurity } from "./routes/security";
 import {
   handleApproveRequest, handleCancelTask, handleClaim, handleComplete, handleCreateRequest, handleEnqueue, handleFactory, handleFail,
-  handleHeartbeat, handleRejectRequest, handleTask,
+  handleHeartbeat, handleRejectRequest, handleTask, handleBuilt,
 } from "./routes/factory";
 import { requireFactoryAuth } from "./auth";
 import { handleGetEvents, handlePostEvent } from "./routes/events";
@@ -187,6 +187,7 @@ async function api(method: string, path: string, url: URL, request: Request, env
   if (method === "GET" && path === "/search") return handleSearch(url, env);
   if (method === "GET" && path === "/security") return handleSecurity(url, env);
   if (method === "GET" && path === "/factory") return handleFactory(env);
+  if (method === "GET" && path === "/factory/built") return handleBuilt(env);
   if ((m = path.match(/^\/factory\/tasks\/(\d+)$/)) && method === "GET") return handleTask(Number(m[1]), env);
   if (method === "POST" && path === "/factory/claim") return requireFactoryAuth(request, env) ?? handleClaim(request, env);
   if ((m = path.match(/^\/factory\/tasks\/(\d+)\/heartbeat$/)) && method === "POST") return requireFactoryAuth(request, env) ?? handleHeartbeat(Number(m[1]), request, env);
