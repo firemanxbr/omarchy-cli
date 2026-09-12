@@ -35,6 +35,21 @@ pub struct Release {
     pub created_at: String,
 }
 
+/// What `POST /api/v1/releases` accepts.
+#[derive(Debug, Default, Clone)]
+pub struct ReleaseRequest<'a> {
+    pub ring: &'a str,
+    /// Promote: copy the head selection of this ring.
+    pub from_ring: Option<&'a str>,
+    /// Roll back / pin: copy this exact release's selection.
+    pub from_release_id: Option<u64>,
+    pub add: &'a [String],
+    pub remove: &'a [String],
+    /// Scope `add` lookups and `remove` to one repository architecture.
+    pub remove_arch: Option<&'a str>,
+    pub note: Option<&'a str>,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct ReleaseCreated {
     pub release: Release,
@@ -65,12 +80,18 @@ pub struct History {
 pub struct IndexedManifest {
     #[serde(default = "default_source")]
     pub source: String,
+    #[serde(default = "default_arch")]
+    pub repo_arch: String,
     #[serde(flatten)]
     pub manifest: PackageManifest,
 }
 
 fn default_source() -> String {
     "packages".into()
+}
+
+fn default_arch() -> String {
+    "x86_64".into()
 }
 
 #[derive(Debug, Deserialize)]
@@ -90,6 +111,8 @@ pub struct PackageSummary {
     pub size_download: u64,
     #[serde(default = "default_source")]
     pub source: String,
+    #[serde(default = "default_arch")]
+    pub repo_arch: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -195,8 +218,8 @@ impl Api {
         })
     }
 
-    /// Subset of `shas` the index already knows.
-    pub fn known(&self, shas: &[String]) -> Result<Vec<String>, RepoError> {
+    /// Subset of `shas` the index already knows for `arch`.
+    pub fn known(&self, shas: &[String], arch: &str) -> Result<Vec<String>, RepoError> {
         #[derive(Deserialize)]
         struct Known {
             known: Vec<String>,
@@ -207,7 +230,7 @@ impl Api {
                 let resp = self
                     .http
                     .post(self.url("/packages/known"))
-                    .json(&serde_json::json!({ "sha256": chunk }))
+                    .json(&serde_json::json!({ "sha256": chunk, "arch": arch }))
                     .send()?;
                 Ok(Self::check(resp)?.json()?)
             })?;
@@ -216,11 +239,12 @@ impl Api {
         Ok(out)
     }
 
-    /// Uploads an archive into the pool under its filename; multipart when large.
+    /// Uploads an archive into the pool under `<arch>/<filename>`; multipart when large.
     pub fn upload_pool(
         &self,
         sha256: &str,
         filename: &str,
+        arch: &str,
         archive: &Path,
     ) -> Result<(), RepoError> {
         let len = std::fs::metadata(archive)?.len();
@@ -230,7 +254,7 @@ impl Api {
                 let resp = self
                     .http
                     .put(self.url(&format!("/pool/{sha256}")))
-                    .query(&[("filename", filename)])
+                    .query(&[("filename", filename), ("arch", arch)])
                     .bearer_auth(&self.token)
                     .header("content-length", len)
                     .body(reqwest::blocking::Body::sized(file, len))
@@ -243,7 +267,7 @@ impl Api {
             let resp = self
                 .http
                 .post(self.url(&format!("/pool/{sha256}/multipart")))
-                .query(&[("filename", filename)])
+                .query(&[("filename", filename), ("arch", arch)])
                 .bearer_auth(&self.token)
                 .send()?;
             Ok(Self::check(resp)?.json()?)
@@ -303,6 +327,7 @@ impl Api {
         &self,
         sha256: &str,
         filename: &str,
+        arch: &str,
         sig: &Path,
     ) -> Result<(), RepoError> {
         let bytes = std::fs::read(sig)?;
@@ -310,7 +335,7 @@ impl Api {
             let resp = self
                 .http
                 .put(self.url(&format!("/pool/{sha256}/sig")))
-                .query(&[("filename", filename)])
+                .query(&[("filename", filename), ("arch", arch)])
                 .bearer_auth(&self.token)
                 .body(bytes.clone())
                 .send()?;
@@ -322,11 +347,13 @@ impl Api {
         &self,
         manifest: &PackageManifest,
         source: &str,
+        arch: &str,
     ) -> Result<(), RepoError> {
         with_retry("index_manifest", || {
             let resp = self
                 .http
-                .post(self.url(&format!("/packages?source={source}")))
+                .post(self.url("/packages"))
+                .query(&[("source", source), ("arch", arch)])
                 .bearer_auth(&self.token)
                 .json(manifest)
                 .send()?;
@@ -334,22 +361,15 @@ impl Api {
         })
     }
 
-    pub fn create_release(
-        &self,
-        ring: &str,
-        from_ring: Option<&str>,
-        from_release_id: Option<u64>,
-        add: &[String],
-        remove: &[String],
-        note: Option<&str>,
-    ) -> Result<ReleaseCreated, RepoError> {
+    pub fn create_release(&self, req: &ReleaseRequest<'_>) -> Result<ReleaseCreated, RepoError> {
         let body = serde_json::json!({
-            "ring": ring,
-            "from_ring": from_ring,
-            "from_release_id": from_release_id,
-            "add": add,
-            "remove": remove,
-            "note": note,
+            "ring": req.ring,
+            "from_ring": req.from_ring,
+            "from_release_id": req.from_release_id,
+            "add": req.add,
+            "remove": req.remove,
+            "remove_arch": req.remove_arch,
+            "note": req.note,
         });
         with_retry("create_release", || {
             let resp = self

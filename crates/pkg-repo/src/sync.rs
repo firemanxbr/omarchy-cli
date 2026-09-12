@@ -17,7 +17,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Instant;
 
-use crate::client::Api;
+use crate::client::{Api, ReleaseRequest};
 use crate::syncdb::{parse_sync_db, UpstreamPackage};
 use crate::RepoError;
 
@@ -29,6 +29,13 @@ type Failed = (String, String);
 pub struct SyncOptions {
     pub source: String,
     pub upstream: String,
+    /// Directory holding the database and the packages; overrides the Arch
+    /// layout `<upstream>/<source>/os/<arch>` (Arch Linux ARM uses
+    /// `<upstream>/<arch>/<source>`, the OPR `<upstream>/<ring>/<arch>`).
+    pub base_url: Option<String>,
+    /// Database file name without `.db`; defaults to `source`.
+    pub db_name: Option<String>,
+    /// Architecture of the upstream repository; also the pool directory.
     pub arch: String,
     pub ring: String,
     /// Stop after this many new packages (0 = no limit); the rest wait for the
@@ -53,17 +60,21 @@ pub struct SyncReport {
 
 pub fn run(api: &Api, opts: &SyncOptions) -> Result<SyncReport, RepoError> {
     let started = Instant::now();
-    let base = format!(
-        "{}/{}/os/{}",
-        opts.upstream.trim_end_matches('/'),
-        opts.source,
-        opts.arch
-    );
+    let base = opts.base_url.clone().unwrap_or_else(|| {
+        format!(
+            "{}/{}/os/{}",
+            opts.upstream.trim_end_matches('/'),
+            opts.source,
+            opts.arch
+        )
+    });
+    let base = base.trim_end_matches('/').to_owned();
+    let db_name = opts.db_name.clone().unwrap_or_else(|| opts.source.clone());
     std::fs::create_dir_all(&opts.work_dir)?;
 
     // 1. upstream database
-    let db_path = opts.work_dir.join(format!("{}.db", opts.source));
-    api.download(&format!("{base}/{}.db", opts.source), &db_path)?;
+    let db_path = opts.work_dir.join(format!("{db_name}-{}.db", opts.arch));
+    api.download(&format!("{base}/{db_name}.db"), &db_path)?;
     let upstream = parse_sync_db(&std::fs::read(&db_path)?)?;
     let mut report = SyncReport {
         upstream_total: upstream.len(),
@@ -73,7 +84,7 @@ pub fn run(api: &Api, opts: &SyncOptions) -> Result<SyncReport, RepoError> {
 
     // 2. what the index already has
     let shas: Vec<String> = upstream.iter().map(|p| p.sha256.clone()).collect();
-    let known: HashSet<String> = api.known(&shas)?.into_iter().collect();
+    let known: HashSet<String> = api.known(&shas, &opts.arch)?.into_iter().collect();
     report.already_indexed = known.len();
     let mut missing: Vec<&UpstreamPackage> = upstream
         .iter()
@@ -118,7 +129,11 @@ pub fn run(api: &Api, opts: &SyncOptions) -> Result<SyncReport, RepoError> {
         Some(view) => view
             .packages
             .iter()
-            .filter(|p| p.source == opts.source && !upstream_names.contains(p.name.as_str()))
+            .filter(|p| {
+                p.source == opts.source
+                    && p.repo_arch == opts.arch
+                    && !upstream_names.contains(p.name.as_str())
+            })
             .map(|p| p.name.clone())
             .collect(),
         None => Vec::new(),
@@ -126,10 +141,17 @@ pub fn run(api: &Api, opts: &SyncOptions) -> Result<SyncReport, RepoError> {
     report.removed = remove.len();
 
     let note = format!(
-        "sync {}: {} new, {} removed, {} upstream",
-        opts.source, report.uploaded, report.removed, report.upstream_total
+        "sync {} {}: {} new, {} removed, {} upstream",
+        opts.source, opts.arch, report.uploaded, report.removed, report.upstream_total
     );
-    let created = api.create_release(&opts.ring, None, None, &add, &remove, Some(&note))?;
+    let created = api.create_release(&ReleaseRequest {
+        ring: &opts.ring,
+        add: &add,
+        remove: &remove,
+        remove_arch: Some(&opts.arch),
+        note: Some(&note),
+        ..ReleaseRequest::default()
+    })?;
     report.release = Some((created.release.id, created.release.seq));
 
     // 5. event
@@ -161,8 +183,9 @@ fn post_sync_event(
     };
     let summary = if report.failed.is_empty() {
         format!(
-            "{}: {} new packages ({}), {} removed → {}#{}",
+            "{} {}: {} new packages ({}), {} removed → {}#{}",
             opts.source,
+            opts.arch,
             report.uploaded,
             human(report.bytes_uploaded),
             report.removed,
@@ -171,8 +194,9 @@ fn post_sync_event(
         )
     } else {
         format!(
-            "{}: {} new, {} failed, {} removed → {}#{}",
+            "{} {}: {} new, {} failed, {} removed → {}#{}",
             opts.source,
+            opts.arch,
             report.uploaded,
             report.failed.len(),
             report.removed,
@@ -189,6 +213,7 @@ fn post_sync_event(
         "duration_ms": u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
         "payload": {
             "upstream": base,
+            "arch": opts.arch,
             "upstream_total": report.upstream_total,
             "already_indexed": report.already_indexed,
             "uploaded": report.uploaded,
@@ -223,6 +248,7 @@ fn import_all(
             let api = api.clone();
             let work_dir = opts.work_dir.join(format!("w{worker}"));
             let source = opts.source.clone();
+            let arch = opts.arch.clone();
             scope.spawn(move || {
                 let _ = std::fs::create_dir_all(&work_dir);
                 loop {
@@ -230,7 +256,7 @@ fn import_all(
                     let Some(pkg) = next else {
                         break;
                     };
-                    match import_one(&api, base, &source, pkg, &work_dir) {
+                    match import_one(&api, base, &source, &arch, pkg, &work_dir) {
                         Ok(()) => done
                             .lock()
                             .expect("done")
@@ -257,6 +283,7 @@ fn import_one(
     api: &Api,
     base: &str,
     source: &str,
+    arch: &str,
     pkg: &UpstreamPackage,
     work_dir: &std::path::Path,
 ) -> Result<(), RepoError> {
@@ -275,11 +302,11 @@ fn import_one(
             .download(&format!("{base}/{}.sig", pkg.filename), &sig)
             .is_ok();
         let manifest = pkg_extract::extract_manifest(&archive)?;
-        api.upload_pool(&pkg.sha256, &pkg.filename, &archive)?;
+        api.upload_pool(&pkg.sha256, &pkg.filename, arch, &archive)?;
         if has_sig {
-            api.upload_pool_signature(&pkg.sha256, &pkg.filename, &sig)?;
+            api.upload_pool_signature(&pkg.sha256, &pkg.filename, arch, &sig)?;
         }
-        api.index_manifest(&manifest, source)?;
+        api.index_manifest(&manifest, source, arch)?;
         tracing::info!(package = %pkg.filename, bytes = pkg.size_download, "imported");
         Ok(())
     })();

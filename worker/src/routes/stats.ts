@@ -11,12 +11,12 @@ export async function handleStats(env: Env): Promise<Response> {
       continue;
     }
     const sources = await env.DB.prepare(
-      `SELECT p.source, COUNT(*) AS packages, COALESCE(SUM(p.size_download), 0) AS bytes
+      `SELECT p.source, p.repo_arch AS arch, COUNT(*) AS packages, COALESCE(SUM(p.size_download), 0) AS bytes
          FROM release_packages rp JOIN packages p ON p.id = rp.package_id
-        WHERE rp.release_id = ? GROUP BY p.source ORDER BY p.source`,
+        WHERE rp.release_id = ? GROUP BY p.source, p.repo_arch ORDER BY p.repo_arch, p.source`,
     )
       .bind(head.id)
-      .all<{ source: string; packages: number; bytes: number }>();
+      .all<{ source: string; arch: string; packages: number; bytes: number }>();
     const artifacts = await env.DB.prepare(
       "SELECT repo, arch, kind, size, created_at FROM release_artifacts WHERE release_id = ? ORDER BY repo, kind",
     )
@@ -38,7 +38,7 @@ export async function handleStats(env: Env): Promise<Response> {
       WHERE id IN (SELECT package_id FROM release_packages)`,
   ).first<{ objects: number; bytes: number }>();
   const bySource = await env.DB.prepare(
-    "SELECT source, COUNT(*) AS objects, COALESCE(SUM(size_download), 0) AS bytes FROM packages GROUP BY source ORDER BY source",
+    "SELECT source, repo_arch AS arch, COUNT(*) AS objects, COALESCE(SUM(size_download), 0) AS bytes FROM packages GROUP BY source, repo_arch ORDER BY repo_arch, source",
   ).all();
 
   const releases = await env.DB.prepare(

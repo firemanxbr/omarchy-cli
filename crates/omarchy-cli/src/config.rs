@@ -46,12 +46,11 @@ impl Config {
         }
     }
 
-    /// Mirror URL for a package file in this ring.
+    /// Where pacman fetches a package file: beside the ring databases in the pool.
     pub fn package_url(&self, filename: &str) -> String {
         format!(
-            "{}/{}/os/{}/{}",
-            self.api.trim_end_matches('/'),
-            self.ring,
+            "{}/{}/{}",
+            self.pool.trim_end_matches('/'),
             self.arch,
             filename
         )

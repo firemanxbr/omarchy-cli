@@ -17,10 +17,23 @@ pub struct Release {
     pub created_at: String,
 }
 
+/// A manifest as the index returns it. The index adds provenance fields
+/// (`source`, `repo_arch`) that the strict manifest type does not know; they
+/// are absorbed here so the manifest itself stays exact.
+#[derive(Debug, Clone, Deserialize)]
+pub struct IndexedManifest {
+    #[serde(default, rename = "source")]
+    _source: Option<String>,
+    #[serde(default, rename = "repo_arch")]
+    _repo_arch: Option<String>,
+    #[serde(flatten)]
+    pub manifest: PackageManifest,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct ReleaseView {
     pub release: Release,
-    pub packages: Vec<PackageManifest>,
+    pub packages: Vec<IndexedManifest>,
 }
 
 /// One row of `?fields=summary`: what status / list / search need.
@@ -34,8 +47,6 @@ pub struct PackageSummary {
     pub size_download: u64,
     pub size_installed: u64,
     pub description: Option<String>,
-    #[serde(default)]
-    pub source: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -48,7 +59,7 @@ pub struct ReleaseSummaryView {
 #[derive(Debug, Deserialize)]
 pub struct Graph {
     pub release_id: u64,
-    pub packages: Vec<PackageManifest>,
+    pub packages: Vec<IndexedManifest>,
     pub missing_targets: Vec<String>,
     pub truncated: bool,
 }

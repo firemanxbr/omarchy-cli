@@ -118,7 +118,9 @@ fn missing_symbol_version_blocks_with_the_newest_available() {
 }
 
 #[test]
-fn missing_library_blocks() {
+fn missing_library_is_a_warning_not_a_blocker() {
+    // An absent library is an optional dependency of some binary (glibc's
+    // memusagestat → libgd); a hard one would be declared and pulled by pacman.
     let root = system_root();
     let plan = check(
         &[manifest(
@@ -130,8 +132,15 @@ fn missing_library_blocks() {
         &local_db(),
         &abi(root.path()),
     );
-    let blockers: Vec<_> = plan.blockers().map(|f| f.requirement.clone()).collect();
-    assert_eq!(blockers, ["libnope.so.1", "libnope.so.1(NOPE_1.0)"]);
+    assert!(plan.is_safe(), "{:?}", plan.findings);
+    let mut warnings: Vec<_> = plan
+        .findings
+        .iter()
+        .filter(|f| f.severity == Severity::Warning)
+        .map(|f| f.requirement.clone())
+        .collect();
+    warnings.sort();
+    assert_eq!(warnings, ["libnope.so.1", "libnope.so.1(NOPE_1.0)"]);
 }
 
 #[test]

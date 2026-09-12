@@ -113,6 +113,7 @@ pub fn run(cli: Cli) -> Result<i32> {
             let candidates: Vec<PackageManifest> = view
                 .packages
                 .into_iter()
+                .map(|p| p.manifest)
                 .filter(|m| {
                     local
                         .get(&m.name)
@@ -166,7 +167,12 @@ fn search(config: &Config, api: &Api, query: &str, json: bool) -> Result<i32> {
 
 fn info(config: &Config, api: &Api, package: &str, json: bool) -> Result<i32> {
     let view = api.release(&config.ring)?;
-    let Some(m) = view.packages.iter().find(|m| m.name == package) else {
+    let Some(m) = view
+        .packages
+        .iter()
+        .map(|p| &p.manifest)
+        .find(|m| m.name == package)
+    else {
         bail!("{package} is not in {}#{}", config.ring, view.release.seq);
     };
     if json {
@@ -295,8 +301,9 @@ fn plan_targets(config: &Config, api: &Api, targets: &[String]) -> Result<(Plan,
     let local = LocalDb::load(&config.root)
         .with_context(|| format!("reading {}", LocalDb::db_path(&config.root).display()))?;
     let abi = SystemAbi::new(&config.root);
+    let candidates: Vec<PackageManifest> = graph.packages.into_iter().map(|p| p.manifest).collect();
     Ok((
-        pkg_check::check(&graph.packages, &local, &abi),
+        pkg_check::check(&candidates, &local, &abi),
         graph.release_id,
     ))
 }

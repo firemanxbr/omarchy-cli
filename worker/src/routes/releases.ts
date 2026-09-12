@@ -1,5 +1,5 @@
 import { isRing, json, type Env, type Ring } from "../index";
-import { archDirsFor, artifactKey, SHORT } from "../r2";
+import { artifactKey, isRepoArch, SHORT } from "../r2";
 import { releaseManifests, releaseSummary, ringHead, type ManifestDetail, type ReleaseRow } from "../db";
 
 interface CreateRelease {
@@ -8,10 +8,11 @@ interface CreateRelease {
   from_ring?: string | null;
   /** Roll back / pin: start from this exact release's selection (any ring). */
   from_release_id?: number | null;
-  /** Package sha256s to add; a package replaces any same-name/arch entry. */
+  /** Package sha256s to add; a package replaces any same-name entry of the same repo arch. */
   add?: string[];
-  /** Package names to drop from the selection. */
+  /** Package names to drop from the selection (scoped by `remove_arch` when given). */
   remove?: string[];
+  remove_arch?: string | null;
   note?: string | null;
 }
 
@@ -39,16 +40,22 @@ export async function handleCreateRelease(request: Request, env: Env): Promise<R
   const base = source ?? parent;
 
   const add = body.add ?? [];
+  const removeArch = body.remove_arch ?? null;
+  if (removeArch !== null && !isRepoArch(removeArch)) return json({ error: "remove_arch must be x86_64 or aarch64" }, 400);
+  // Adds are looked up per repo arch when the caller scopes the request.
   const found = add.length
     ? (
-        await env.DB.prepare("SELECT id, sha256 FROM packages WHERE sha256 IN (SELECT value FROM json_each(?))")
-          .bind(JSON.stringify(add))
+        await env.DB.prepare(
+          `SELECT id, sha256 FROM packages WHERE sha256 IN (SELECT value FROM json_each(?))
+              AND (? IS NULL OR repo_arch = ?)`,
+        )
+          .bind(JSON.stringify(add), removeArch, removeArch)
           .all<{ id: number; sha256: string }>()
       ).results
     : [];
   const bySha = new Map(found.map((r) => [r.sha256, r.id]));
   const missing = add.filter((sha) => !bySha.has(sha));
-  if (missing.length) return json({ error: `packages not indexed: ${missing.join(", ")}` }, 404);
+  if (missing.length) return json({ error: `packages not indexed: ${missing.slice(0, 5).join(", ")}${missing.length > 5 ? "…" : ""}` }, 404);
   const added: number[] = add.map((sha) => bySha.get(sha)!);
 
   const seqRow = await env.DB.prepare("SELECT COALESCE(MAX(seq), 0) + 1 AS seq FROM releases WHERE ring = ?")
@@ -65,17 +72,18 @@ export async function handleCreateRelease(request: Request, env: Env): Promise<R
 
   const stmts: D1PreparedStatement[] = [];
   if (base) {
-    // Copy the base selection, minus names being removed or replaced by an add.
+    // Copy the base selection, minus names being removed (within remove_arch when
+    // given) or replaced by an add of the same name and repo arch.
     stmts.push(
       env.DB.prepare(
         `INSERT INTO release_packages (release_id, package_id)
          SELECT ?, rp.package_id FROM release_packages rp JOIN packages p ON p.id = rp.package_id
           WHERE rp.release_id = ?
-            AND p.name NOT IN (SELECT value FROM json_each(?))
+            AND NOT (p.name IN (SELECT value FROM json_each(?)) AND (? IS NULL OR p.repo_arch = ?))
             AND NOT EXISTS (
               SELECT 1 FROM packages q WHERE q.id IN (SELECT value FROM json_each(?))
-                 AND q.name = p.name AND q.arch = p.arch)`,
-      ).bind(id, base.id, JSON.stringify(body.remove ?? []), JSON.stringify(added)),
+                 AND q.name = p.name AND q.repo_arch = p.repo_arch)`,
+      ).bind(id, base.id, JSON.stringify(body.remove ?? []), removeArch, removeArch, JSON.stringify(added)),
     );
   }
   for (const pkgId of added) {
@@ -140,17 +148,15 @@ export async function handlePutArtifact(
   const repo = url.searchParams.get("repo") ?? "";
   const arch = url.searchParams.get("arch") ?? "x86_64";
   if (!/^[a-z0-9-]+$/.test(repo)) return json({ error: "repo is required (e.g. omarchy-core-stable)" }, 400);
+  if (!isRepoArch(arch)) return json({ error: "arch must be x86_64 or aarch64" }, 400);
   if (!request.body) return json({ error: "empty body" }, 400);
   const release = await env.DB.prepare("SELECT id FROM releases WHERE id = ?").bind(releaseId).first();
   if (!release) return json({ error: "release not found" }, 404);
 
   const bytes = await request.arrayBuffer();
-  const keys: string[] = [];
-  for (const dir of archDirsFor(arch)) {
-    const key = artifactKey(dir, repo, kind);
-    await env.PACKAGES.put(key, bytes, { httpMetadata: { contentType: "application/octet-stream", cacheControl: SHORT } });
-    keys.push(key);
-  }
+  const key = artifactKey(arch, repo, kind);
+  await env.PACKAGES.put(key, bytes, { httpMetadata: { contentType: "application/octet-stream", cacheControl: SHORT } });
+  const keys = [key];
   await env.DB.prepare(
     `INSERT INTO release_artifacts (release_id, repo, arch, kind, r2_key, size) VALUES (?, ?, ?, ?, ?, ?)
      ON CONFLICT(release_id, repo, arch, kind) DO UPDATE SET r2_key = excluded.r2_key, size = excluded.size,

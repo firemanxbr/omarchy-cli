@@ -153,14 +153,22 @@ fn classify(
         return match abi.defined_versions(&rule.name) {
             None => {
                 // Not on disk. The pacman database may still know a provider
-                // (e.g. a library installed under a different path).
+                // (e.g. a library installed under a different path). A library
+                // that is entirely absent is almost always an *optional*
+                // dependency of one binary in the package (glibc's memusagestat
+                // needs libgd): a hard dependency would be declared in
+                // `depends` and pulled in by pacman. So absence is a warning;
+                // the blocker case is a library that is present but too old.
                 if local
                     .satisfiers(&DependencyRule::unversioned(rule.name.clone()))
                     .is_empty()
                 {
                     finding(
-                        Severity::Blocker,
-                        format!("shared library {} is not installed", rule.name),
+                        Severity::Warning,
+                        format!(
+                            "shared library {} is not installed; pacman resolves it if declared, otherwise a binary in this package treats it as optional",
+                            rule.name
+                        ),
                     )
                 } else {
                     finding(Severity::Ok, "provided by an installed package".into())

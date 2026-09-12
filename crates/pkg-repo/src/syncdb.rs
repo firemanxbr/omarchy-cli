@@ -1,5 +1,6 @@
-//! Reads an upstream pacman sync database (`core.db`: gzip tar of
-//! `<name>-<version>/desc`) into the fields the sync needs.
+//! Reads an upstream pacman sync database (`core.db`: a gzip- or
+//! zstd-compressed tar of `<name>-<version>/desc`) into the fields the sync
+//! needs.
 
 use std::io::Read;
 
@@ -15,7 +16,12 @@ pub struct UpstreamPackage {
 }
 
 pub fn parse_sync_db(bytes: &[u8]) -> std::io::Result<Vec<UpstreamPackage>> {
-    let mut archive = tar::Archive::new(GzDecoder::new(bytes));
+    let reader: Box<dyn Read> = match bytes {
+        [0x28, 0xb5, 0x2f, 0xfd, ..] => Box::new(zstd::Decoder::new(bytes)?),
+        [0x1f, 0x8b, ..] => Box::new(GzDecoder::new(bytes)),
+        _ => Box::new(bytes),
+    };
+    let mut archive = tar::Archive::new(reader);
     let mut out = Vec::new();
     for entry in archive.entries()? {
         let mut entry = entry?;

@@ -878,6 +878,7 @@ dependencies = [
  "thiserror",
  "tracing",
  "tracing-subscriber",
+ "zstd",
 ]
 
 [[package]]

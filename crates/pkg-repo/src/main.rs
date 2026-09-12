@@ -5,7 +5,7 @@ use std::time::Instant;
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
 use pkg_manifest::{PackageManifest, RepoIndex};
-use pkg_repo::client::Api;
+use pkg_repo::client::{Api, ReleaseRequest};
 use pkg_repo::sync::{self, SyncOptions};
 use pkg_repo::{build_database, sign, Flavor};
 
@@ -50,6 +50,9 @@ enum Command {
         /// Provenance recorded in the index: core, extra, multilib or packages (OPR).
         #[arg(long, default_value = "packages")]
         source: String,
+        /// Repository architecture the archives belong to (pool directory).
+        #[arg(long, default_value = "x86_64")]
+        arch: String,
         #[arg(long)]
         note: Option<String>,
         /// `.pkg.tar.zst` files; a sibling `.sig` is uploaded when present.
@@ -69,6 +72,14 @@ enum Command {
             default_value = "https://mirror.omarchy.org"
         )]
         upstream: String,
+        /// Full URL of the directory holding the db and packages; overrides `--upstream`
+        /// (e.g. `http://os.archlinuxarm.org/aarch64/core`, `https://pkgs.omarchy.org/edge/x86_64`).
+        #[arg(long)]
+        base_url: Option<String>,
+        /// Database name without `.db` when it differs from the source (`omarchy` for OPR).
+        #[arg(long)]
+        db_name: Option<String>,
+        /// Architecture of the upstream repository (also the pool directory).
         #[arg(long, default_value = "x86_64")]
         arch: String,
         #[arg(long, default_value = "edge")]
@@ -181,13 +192,16 @@ fn main() -> Result<()> {
             remote,
             ring,
             source,
+            arch,
             note,
             archives,
-        } => publish(&remote, &ring, &source, note.as_deref(), &archives),
+        } => publish(&remote, &ring, &source, &arch, note.as_deref(), &archives),
         Command::Sync {
             remote,
             source,
             upstream,
+            base_url,
+            db_name,
             arch,
             ring,
             limit,
@@ -199,6 +213,8 @@ fn main() -> Result<()> {
             &SyncOptions {
                 source,
                 upstream,
+                base_url,
+                db_name,
                 arch,
                 ring,
                 limit,
@@ -319,6 +335,7 @@ fn publish(
     remote: &Remote,
     ring: &str,
     source: &str,
+    arch: &str,
     note: Option<&str>,
     archives: &[PathBuf],
 ) -> Result<()> {
@@ -340,17 +357,23 @@ fn publish(
                 "uploading {} {} ({} bytes)",
                 manifest.name, manifest.version, manifest.size_download
             );
-            api.upload_pool(&sha, &manifest.filename, archive)?;
+            api.upload_pool(&sha, &manifest.filename, arch, archive)?;
             let sig = PathBuf::from(format!("{}.sig", archive.display()));
             if sig.exists() {
-                api.upload_pool_signature(&sha, &manifest.filename, &sig)?;
+                api.upload_pool_signature(&sha, &manifest.filename, arch, &sig)?;
             }
-            api.index_manifest(&manifest, source)?;
+            api.index_manifest(&manifest, source, arch)?;
             bytes += manifest.size_download;
         }
         added.push(sha);
     }
-    let created = api.create_release(ring, None, None, &added, &[], note)?;
+    let created = api.create_release(&ReleaseRequest {
+        ring,
+        add: &added,
+        remove_arch: Some(arch),
+        note,
+        ..ReleaseRequest::default()
+    })?;
     println!(
         "release {}#{} (id {}) — {} packages, {} bytes in pool",
         created.release.ring,
@@ -371,7 +394,12 @@ fn publish(
 fn promote(remote: &Remote, from: &str, to: &str, note: Option<&str>) -> Result<()> {
     let api = Api::new(&remote.api, &remote.token)?;
     let started = Instant::now();
-    let created = api.create_release(to, Some(from), None, &[], &[], note)?;
+    let created = api.create_release(&ReleaseRequest {
+        ring: to,
+        from_ring: Some(from),
+        note,
+        ..ReleaseRequest::default()
+    })?;
     let took = started.elapsed();
     println!(
         "promoted {from} → {}#{} (id {}, from release {:?}) — {} packages, {} bytes, {:?}, zero bytes copied",
@@ -395,7 +423,12 @@ fn promote(remote: &Remote, from: &str, to: &str, note: Option<&str>) -> Result<
 fn rollback(remote: &Remote, ring: &str, to: u64, note: Option<&str>) -> Result<()> {
     let api = Api::new(&remote.api, &remote.token)?;
     let started = Instant::now();
-    let created = api.create_release(ring, None, Some(to), &[], &[], note)?;
+    let created = api.create_release(&ReleaseRequest {
+        ring,
+        from_release_id: Some(to),
+        note,
+        ..ReleaseRequest::default()
+    })?;
     let took = started.elapsed();
     println!(
         "{ring} now serves the selection of release {to} as {}#{} (id {}) — {} packages, {:?}, zero bytes copied",
@@ -443,7 +476,7 @@ fn render(remote: &Remote, ring: &str, arch: &str, key: Option<&str>) -> Result<
 
     let mut by_source: BTreeMap<String, Vec<PackageManifest>> = BTreeMap::new();
     for p in view.packages {
-        if p.manifest.arch == arch || p.manifest.arch == "any" {
+        if p.repo_arch == arch {
             by_source.entry(p.source).or_default().push(p.manifest);
         }
     }

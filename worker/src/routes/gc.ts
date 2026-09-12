@@ -1,5 +1,5 @@
 import { json, RINGS, type Env } from "../index";
-import { archDirsFor, packageKey, signatureKey } from "../r2";
+import { packageKey, signatureKey } from "../r2";
 
 /**
  * Retention: a package is protected while any of the last `keep` releases of
@@ -15,13 +15,13 @@ async function unreferenced(env: Env, keep: number) {
     for (const r of rows.results) protectedReleases.push(r.id);
   }
   const rows = await env.DB.prepare(
-    `SELECT id, sha256, name, version, arch, filename, size_download, source FROM packages
+    `SELECT id, sha256, name, version, arch, repo_arch, filename, size_download, source FROM packages
       WHERE id NOT IN (SELECT package_id FROM release_packages
                         WHERE release_id IN (SELECT value FROM json_each(?)))
       ORDER BY id`,
   )
     .bind(JSON.stringify(protectedReleases))
-    .all<{ id: number; sha256: string; name: string; version: string; arch: string; filename: string; size_download: number; source: string }>();
+    .all<{ id: number; sha256: string; name: string; version: string; arch: string; repo_arch: string; filename: string; size_download: number; source: string }>();
   return { protectedReleases, packages: rows.results };
 }
 
@@ -45,9 +45,7 @@ export async function handleGc(url: URL, env: Env): Promise<Response> {
   const victims = packages.slice(0, limit);
   let bytes = 0;
   for (const p of victims) {
-    const keys: string[] = [];
-    for (const dir of archDirsFor(p.arch)) keys.push(packageKey(dir, p.filename), signatureKey(dir, p.filename));
-    await env.PACKAGES.delete(keys);
+    await env.PACKAGES.delete([packageKey(p.repo_arch, p.filename), signatureKey(p.repo_arch, p.filename)]);
     await env.DB.batch([
       env.DB.prepare("DELETE FROM package_provides WHERE package_id = ?").bind(p.id),
       env.DB.prepare("DELETE FROM package_requires WHERE package_id = ?").bind(p.id),
