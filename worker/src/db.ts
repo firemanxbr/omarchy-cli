@@ -1,6 +1,7 @@
 /** Index queries shared by several routes. */
 
 import type { Env, Ring } from "./index";
+import { gunzipJson } from "./gzip";
 
 export interface ReleaseRow {
   id: number;
@@ -41,18 +42,36 @@ export async function releaseManifests(env: Env, releaseId: number, detail: Mani
     return rows.results;
   }
   const rows = await env.DB.prepare(
-    `SELECT p.manifest_json, p.source FROM release_packages rp
+    `SELECT p.id, p.manifest_json, p.source FROM release_packages rp
        JOIN packages p ON p.id = rp.package_id
       WHERE rp.release_id = ? ORDER BY p.name, p.arch`,
   )
     .bind(releaseId)
-    .all<{ manifest_json: string; source: string }>();
-  return rows.results.map((r) => {
+    .all<{ id: number; manifest_json: string; source: string }>();
+  const out = rows.results.map((r) => {
     const m = JSON.parse(r.manifest_json) as { files?: unknown; source?: string };
     m.source = r.source;
-    if (detail !== "files") delete m.files;
-    return m;
+    delete m.files;
+    return { id: r.id, m };
   });
+  if (detail === "files") {
+    // Attach the gzip-stored file lists in batches.
+    const byId = new Map(out.map((o) => [o.id, o.m]));
+    const ids = out.map((o) => o.id);
+    for (let i = 0; i < ids.length; i += 200) {
+      const chunk = ids.slice(i, i + 200);
+      const lists = await env.DB.prepare(
+        "SELECT package_id, gz FROM package_file_lists WHERE package_id IN (SELECT value FROM json_each(?))",
+      )
+        .bind(JSON.stringify(chunk))
+        .all<{ package_id: number; gz: ArrayBuffer | number[] }>();
+      for (const l of lists.results) {
+        const m = byId.get(l.package_id);
+        if (m) m.files = await gunzipJson<string[]>(l.gz);
+      }
+    }
+  }
+  return out.map((o) => o.m);
 }
 
 export async function releaseSummary(env: Env, releaseId: number): Promise<{ package_count: number; size_download: number }> {

@@ -1,5 +1,6 @@
 import { json, type Env } from "../index";
 import { archDirsFor, packageKey, signatureKey } from "../r2";
+import { gzipJson } from "../gzip";
 
 interface Rule {
   name: string;
@@ -66,6 +67,8 @@ export async function handlePostPackage(url: URL, request: Request, env: Env): P
   if (existing) return json({ id: existing.id, sha256: m.sha256, status: "already-indexed" });
 
   const hasSig = (await env.PACKAGES.head(signatureKey(dir, m.filename))) ? 1 : 0;
+  const files = m.files ?? [];
+  delete m.files;
   const inserted = await env.DB.prepare(
     `INSERT INTO packages (sha256, name, version, arch, filename, size_download, size_installed, has_signature, manifest_json, source, r2_key)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
@@ -73,6 +76,8 @@ export async function handlePostPackage(url: URL, request: Request, env: Env): P
     .bind(m.sha256, m.name, m.version, m.arch, m.filename, m.size_download, m.size_installed, hasSig, JSON.stringify(m), source, key)
     .first<{ id: number }>();
   const id = inserted!.id;
+  const gz = await gzipJson(files);
+  await env.DB.prepare("INSERT INTO package_file_lists (package_id, count, gz) VALUES (?, ?, ?)").bind(id, files.length, gz).run();
 
   const stmts: D1PreparedStatement[] = [];
   const prov = env.DB.prepare(

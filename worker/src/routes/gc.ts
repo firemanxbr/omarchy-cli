@@ -52,6 +52,7 @@ export async function handleGc(url: URL, env: Env): Promise<Response> {
       env.DB.prepare("DELETE FROM package_provides WHERE package_id = ?").bind(p.id),
       env.DB.prepare("DELETE FROM package_requires WHERE package_id = ?").bind(p.id),
       env.DB.prepare("DELETE FROM package_files WHERE package_id = ?").bind(p.id),
+      env.DB.prepare("DELETE FROM package_file_lists WHERE package_id = ?").bind(p.id),
       env.DB.prepare("DELETE FROM release_packages WHERE package_id = ?").bind(p.id),
       env.DB.prepare("DELETE FROM packages WHERE id = ?").bind(p.id),
     ]);

@@ -229,7 +229,8 @@ impl Api {
                 let file = std::fs::File::open(archive)?;
                 let resp = self
                     .http
-                    .put(self.url(&format!("/pool/{sha256}?filename={filename}")))
+                    .put(self.url(&format!("/pool/{sha256}")))
+                    .query(&[("filename", filename)])
                     .bearer_auth(&self.token)
                     .header("content-length", len)
                     .body(reqwest::blocking::Body::sized(file, len))
@@ -241,7 +242,8 @@ impl Api {
         let created: MultipartCreated = with_retry("multipart_create", || {
             let resp = self
                 .http
-                .post(self.url(&format!("/pool/{sha256}/multipart?filename={filename}")))
+                .post(self.url(&format!("/pool/{sha256}/multipart")))
+                .query(&[("filename", filename)])
                 .bearer_auth(&self.token)
                 .send()?;
             Ok(Self::check(resp)?.json()?)
@@ -270,9 +272,10 @@ impl Api {
                     let resp = self
                         .http
                         .put(self.url(&format!(
-                            "/pool/multipart/{}/part/{part_number}?key={}",
-                            upload.upload_id, upload.key
+                            "/pool/multipart/{}/part/{part_number}",
+                            upload.upload_id
                         )))
+                        .query(&[("key", upload.key.as_str())])
                         .bearer_auth(&self.token)
                         .body(chunk.clone())
                         .send()?;
@@ -285,10 +288,8 @@ impl Api {
             with_retry("multipart_complete", || {
                 let resp = self
                     .http
-                    .post(self.url(&format!(
-                        "/pool/multipart/{}/complete?key={}",
-                        upload.upload_id, upload.key
-                    )))
+                    .post(self.url(&format!("/pool/multipart/{}/complete", upload.upload_id)))
+                    .query(&[("key", upload.key.as_str())])
                     .bearer_auth(&self.token)
                     .json(&serde_json::json!({ "parts": parts }))
                     .send()?;
@@ -308,7 +309,8 @@ impl Api {
         with_retry("upload_sig", || {
             let resp = self
                 .http
-                .put(self.url(&format!("/pool/{sha256}/sig?filename={filename}")))
+                .put(self.url(&format!("/pool/{sha256}/sig")))
+                .query(&[("filename", filename)])
                 .bearer_auth(&self.token)
                 .body(bytes.clone())
                 .send()?;
@@ -405,9 +407,8 @@ impl Api {
         with_retry("upload_artifact", || {
             let resp = self
                 .http
-                .put(self.url(&format!(
-                    "/releases/{release_id}/artifacts/{kind}?repo={repo}&arch={arch}"
-                )))
+                .put(self.url(&format!("/releases/{release_id}/artifacts/{kind}")))
+                .query(&[("repo", repo), ("arch", arch)])
                 .bearer_auth(&self.token)
                 .body(bytes.to_vec())
                 .send()?;
