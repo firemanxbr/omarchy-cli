@@ -4,7 +4,8 @@ name: Promote
 # both architectures → gate (latest evidence green, no failed health inside the
 # soak window, something new to promote) → index write (zero bytes copied) →
 # render → health of the target ring → automatic rollback if that fails.
-# Daily: edge → rc at 06:00 UTC, rc → stable at 09:00 UTC after a 3-day soak.
+# Daily: edge → rc at 06:00 UTC, rc → stable at 09:00 UTC after a one-day
+# soak — edge is upstream in real time, rc a day behind, stable a day behind rc.
 # Set the repository variable STABLE_ENVIRONMENT=stable to require a human
 # approval before stable moves (the `stable` environment has a reviewer).
 on:
@@ -23,7 +24,7 @@ on:
         description: "Release note"
         default: ""
       soak_days:
-        description: "Days without a failed health check of the source ring (blank: 0 into rc, 3 into stable)"
+        description: "Days the source ring's content must have been there without a failed health check (blank: 0 into rc, 1 into stable)"
         default: ""
       force:
         description: "Type 'yes' to promote even if the gate blocks"
@@ -66,7 +67,7 @@ jobs:
           else
             from="$IN_FROM"; to="$IN_TO"; note="$IN_NOTE"; soak="$IN_SOAK"; force="$IN_FORCE"
           fi
-          [[ -z "$soak" ]] && { [[ "$to" == "stable" ]] && soak=3 || soak=0; }
+          [[ -z "$soak" ]] && { [[ "$to" == "stable" ]] && soak=1 || soak=0; }
           echo "from=$from to=$to soak=$soak force=$force"
           { echo "from=$from"; echo "to=$to"; echo "note=$note"; echo "soak=$soak"; echo "force=$force"; } >> "$GITHUB_OUTPUT"
 

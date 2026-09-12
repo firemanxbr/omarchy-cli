@@ -6,7 +6,10 @@
 //! safety check of the upgrades the ring would apply to a reference system).
 //! For every architecture the latest health of `from` must be recent and not
 //! an error, no health of `from` inside the soak window may have failed, and
-//! a recent ABI check must not have found blockers. A ring with nothing
+//! a recent ABI check must not have found blockers. The soak also means age:
+//! the last promotion into `from` must be at least `soak_days` old, so what
+//! reaches `stable` has been served by `rc` that long (syncs of the OPR
+//! channel into the ring do not reset the clock). A ring with nothing
 //! rendered for an architecture (`warn`) is not evidence against it. When the
 //! head of `to` already came from the head of `from`, there is nothing to
 //! promote.
@@ -64,19 +67,26 @@ pub struct GateReport {
 }
 
 /// Pure decision: `events` are `health` and `abi` events (any ring), `now`
-/// unix seconds.
+/// unix seconds, `from_promoted_at` when the content of `from` last arrived
+/// there by promotion (unix seconds; `None` when `from` was never promoted
+/// into, e.g. `edge`).
 #[must_use]
 pub fn evaluate(
     events: &[Event],
     now: i64,
     from_head: Option<u64>,
     to_source: Option<u64>,
+    from_promoted_at: Option<i64>,
     opts: &GateOptions<'_>,
 ) -> GateReport {
     let mut reasons = Vec::new();
     let mut evidence = Vec::new();
     let window = i64::from(opts.soak_days) * 86_400;
     let max_age = i64::from(opts.max_age_hours) * 3_600;
+
+    if let Some(reason) = soak_age_reason(now, from_promoted_at, opts) {
+        reasons.push(reason);
+    }
 
     for arch in opts.arches {
         let mut of_arch: Vec<&Event> = events
@@ -168,6 +178,27 @@ pub fn evaluate(
     GateReport { verdict, evidence }
 }
 
+/// Soak = age: what is in `from` must have been there for the whole window.
+fn soak_age_reason(
+    now: i64,
+    from_promoted_at: Option<i64>,
+    opts: &GateOptions<'_>,
+) -> Option<String> {
+    let window = i64::from(opts.soak_days) * 86_400;
+    let at = from_promoted_at?;
+    let age = now - at;
+    if window == 0 || age >= window {
+        return None;
+    }
+    #[allow(clippy::cast_precision_loss)] // hours, display only
+    Some(format!(
+        "{}'s content is {:.1} h old; the soak needs {} day(s)",
+        opts.from,
+        age as f64 / 3600.0,
+        opts.soak_days
+    ))
+}
+
 /// Fetches the evidence, decides, records a `gate` event and prints the report.
 pub fn run(api: &Api, opts: &GateOptions<'_>) -> Result<GateReport, RepoError> {
     let mut events = api.events("health", 200)?;
@@ -179,8 +210,10 @@ pub fn run(api: &Api, opts: &GateOptions<'_>) -> Result<GateReport, RepoError> {
         .find(|r| r.is_head != 0)
         .map(|r| r.id);
     let to_source = last_promotion_source(&api.history(opts.to)?.releases);
+    let from_history = api.history(opts.from)?.releases;
+    let from_promoted_at = last_promotion(&from_history).and_then(|r| parse_iso8601(&r.created_at));
     let now = now_unix();
-    let report = evaluate(&events, now, from_head, to_source, opts);
+    let report = evaluate(&events, now, from_head, to_source, from_promoted_at, opts);
 
     let (status, summary) = match &report.verdict {
         Verdict::Promote => (
@@ -239,18 +272,23 @@ pub fn run(api: &Api, opts: &GateOptions<'_>) -> Result<GateReport, RepoError> {
     Ok(report)
 }
 
-/// The release the last promotion into a ring copied from: walk from the
-/// head through releases without a `source_id` (syncs of the OPR channel into
-/// the ring, rollbacks re-pin with one) until one has it.
-fn last_promotion_source(history: &[crate::client::HistoryEntry]) -> Option<u64> {
+/// The last promotion into a ring: walk from the head through releases
+/// without a `source_id` (syncs of the OPR channel into the ring) until one
+/// has it (promotions and rollbacks re-pin with one).
+fn last_promotion(history: &[crate::client::HistoryEntry]) -> Option<&crate::client::HistoryEntry> {
     let mut cur = history.iter().find(|r| r.is_head != 0);
     while let Some(r) = cur {
-        if let Some(src) = r.source_id {
-            return Some(src);
+        if r.source_id.is_some() {
+            return Some(r);
         }
         cur = r.parent_id.and_then(|p| history.iter().find(|x| x.id == p));
     }
     None
+}
+
+/// The release the last promotion into a ring copied from.
+fn last_promotion_source(history: &[crate::client::HistoryEntry]) -> Option<u64> {
+    last_promotion(history).and_then(|r| r.source_id)
 }
 
 #[allow(clippy::cast_possible_wrap)] // fits until the year 292 billion
@@ -346,7 +384,7 @@ mod tests {
             ev(2, "rc", "aarch64", "ok", "2026-09-12T06:01:00Z"),
             ev(3, "edge", "x86_64", "error", "2026-09-12T06:02:00Z"), // other ring, ignored
         ];
-        let r = evaluate(&events, NOW, Some(10), Some(7), &opts(&arches, 3));
+        let r = evaluate(&events, NOW, Some(10), Some(7), None, &opts(&arches, 3));
         assert_eq!(r.verdict, Verdict::Promote);
     }
 
@@ -358,7 +396,7 @@ mod tests {
             ev(2, "rc", "aarch64", "warn", "2026-09-12T06:01:00Z"),
         ];
         assert_eq!(
-            evaluate(&events, NOW, Some(10), None, &opts(&arches, 3)).verdict,
+            evaluate(&events, NOW, Some(10), None, None, &opts(&arches, 3)).verdict,
             Verdict::Promote
         );
     }
@@ -371,7 +409,7 @@ mod tests {
             ev(2, "rc", "aarch64", "error", "2026-09-12T06:01:00Z"),
         ];
         let Verdict::Block(reasons) =
-            evaluate(&failed, NOW, Some(10), None, &opts(&arches, 3)).verdict
+            evaluate(&failed, NOW, Some(10), None, None, &opts(&arches, 3)).verdict
         else {
             panic!("expected block")
         };
@@ -384,7 +422,7 @@ mod tests {
             ev(2, "rc", "aarch64", "ok", "2026-09-12T06:01:00Z"),
         ];
         let Verdict::Block(reasons) =
-            evaluate(&stale, NOW, Some(10), None, &opts(&arches, 3)).verdict
+            evaluate(&stale, NOW, Some(10), None, None, &opts(&arches, 3)).verdict
         else {
             panic!("expected block")
         };
@@ -392,7 +430,7 @@ mod tests {
 
         let missing = vec![ev(1, "rc", "x86_64", "ok", "2026-09-12T06:00:00Z")];
         assert!(matches!(
-            evaluate(&missing, NOW, Some(10), None, &opts(&arches, 3)).verdict,
+            evaluate(&missing, NOW, Some(10), None, None, &opts(&arches, 3)).verdict,
             Verdict::Block(_)
         ));
     }
@@ -405,10 +443,10 @@ mod tests {
             ev(2, "rc", "x86_64", "error", "2026-09-11T06:00:00Z"), // 1 day ago
             ev(1, "rc", "x86_64", "error", "2026-09-01T06:00:00Z"), // 11 days ago
         ];
-        let r = evaluate(&events, NOW, Some(10), None, &opts(&arches, 3));
+        let r = evaluate(&events, NOW, Some(10), None, None, &opts(&arches, 3));
         assert_eq!(r.evidence[0].errors_in_window, 1);
         assert!(matches!(r.verdict, Verdict::Block(_)));
-        let r = evaluate(&events, NOW, Some(10), None, &opts(&arches, 0));
+        let r = evaluate(&events, NOW, Some(10), None, None, &opts(&arches, 0));
         assert_eq!(
             r.evidence[0].errors_in_window, 0,
             "a zero-day window only sees the latest"
@@ -423,16 +461,56 @@ mod tests {
             ev(1, "rc", "x86_64", "ok", "2026-09-12T06:00:00Z"),
             kind_ev("abi", 2, "rc", "x86_64", "error", "2026-09-12T06:05:00Z"),
         ];
-        let r = evaluate(&events, NOW, Some(10), None, &opts(&arches, 0));
+        let r = evaluate(&events, NOW, Some(10), None, None, &opts(&arches, 0));
         assert!(
             matches!(&r.verdict, Verdict::Block(reasons) if reasons[0].contains("ABI check of rc failed"))
         );
         assert_eq!(r.evidence[0].abi_status.as_deref(), Some("error"));
 
         events[1].created_at = "2026-09-01T06:05:00Z".into(); // stale: not evidence
-        let r = evaluate(&events, NOW, Some(10), None, &opts(&arches, 0));
+        let r = evaluate(&events, NOW, Some(10), None, None, &opts(&arches, 0));
         assert_eq!(r.verdict, Verdict::Promote);
         assert_eq!(r.evidence[0].abi_status, None);
+    }
+
+    #[test]
+    fn soak_requires_the_source_content_to_be_old_enough() {
+        let arches = vec!["x86_64".to_owned()];
+        let events = vec![ev(1, "rc", "x86_64", "ok", "2026-09-12T06:00:00Z")];
+        // promoted into rc one hour ago: too fresh for a 3-day soak
+        let r = evaluate(
+            &events,
+            NOW,
+            Some(10),
+            None,
+            Some(NOW - 3600),
+            &opts(&arches, 3),
+        );
+        assert!(
+            matches!(&r.verdict, Verdict::Block(reasons) if reasons[0].contains("soak needs 3 day")),
+            "{:?}",
+            r.verdict
+        );
+        // promoted four days ago: fine
+        let r = evaluate(
+            &events,
+            NOW,
+            Some(10),
+            None,
+            Some(NOW - 4 * 86_400),
+            &opts(&arches, 3),
+        );
+        assert_eq!(r.verdict, Verdict::Promote);
+        // no soak requested (into rc): age is irrelevant
+        let r = evaluate(
+            &events,
+            NOW,
+            Some(10),
+            None,
+            Some(NOW - 60),
+            &opts(&arches, 0),
+        );
+        assert_eq!(r.verdict, Verdict::Promote);
     }
 
     #[test]
@@ -464,10 +542,10 @@ mod tests {
     fn skips_when_target_already_serves_the_source_head() {
         let arches = vec!["x86_64".to_owned()];
         let events = vec![ev(1, "rc", "x86_64", "ok", "2026-09-12T06:00:00Z")];
-        let r = evaluate(&events, NOW, Some(10), Some(10), &opts(&arches, 0));
+        let r = evaluate(&events, NOW, Some(10), Some(10), None, &opts(&arches, 0));
         assert!(matches!(r.verdict, Verdict::Skip(_)));
         assert_eq!(r.verdict.exit_code(), 3);
-        let r = evaluate(&events, NOW, None, None, &opts(&arches, 0));
+        let r = evaluate(&events, NOW, None, None, None, &opts(&arches, 0));
         assert!(matches!(r.verdict, Verdict::Block(_)));
     }
 }
