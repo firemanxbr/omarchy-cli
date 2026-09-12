@@ -11,7 +11,7 @@ workflows and the publisher.
 | Index API | https://pkgs.firemanxbr.org/api/v1/stats |
 | Pool (static, what pacman reads) | https://pool.firemanxbr.org/x86_64/ · `/aarch64/` |
 | Database signing key | `docs/omarchy-staging.pub.asc` · https://pool.firemanxbr.org/omarchy-staging.pub.asc (expires 2027-09-12) |
-| Workflows | Sync (hourly) · Promote (edge→rc daily, rc→stable Mondays, manual) · Health (daily, both arches) · GC (Sundays) · Release (every merge into `main`) |
+| Workflows | Sync (hourly) · Promote (edge→rc 06:00 UTC, rc→stable 09:00 UTC, evidence-gated, auto-rollback) · Health (daily, both arches) · GC (Sundays) · Release (every merge into `main`) |
 | Running version | https://pkgs.firemanxbr.org/api/v1/version · the chip in the dashboard header |
 
 ## Trust model
@@ -39,14 +39,32 @@ workflows and the publisher.
 # manual runs (repository variables OMARCHY_API/OMARCHY_POOL and secrets are set)
 gh workflow run sync.yml -f sources="core-x86_64 packages-x86_64" -f limit=0
 gh workflow run promote.yml -f from=edge -f to=rc -f note="…"
-gh workflow run promote.yml -f from=rc -f to=stable -f note="…"   # waits for approval
+gh workflow run promote.yml -f from=rc -f to=stable -f note="…"   # 3-day soak of rc by default
+gh workflow run promote.yml -f from=rc -f to=stable -f soak_days=0 -f force=yes   # skip the gate (emergency)
 gh workflow run health.yml
 gh workflow run gc.yml -f keep=3
 ```
 
-Approve a stable promotion: GitHub → Actions → the waiting Promote run → *Review
-deployments* → approve. The run then promotes, renders both architectures and
-health-checks stable.
+Promotions are gated by evidence (see *Promotion by evidence* in
+[ARCHITECTURE.md](ARCHITECTURE.md)): the run first records fresh `health` and
+`abi` events for the source ring on both architectures, then `pkg-repo gate`
+decides — promote, nothing to promote, or blocked with the reasons in a `gate`
+event on the dashboard. After a promotion the target ring is health-checked on
+both architectures and rolled back automatically if that fails (`rollback` event
+naming the failed and the restored release).
+
+To require a human approval before stable moves, set the repository variable
+`STABLE_ENVIRONMENT=stable` (`gh variable set STABLE_ENVIRONMENT -b stable`); the
+Promote job then waits in the `stable` environment: GitHub → Actions → the
+waiting run → *Review deployments* → approve. Unset the variable to go back to
+fully automatic.
+
+```bash
+# the same decisions by hand
+pkg-repo gate --from rc --to stable --soak-days 3 --dry-run   # exit 0 promote, 3 nothing new, 1 blocked
+pkg-repo head --ring stable                                    # current release id (rollback target)
+tests/abi-gate.sh rc x86_64                                    # ABI check of rc's upgrades, exit 2 on blockers
+```
 
 Locally, with `OMARCHY_API`, `OMARCHY_PUBLISH_TOKEN` (and the GPG key) set:
 

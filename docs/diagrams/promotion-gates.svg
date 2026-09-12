@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 392" width="1240" height="392" font-family="-apple-system, 'Segoe UI', Inter, Helvetica, Arial, sans-serif">
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#8A8A8A"/></marker></defs>
+<rect width="1240" height="392" fill="white"/>
+<rect x="40" y="50" width="212" height="88" rx="12" fill="#EBEBE6" stroke="#9A9A94" stroke-width="1.3"/>
+<text x="146.0" y="83.0" text-anchor="middle" font-size="17" font-weight="600" fill="#333333">Evidence</text>
+<text x="146.0" y="103.0" text-anchor="middle" font-size="12.5" fill="#555555">health + ABI of the source ring</text>
+<text x="146.0" y="120.0" text-anchor="middle" font-size="12.5" fill="#555555">x86_64 and aarch64</text>
+<rect x="280" y="50" width="212" height="88" rx="12" fill="#ECEBFE" stroke="#6B5BD6" stroke-width="1.3"/>
+<text x="386.0" y="77.0" text-anchor="middle" font-size="17" font-weight="600" fill="#3F2FA0">Gate</text>
+<text x="386.0" y="97.0" text-anchor="middle" font-size="12" fill="#5A4BC4">latest evidence green</text>
+<text x="386.0" y="114.0" text-anchor="middle" font-size="12" fill="#5A4BC4">no failed health in the soak window</text>
+<text x="386.0" y="131.0" text-anchor="middle" font-size="12" fill="#5A4BC4">something new to promote</text>
+<rect x="520" y="50" width="212" height="88" rx="12" fill="#ECEBFE" stroke="#6B5BD6" stroke-width="1.3"/>
+<text x="626.0" y="83.0" text-anchor="middle" font-size="17" font-weight="600" fill="#3F2FA0">Promote</text>
+<text x="626.0" y="103.0" text-anchor="middle" font-size="12.5" fill="#5A4BC4">index write, zero bytes copied</text>
+<text x="626.0" y="120.0" text-anchor="middle" font-size="12.5" fill="#5A4BC4">previous head remembered</text>
+<rect x="760" y="50" width="212" height="88" rx="12" fill="#ECEBFE" stroke="#6B5BD6" stroke-width="1.3"/>
+<text x="866.0" y="83.0" text-anchor="middle" font-size="17" font-weight="600" fill="#3F2FA0">Render + sign</text>
+<text x="866.0" y="103.0" text-anchor="middle" font-size="12.5" fill="#5A4BC4">omarchy-&lt;source&gt;-&lt;ring&gt;.db / .files</text>
+<text x="866.0" y="120.0" text-anchor="middle" font-size="12.5" fill="#5A4BC4">per architecture</text>
+<rect x="1000" y="50" width="212" height="88" rx="12" fill="#EBEBE6" stroke="#9A9A94" stroke-width="1.3"/>
+<text x="1106.0" y="83.0" text-anchor="middle" font-size="17" font-weight="600" fill="#333333">Health of the target</text>
+<text x="1106.0" y="103.0" text-anchor="middle" font-size="12.5" fill="#555555">real pacman</text>
+<text x="1106.0" y="120.0" text-anchor="middle" font-size="12.5" fill="#555555">x86_64 and aarch64</text>
+<path d="M 252 94.0 L 280 94.0" fill="none" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+<path d="M 492 94.0 L 520 94.0" fill="none" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+<path d="M 732 94.0 L 760 94.0" fill="none" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+<path d="M 972 94.0 L 1000 94.0" fill="none" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+<rect x="1012" y="250" width="200" height="84" rx="12" fill="#E3F2DA" stroke="#6EA84F" stroke-width="1.3"/>
+<text x="1112.0" y="281.0" text-anchor="middle" font-size="17" font-weight="600" fill="#2E6B1E">Confirmed</text>
+<text x="1112.0" y="301.0" text-anchor="middle" font-size="12.5" fill="#3F7F2C">promote event</text>
+<text x="1112.0" y="318.0" text-anchor="middle" font-size="12.5" fill="#3F7F2C">the ring keeps the release</text>
+<rect x="716.0" y="250" width="300" height="84" rx="12" fill="#FBF1DC" stroke="#D9A441" stroke-width="1.3"/>
+<text x="866.0" y="281.0" text-anchor="middle" font-size="17" font-weight="600" fill="#7A5A12">Automatic rollback</text>
+<text x="866.0" y="301.0" text-anchor="middle" font-size="12.5" fill="#9A7420">index write back to the previous release</text>
+<text x="866.0" y="318.0" text-anchor="middle" font-size="12.5" fill="#9A7420">re-render · rollback event</text>
+<path d="M 1156.0 138 L 1156.0 250" fill="none" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+<text x="1174.0" y="198" text-anchor="middle" font-size="12" fill="#666">ok</text>
+<path d="M 1040 138 L 1040 220 L 866.0 220 L 866.0 250" fill="none" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+<text x="966.0" y="212" text-anchor="middle" font-size="12" fill="#666">health failed</text>
+<rect x="170" y="250" width="190" height="84" rx="12" fill="#EBEBE6" stroke="#9A9A94" stroke-width="1.3"/>
+<text x="265.0" y="281.0" text-anchor="middle" font-size="15" font-weight="600" fill="#333333">Nothing to promote</text>
+<text x="265.0" y="301.0" text-anchor="middle" font-size="12" fill="#555555">target already serves</text>
+<text x="265.0" y="318.0" text-anchor="middle" font-size="12" fill="#555555">the source head</text>
+<rect x="380" y="250" width="190" height="84" rx="12" fill="#EBEBE6" stroke="#9A9A94" stroke-width="1.3"/>
+<text x="475.0" y="281.0" text-anchor="middle" font-size="15" font-weight="600" fill="#333333">Blocked</text>
+<text x="475.0" y="301.0" text-anchor="middle" font-size="12" fill="#555555">reasons in the gate event</text>
+<text x="475.0" y="318.0" text-anchor="middle" font-size="12" fill="#555555">force=yes overrides</text>
+<path d="M 310 138 L 310 250" fill="none" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+<text x="290" y="190" text-anchor="middle" font-size="12" fill="#666">exit 3</text>
+<path d="M 462 138 L 462 250" fill="none" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
+<text x="484" y="190" text-anchor="middle" font-size="12" fill="#666">exit 1</text>
+<text x="620.0" y="378" text-anchor="middle" font-size="12" fill="#777">promote.yml — edge → rc daily at 06:00 UTC, rc → stable daily at 09:00 UTC after a 3-day soak · STABLE_ENVIRONMENT=stable adds a human approval before stable moves</text>
+</svg>

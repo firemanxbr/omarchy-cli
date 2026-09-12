@@ -186,7 +186,33 @@ Linux ARM image on an ARM runner). Reads the ring's rendered repos from
 `SigLevel = Required DatabaseRequired`, runs `pacman -Sy`, lists every repo and
 downloads the first package with signature verification inside an Arch container,
 then posts a `health` event (ok / warn when nothing is rendered / error). The
-`Health` workflow runs it daily for all rings; `Promote` runs it for the target ring.
+`Health` workflow runs it daily for all rings; `Promote` runs it for the source
+ring before the gate and for the target ring after the promotion.
+
+## ABI gate
+
+```bash
+OMARCHY_API=… OMARCHY_POOL=… OMARCHY_PUBLISH_TOKEN=… tests/abi-gate.sh rc x86_64
+```
+
+Exports the pacman database and shared libraries of the official base image
+(`archlinux:base`, `menci/archlinuxarm:base` for aarch64), asks
+`omarchy-cli status --json` which installed packages the ring would upgrade, and
+runs `omarchy-cli check` on them in batches of 40 (each batch resolves its
+dependency closure through `/api/v1/graph?arch=`). Posts an `abi` event with the
+counts and the first blockers; exits 2 on any blocker, 1 if a batch could not be
+checked. Runs in a few seconds; `Promote` runs it for both architectures.
+
+## Promotion gate
+
+`pkg-repo gate --from <ring> --to <ring> [--soak-days N] [--dry-run]` reads the
+`health` and `abi` events and decides (exit 0 promote, 3 nothing to promote, 1
+blocked, reasons printed and recorded as a `gate` event unless `--dry-run`). The
+decision is a pure function with unit tests in `crates/pkg-repo/src/gate.rs`:
+fresh green evidence promotes; a failed latest health, a failure inside the soak
+window, stale or missing evidence, or recent ABI blockers block; `warn` (nothing
+rendered for an architecture) is ignored; a target that already serves the
+source's head is a skip. `cargo test -p pkg-repo gate` runs them.
 
 ## Cloudflare (staging)
 

@@ -1,11 +1,16 @@
 name: Promote
 
-# Moves a ring's selection forward (index write, zero bytes copied), renders the
-# target ring's databases, then runs the health check against it.
+# Evidence-driven promotion. Fresh health and ABI checks of the source ring on
+# both architectures → gate (latest evidence green, no failed health inside the
+# soak window, something new to promote) → index write (zero bytes copied) →
+# render → health of the target ring → automatic rollback if that fails.
+# Daily: edge → rc at 06:00 UTC, rc → stable at 09:00 UTC after a 3-day soak.
+# Set the repository variable STABLE_ENVIRONMENT=stable to require a human
+# approval before stable moves (the `stable` environment has a reviewer).
 on:
   schedule:
-    - cron: "0 6 * * *"      # edge → rc, daily
-    - cron: "0 7 * * 1"      # rc → stable, Mondays
+    - cron: "0 6 * * *"
+    - cron: "0 9 * * *"
   workflow_dispatch:
     inputs:
       from:
@@ -16,6 +21,12 @@ on:
         default: "rc"
       note:
         description: "Release note"
+        default: ""
+      soak_days:
+        description: "Days without a failed health check of the source ring (blank: 0 into rc, 3 into stable)"
+        default: ""
+      force:
+        description: "Type 'yes' to promote even if the gate blocks"
         default: ""
 
 concurrency:
@@ -29,11 +40,101 @@ env:
   OMARCHY_PUBLISH_TOKEN: ${{ secrets.OMARCHY_PUBLISH_TOKEN }}
 
 jobs:
-  promote:
+  plan:
+    name: Plan
     runs-on: ubuntu-latest
-    # Promotions into stable wait for a human approval (GitHub environment
-    # `stable`, required reviewer); edge → rc is automatic.
-    environment: ${{ (github.event.inputs.to == 'stable' || github.event.schedule == '0 7 * * 1') && 'stable' || 'automatic' }}
+    outputs:
+      from: ${{ steps.plan.outputs.from }}
+      to: ${{ steps.plan.outputs.to }}
+      note: ${{ steps.plan.outputs.note }}
+      soak: ${{ steps.plan.outputs.soak }}
+      force: ${{ steps.plan.outputs.force }}
+    steps:
+      - id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          CRON: ${{ github.event.schedule }}
+          IN_FROM: ${{ github.event.inputs.from }}
+          IN_TO: ${{ github.event.inputs.to }}
+          IN_NOTE: ${{ github.event.inputs.note }}
+          IN_SOAK: ${{ github.event.inputs.soak_days }}
+          IN_FORCE: ${{ github.event.inputs.force }}
+        run: |
+          if [[ "$EVENT" == "schedule" ]]; then
+            if [[ "$CRON" == "0 9 * * *" ]]; then from=rc; to=stable; note="daily stable"; else from=edge; to=rc; note="daily rc"; fi
+            force=""; soak=""
+          else
+            from="$IN_FROM"; to="$IN_TO"; note="$IN_NOTE"; soak="$IN_SOAK"; force="$IN_FORCE"
+          fi
+          [[ -z "$soak" ]] && { [[ "$to" == "stable" ]] && soak=3 || soak=0; }
+          echo "from=$from to=$to soak=$soak force=$force"
+          { echo "from=$from"; echo "to=$to"; echo "note=$note"; echo "soak=$soak"; echo "force=$force"; } >> "$GITHUB_OUTPUT"
+
+  evidence:
+    name: Evidence (${{ matrix.arch }})
+    needs: plan
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.1
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p pkg-repo -p omarchy-cli
+      # Both record an event; the gate reads them. A failure here is evidence,
+      # not a broken workflow, so neither step fails the job.
+      - name: Health of ${{ needs.plan.outputs.from }} (${{ matrix.arch }})
+        run: tests/health-check.sh "${{ needs.plan.outputs.from }}" "${{ matrix.arch }}" || true
+      - name: ABI of ${{ needs.plan.outputs.from }} (${{ matrix.arch }})
+        run: tests/abi-gate.sh "${{ needs.plan.outputs.from }}" "${{ matrix.arch }}" || true
+
+  gate:
+    name: Gate ${{ needs.plan.outputs.from }} → ${{ needs.plan.outputs.to }}
+    needs: [plan, evidence]
+    runs-on: ubuntu-latest
+    outputs:
+      verdict: ${{ steps.gate.outputs.verdict }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.1
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p pkg-repo
+      - id: gate
+        env:
+          FORCE: ${{ needs.plan.outputs.force }}
+        run: |
+          set +e
+          target/release/pkg-repo gate --from "${{ needs.plan.outputs.from }}" --to "${{ needs.plan.outputs.to }}" --soak-days "${{ needs.plan.outputs.soak }}"
+          code=$?
+          set -e
+          case $code in
+            0) verdict=promote ;;
+            3) verdict=skip ;;
+            *) if [[ "$FORCE" == "yes" ]]; then echo "::warning::gate blocked; promoting anyway (force=yes)"; verdict=promote; else verdict=block; fi ;;
+          esac
+          echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
+          [[ "$verdict" != "block" ]]
+
+  promote:
+    name: Promote ${{ needs.plan.outputs.from }} → ${{ needs.plan.outputs.to }}
+    needs: [plan, gate]
+    if: needs.gate.outputs.verdict == 'promote'
+    runs-on: ubuntu-latest
+    # Automatic unless STABLE_ENVIRONMENT names an environment with reviewers.
+    environment: ${{ needs.plan.outputs.to == 'stable' && vars.STABLE_ENVIRONMENT || 'automatic' }}
+    outputs:
+      previous: ${{ steps.previous.outputs.id }}
+      promoted: ${{ steps.promote.outputs.promoted }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
@@ -45,26 +146,26 @@ jobs:
         run: |
           echo "${{ secrets.OMARCHY_GPG_KEY }}" | gpg --batch --import
           echo "OMARCHY_GPG_KEYID=${{ secrets.OMARCHY_GPG_KEYID }}" >> "$GITHUB_ENV"
-      - name: Decide rings
-        id: rings
-        run: |
-          if [[ "${{ github.event_name }}" == "schedule" ]]; then
-            if [[ "${{ github.event.schedule }}" == "0 7 * * 1" ]]; then echo "from=rc" >> "$GITHUB_OUTPUT"; echo "to=stable" >> "$GITHUB_OUTPUT"; echo "note=weekly stable" >> "$GITHUB_OUTPUT";
-            else echo "from=edge" >> "$GITHUB_OUTPUT"; echo "to=rc" >> "$GITHUB_OUTPUT"; echo "note=daily rc" >> "$GITHUB_OUTPUT"; fi
-          else
-            echo "from=${{ github.event.inputs.from }}" >> "$GITHUB_OUTPUT"; echo "to=${{ github.event.inputs.to }}" >> "$GITHUB_OUTPUT"; echo "note=${{ github.event.inputs.note }}" >> "$GITHUB_OUTPUT"
-          fi
+      - name: Remember the current head (rollback target)
+        id: previous
+        run: echo "id=$(target/release/pkg-repo head --ring "${{ needs.plan.outputs.to }}" || true)" >> "$GITHUB_OUTPUT"
       - name: Promote
-        run: target/release/pkg-repo promote --from "${{ steps.rings.outputs.from }}" --to "${{ steps.rings.outputs.to }}" --note "${{ steps.rings.outputs.note }}"
+        id: promote
+        run: |
+          target/release/pkg-repo promote --from "${{ needs.plan.outputs.from }}" --to "${{ needs.plan.outputs.to }}" --note "${{ needs.plan.outputs.note }}"
+          echo "promoted=true" >> "$GITHUB_OUTPUT"
       - name: Render
         run: |
           for arch in x86_64 aarch64; do
-            target/release/pkg-repo render --ring "${{ steps.rings.outputs.to }}" --arch "$arch" --sign "$OMARCHY_GPG_KEYID"
+            target/release/pkg-repo render --ring "${{ needs.plan.outputs.to }}" --arch "$arch" --sign "$OMARCHY_GPG_KEYID"
           done
-      - name: Health check the target ring (x86_64)
-        run: tests/health-check.sh "${{ steps.rings.outputs.to }}" x86_64
-  health-aarch64:
-    needs: promote
+      - name: Health of ${{ needs.plan.outputs.to }} (x86_64)
+        run: tests/health-check.sh "${{ needs.plan.outputs.to }}" x86_64
+
+  verify-aarch64:
+    name: Health of ${{ needs.plan.outputs.to }} (aarch64)
+    needs: [plan, promote]
+    if: always() && needs.promote.outputs.promoted == 'true'
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
@@ -73,10 +174,53 @@ jobs:
           toolchain: 1.98.1
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release -p pkg-repo
-      - name: Decide ring
-        id: rings
+      - run: tests/health-check.sh "${{ needs.plan.outputs.to }}" aarch64
+
+  verdict:
+    name: Verdict
+    needs: [plan, promote, verify-aarch64]
+    if: always() && needs.promote.outputs.promoted == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.1
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p pkg-repo
+      - name: Import signing key
         run: |
-          if [[ "${{ github.event_name }}" == "schedule" ]]; then
-            if [[ "${{ github.event.schedule }}" == "0 7 * * 1" ]]; then echo "to=stable" >> "$GITHUB_OUTPUT"; else echo "to=rc" >> "$GITHUB_OUTPUT"; fi
-          else echo "to=${{ github.event.inputs.to }}" >> "$GITHUB_OUTPUT"; fi
-      - run: tests/health-check.sh "${{ steps.rings.outputs.to }}" aarch64
+          echo "${{ secrets.OMARCHY_GPG_KEY }}" | gpg --batch --import
+          echo "OMARCHY_GPG_KEYID=${{ secrets.OMARCHY_GPG_KEYID }}" >> "$GITHUB_ENV"
+      - name: Confirm or roll back
+        env:
+          TO: ${{ needs.plan.outputs.to }}
+          FROM: ${{ needs.plan.outputs.from }}
+          PREVIOUS: ${{ needs.promote.outputs.previous }}
+          X86: ${{ needs.promote.result }}
+          ARM: ${{ needs.verify-aarch64.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          head=$(target/release/pkg-repo head --ring "$TO")
+          if [[ "$X86" == "success" && "$ARM" == "success" ]]; then
+            target/release/pkg-repo event --kind promote --ring "$TO" --source "$FROM" --status ok \
+              --summary "$FROM → $TO: release $head verified on x86_64 and aarch64" \
+              --payload "{\"release_id\": $head, \"previous\": \"$PREVIOUS\", \"run_url\": \"$RUN_URL\"}"
+            exit 0
+          fi
+          echo "health after promotion: x86_64=$X86 aarch64=$ARM — rolling $TO back to ${PREVIOUS:-nothing}"
+          if [[ -z "$PREVIOUS" ]]; then
+            target/release/pkg-repo event --kind rollback --ring "$TO" --source "$FROM" --status error \
+              --summary "$FROM → $TO: health failed after promotion and there is no previous release to return to" \
+              --payload "{\"release_id\": $head, \"run_url\": \"$RUN_URL\"}"
+            exit 1
+          fi
+          target/release/pkg-repo rollback --ring "$TO" --to "$PREVIOUS" --note "automatic rollback: health failed after promotion from $FROM (x86_64=$X86, aarch64=$ARM)"
+          for arch in x86_64 aarch64; do
+            target/release/pkg-repo render --ring "$TO" --arch "$arch" --sign "$OMARCHY_GPG_KEYID"
+          done
+          target/release/pkg-repo event --kind rollback --ring "$TO" --source "$FROM" --status warn \
+            --summary "$FROM → $TO: release $head failed health (x86_64=$X86, aarch64=$ARM); rolled back to $PREVIOUS" \
+            --payload "{\"failed_release_id\": $head, \"restored_release_id\": $PREVIOUS, \"run_url\": \"$RUN_URL\"}"
+          exit 1

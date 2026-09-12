@@ -69,6 +69,26 @@ pub struct HistoryEntry {
     pub is_head: u8,
 }
 
+/// One dashboard event (`GET /api/v1/events`).
+#[derive(Debug, Clone, Deserialize)]
+pub struct Event {
+    pub id: u64,
+    pub kind: String,
+    pub ring: Option<String>,
+    pub source: Option<String>,
+    pub status: String,
+    pub summary: String,
+    #[serde(default)]
+    pub payload: Option<serde_json::Value>,
+    pub duration_ms: Option<u64>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct EventsView {
+    events: Vec<Event>,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct History {
     pub ring: String,
@@ -389,6 +409,18 @@ impl Api {
                 .get(self.url(&format!("/releases/{ring}/history")))
                 .send()?;
             Ok(Self::check(resp)?.json()?)
+        })
+    }
+
+    /// Newest events of one kind (`limit` ≤ 200).
+    pub fn events(&self, kind: &str, limit: u32) -> Result<Vec<Event>, RepoError> {
+        with_retry("events", || {
+            let resp = self
+                .http
+                .get(self.url("/events"))
+                .query(&[("kind", kind), ("limit", &limit.to_string())])
+                .send()?;
+            Ok(Self::check(resp)?.json::<EventsView>()?.events)
         })
     }
 
