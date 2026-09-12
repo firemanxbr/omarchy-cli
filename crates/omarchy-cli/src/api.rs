@@ -126,10 +126,57 @@ impl Api {
         self.get(&format!("/releases/{ring}?fields=summary"))
     }
 
+    /// Packages the ring serves with an open advisory, for one architecture.
+    pub fn security(&self, ring: &str, arch: &str) -> Result<SecurityView> {
+        self.get(&format!("/security?ring={ring}&arch={arch}"))
+    }
+
     pub fn graph(&self, ring: &str, arch: &str, targets: &[String]) -> Result<Graph> {
         self.get(&format!(
             "/graph?ring={ring}&arch={arch}&targets={}",
             targets.join(",")
         ))
     }
+}
+
+/// One package with an open advisory (`GET /api/v1/security`).
+#[derive(Debug, Clone, Deserialize, serde::Serialize)]
+pub struct VulnerablePackage {
+    pub name: String,
+    pub version: String,
+    pub worst: String,
+    pub kev: bool,
+    #[serde(default)]
+    pub epss: Option<f64>,
+    pub advisories: Vec<AdvisoryRef>,
+    #[serde(default)]
+    pub fixed_in: Vec<FixedIn>,
+}
+
+#[derive(Debug, Clone, Deserialize, serde::Serialize)]
+pub struct AdvisoryRef {
+    pub id: String,
+    pub tracker: String,
+    pub cves: Vec<String>,
+    pub severity: String,
+    #[serde(rename = "match")]
+    pub confidence: String,
+    #[serde(default)]
+    pub fixed: Option<String>,
+    pub url: String,
+}
+
+#[derive(Debug, Clone, Deserialize, serde::Serialize)]
+pub struct FixedIn {
+    pub ring: String,
+    pub version: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SecurityView {
+    pub ring: String,
+    pub arch: String,
+    #[serde(default)]
+    pub updated_at: Option<String>,
+    pub vulnerable: Vec<VulnerablePackage>,
 }

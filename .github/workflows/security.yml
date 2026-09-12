@@ -6,6 +6,11 @@ name: Security
 # has no advisory for), CISA KEV (exploited in the wild) and FIRST EPSS
 # (probability of exploitation). Results land in the index; the dashboard's
 # Security page and every package page read them.
+#
+# Then the fast-track: a package with a confident open advisory in rc or
+# stable whose clean, newer version edge already serves is pulled in as one
+# release without waiting for the soak — rendered, health-checked on both
+# architectures and rolled back if that fails, like any promotion.
 on:
   schedule:
     - cron: "40 */3 * * *"
@@ -47,3 +52,106 @@ jobs:
         run: |
           target/release/pkg-repo event --kind security --status error \
             --summary "security run ${{ github.run_id }} failed — see Actions log" --payload '{}' || true
+
+  fasttrack:
+    name: Fast-track fixes
+    needs: match
+    runs-on: ubuntu-latest
+    concurrency:
+      group: publish
+      cancel-in-progress: false
+    outputs:
+      changed: ${{ steps.apply.outputs.changed }}
+      prev_rc: ${{ steps.heads.outputs.rc }}
+      prev_stable: ${{ steps.heads.outputs.stable }}
+    env:
+      OMARCHY_POOL: ${{ vars.OMARCHY_POOL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.1
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p pkg-repo
+      - name: Import signing key
+        run: |
+          echo "${{ secrets.OMARCHY_GPG_KEY }}" | gpg --batch --import
+          echo "OMARCHY_GPG_KEYID=${{ secrets.OMARCHY_GPG_KEYID }}" >> "$GITHUB_ENV"
+      - name: Remember the current heads (rollback targets)
+        id: heads
+        run: |
+          for ring in rc stable; do echo "$ring=$(target/release/pkg-repo head --ring "$ring" || true)" >> "$GITHUB_OUTPUT"; done
+      - name: Apply
+        id: apply
+        run: |
+          changed=""
+          for ring in rc stable; do
+            set +e; target/release/pkg-repo fast-track --ring "$ring" --from edge; code=$?; set -e
+            case $code in 0) changed="$changed $ring" ;; 3) ;; *) exit $code ;; esac
+          done
+          echo "changed=${changed# }" >> "$GITHUB_OUTPUT"
+          echo "changed: ${changed:-nothing}"
+      - name: Render
+        if: steps.apply.outputs.changed != ''
+        run: |
+          for ring in ${{ steps.apply.outputs.changed }}; do for arch in x86_64 aarch64; do
+            target/release/pkg-repo render --ring "$ring" --arch "$arch" --sign "$OMARCHY_GPG_KEYID"
+          done; done
+      - name: Health (x86_64)
+        if: steps.apply.outputs.changed != ''
+        run: for ring in ${{ steps.apply.outputs.changed }}; do tests/health-check.sh "$ring" x86_64; done
+
+  fasttrack-arm:
+    name: Health of fast-tracked rings (aarch64)
+    needs: fasttrack
+    if: always() && needs.fasttrack.outputs.changed != ''
+    runs-on: ubuntu-24.04-arm
+    env:
+      OMARCHY_POOL: ${{ vars.OMARCHY_POOL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.1
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p pkg-repo
+      - run: for ring in ${{ needs.fasttrack.outputs.changed }}; do tests/health-check.sh "$ring" aarch64; done
+
+  verdict:
+    name: Verdict
+    needs: [fasttrack, fasttrack-arm]
+    if: always() && needs.fasttrack.outputs.changed != ''
+    runs-on: ubuntu-latest
+    concurrency:
+      group: publish
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.1
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p pkg-repo
+      - name: Import signing key
+        run: |
+          echo "${{ secrets.OMARCHY_GPG_KEY }}" | gpg --batch --import
+          echo "OMARCHY_GPG_KEYID=${{ secrets.OMARCHY_GPG_KEYID }}" >> "$GITHUB_ENV"
+      - name: Confirm or roll back
+        env:
+          CHANGED: ${{ needs.fasttrack.outputs.changed }}
+          PREV_RC: ${{ needs.fasttrack.outputs.prev_rc }}
+          PREV_STABLE: ${{ needs.fasttrack.outputs.prev_stable }}
+          X86: ${{ needs.fasttrack.result }}
+          ARM: ${{ needs.fasttrack-arm.result }}
+        run: |
+          set -euo pipefail
+          if [[ "$X86" == "success" && "$ARM" == "success" ]]; then echo "fast-track verified on both architectures"; exit 0; fi
+          for ring in $CHANGED; do
+            prev=$([[ "$ring" == rc ]] && echo "$PREV_RC" || echo "$PREV_STABLE")
+            [[ -z "$prev" ]] && continue
+            target/release/pkg-repo rollback --ring "$ring" --to "$prev" --note "automatic rollback: health failed after a security fast-track (x86_64=$X86, aarch64=$ARM)"
+            for arch in x86_64 aarch64; do target/release/pkg-repo render --ring "$ring" --arch "$arch" --sign "$OMARCHY_GPG_KEYID"; done
+            target/release/pkg-repo event --kind rollback --ring "$ring" --source edge --status warn \
+              --summary "$ring: security fast-track failed health (x86_64=$X86, aarch64=$ARM); rolled back to $prev" --payload "{\"restored_release_id\": $prev}"
+          done
+          exit 1

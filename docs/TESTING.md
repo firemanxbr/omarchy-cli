@@ -222,6 +222,16 @@ Debian filling only what Arch does not cover, the upstream-version extraction
 and the name-collision rejection. `tests/e2e-worker.sh` puts an advisory on the
 zlib fixture and checks the ring report and the KEV flag.
 
+```bash
+pkg-repo fast-track --ring stable --from edge --dry-run     # candidates only; exit 3 when none
+omarchy-cli --ring stable --root <rootfs> security          # installed packages with open advisories
+omarchy-cli --ring stable --root <rootfs> upgrade --security-only --dry-run
+```
+
+The candidate rule (confident match, medium or worse or exploited in the wild,
+a clean newer version in the source ring) is unit-tested with the rest of the
+security module.
+
 ## Promotion gate
 
 `pkg-repo gate --from <ring> --to <ring> [--soak-days N] [--dry-run]` reads the

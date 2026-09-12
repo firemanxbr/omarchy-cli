@@ -80,7 +80,7 @@ serves data. Decisions are made by the publisher (`pkg-repo`) and the client.
 | `promote.yml` | daily: edge→rc 06:00 UTC, rc→stable 09:00 UTC; or manual | evidence-driven (below): fresh health + ABI of the source ring on both architectures → gate → index write → the OPR channel of the target ring aligned (`packages` comes from the OPR's matching channel, not from the source ring) → render → health of the target → automatic rollback if that fails |
 | `health.yml` | daily, x86_64 and aarch64 runners | real pacman per ring and architecture: `-Sy`, list, signed download → `health` event |
 | `gc.yml` | weekly | delete pool objects the last 3 releases of every ring do not reference (7-day grace for imports in flight) |
-| `security.yml` | every 3 hours | `pkg-repo security`: the Arch Security Tracker (exact matches on Arch's versions), the Debian Security Tracker (same upstream projects, only for CVEs Arch has no advisory for, `name-version` when Debian names a fixed version newer than ours, `name-only` while still open; names whose versions are an order of magnitude apart are treated as different projects), CISA KEV and EPSS, matched with the real `vercmp` against every object the rings serve and stored in the index |
+| `security.yml` | every 3 hours | `pkg-repo security`: the Arch Security Tracker (exact matches on Arch's versions), the Debian Security Tracker (same upstream projects, only for CVEs Arch has no advisory for, `name-version` when Debian names a fixed version newer than ours, `name-only` while still open; names whose versions are an order of magnitude apart are treated as different projects), CISA KEV and EPSS, matched with the real `vercmp` against every object the rings serve and stored in the index; then the **fast-track**: a package with a confident open advisory (exact or name-version, medium or worse, or exploited in the wild) in `rc`/`stable` whose clean newer version `edge` already serves is pulled in as one release without the soak, rendered, health-checked on both architectures and rolled back if that fails |
 | `metrics.yml` | every 30 minutes | snapshot of the pipeline itself — GitHub Actions runs of the last 7 days per workflow, what is running now, runner minutes — and the pool totals, as a `metrics` event; the dashboard's charts, coverage and workflow table read from it |
 | `ci.yml`, `e2e.yml` | every pull request | fmt, clippy, tests and the worker typecheck on x86_64 and aarch64; real pacman end to end through a local worker |
 | `release.yml` | every merge into `main` | CI + E2E again on the merged commit, next version from the last tag (`v0.0.1`, `v0.0.2`, …), binaries for both architectures, GitHub release, `wrangler deploy` carrying `POOL_VERSION` — the dashboard shows what is running |
@@ -131,6 +131,11 @@ is exploited in the wild (KEV) and how likely exploitation is (EPSS). Arch is
 authoritative: Debian only fills CVEs Arch has no advisory for, and a name whose
 versions are an order of magnitude apart from Debian's (`keystone`: assembler vs
 OpenStack) is treated as a different project.
+
+Fixes travel faster than features: `pkg-repo fast-track` pulls a clean version
+into `rc`/`stable` as soon as `edge` has it, with the same render → health →
+rollback safety net as a promotion, and `omarchy-cli security` /
+`omarchy-cli upgrade --security-only` let a machine apply just those.
 
 Exposure is not stored: the index derives it from the same dependency and soname
 graph the package page draws — a package is *exposed* when it declares a

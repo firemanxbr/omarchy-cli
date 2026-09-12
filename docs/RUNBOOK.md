@@ -61,6 +61,7 @@ fully automatic.
 
 ```bash
 # the same decisions by hand
+pkg-repo fast-track --ring stable --from edge --dry-run        # security fixes edge has and stable lacks (exit 3: none)
 pkg-repo gate --from rc --to stable --soak-days 3 --dry-run   # exit 0 promote, 3 nothing new, 1 blocked
 pkg-repo head --ring stable                                    # current release id (rollback target)
 tests/abi-gate.sh rc x86_64                                    # ABI check of rc's upgrades, exit 2 on blockers
@@ -102,6 +103,16 @@ published and the run ends with a warning instead of a deployment.
 Rolling the worker back is deploying an earlier release: re-run the Deploy job of
 that release's run, or `git checkout vX.Y.Z && cd worker && npx wrangler deploy
 --var POOL_VERSION:vX.Y.Z`. Migrations are forward-only; keep them additive.
+
+## Security data
+
+`security.yml` (every 3 h) fetches the Arch and Debian trackers, KEV and EPSS,
+matches them (`pkg-repo security`) and then fast-tracks fixes into `rc` and
+`stable` (`pkg-repo fast-track`, `--min-severity medium`, exploited-in-the-wild
+always). Both are safe to run by hand with `--dry-run`. A wrong match is a
+tracker's mistake or a name collision: open an issue with the package and the
+advisory id shown on the package page; the `same_project` heuristic in
+`crates/pkg-repo/src/security.rs` is where collisions are rejected.
 
 ## Kill switch
 

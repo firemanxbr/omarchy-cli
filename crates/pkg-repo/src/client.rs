@@ -537,6 +537,14 @@ impl Api {
         })
     }
 
+    /// `GET` any JSON endpoint, retrying on 5xx.
+    pub fn get_json(&self, path: &str) -> Result<serde_json::Value, RepoError> {
+        with_retry("get_json", || {
+            let resp = self.http.get(self.url(path)).send()?;
+            Ok(Self::check(resp)?.json()?)
+        })
+    }
+
     /// `PUT` a JSON body to an authenticated endpoint, retrying on 5xx.
     pub fn put_json(
         &self,

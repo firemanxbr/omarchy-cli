@@ -55,6 +55,8 @@ uses it by default:
 omarchy-cli status          # pinned release vs. what stable serves now
 omarchy-cli check xz        # ABI safety check against this machine, exit 2 if unsafe
 omarchy-cli upgrade         # pacman -U from the pool, then pin the release
+omarchy-cli security        # installed packages with open advisories, and where the fix is
+omarchy-cli upgrade --security-only
 ```
 
 This is an evidence environment: throwaway signing key, no SLA, may be reset.
