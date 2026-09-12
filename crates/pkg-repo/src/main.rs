@@ -547,7 +547,7 @@ fn publish(
         // rule the sync applies to upstream rebuilds): a rebuild of the same
         // version pins what is already there instead of failing on the
         // size/sha mismatch.
-        let (_, by_filename) = api.known_with_filenames(&[], &[manifest.filename.clone()], arch)?;
+        let (_, by_filename) = api.known_with_filenames(&[], std::slice::from_ref(&manifest.filename), arch)?;
         let sha = match by_filename.get(&manifest.filename) {
             Some(stored) if *stored != sha => {
                 eprintln!(
