@@ -102,7 +102,9 @@ and is undone automatically when the target ring turns out not to be:
    versions).
 2. **Gate** (`pkg-repo gate`). Per architecture: the latest health of the source
    ring is recent and not an error; no health inside the soak window failed
-   (0 days into `rc`, 3 days into `stable`); a recent ABI check found no blocker.
+   (0 days into `rc`, 3 days into `stable`) and the source ring's content has
+   been there that long (the age of its last promotion; syncs of the OPR channel
+   do not reset it); a recent ABI check found no blocker.
    A ring with nothing rendered for an architecture is not evidence against it.
    If the target already serves the source's head there is nothing to promote.
    The verdict and its reasons are a `gate` event.
