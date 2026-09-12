@@ -15,12 +15,12 @@
 #   rsync copy, repo-add (real, in an Arch container), and for the same N
 #   index promotion + render against a local worker.
 #
-# Usage: tests/bench-current.sh [N=1000] [SIZE_MB=5]
+# Usage: poc/bench/bench-current.sh [N=1000] [SIZE_MB=5]
 set -euo pipefail
 
 N="${1:-1000}"
 SIZE_MB="${2:-5}"
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 BENCH="$ROOT/target/bench-current"
 PORT="${OMARCHY_BENCH_PORT:-8793}"
 RUNTIME="$(command -v podman || command -v docker)"
@@ -69,7 +69,7 @@ echo "repo-add: $REPO_ADD_MS ms (db + files; reads every archive)"
 step "Pool + index model: same $N packages"
 cargo build -q --release -p pkg-repo
 PKG_REPO="$ROOT/target/release/pkg-repo"
-python3 "$ROOT/tests/bench/seed.py" "$N" > "$BENCH/seed.sql"
+python3 "$ROOT/poc/bench/seed.py" "$N" > "$BENCH/seed.sql"
 cd "$ROOT/worker"
 STATE="$BENCH/wrangler-state"
 npx wrangler d1 migrations apply omarchy-repo --local --persist-to "$STATE" >/dev/null

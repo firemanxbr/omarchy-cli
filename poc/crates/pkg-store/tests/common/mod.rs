@@ -132,7 +132,7 @@ pub fn manifest(archive: &Path) -> PackageManifest {
 
 pub fn fixture(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../pkg-extract/tests/fixtures")
+        .join("../../../crates/pkg-extract/tests/fixtures")
         .join(name)
 }
 

@@ -5,8 +5,9 @@ members = [
     "crates/pkg-extract",
     "crates/pkg-repo",
     "crates/pkg-check",
-    "crates/pkg-store",
-    "crates/pkg-hooks",
+    # Kept building and tested, but not on the product path: see poc/README.md.
+    "poc/crates/pkg-store",
+    "poc/crates/pkg-hooks",
     "crates/omarchy-cli",
 ]
 
@@ -24,8 +25,8 @@ pkg-manifest = { path = "crates/pkg-manifest" }
 pkg-extract = { path = "crates/pkg-extract" }
 pkg-repo = { path = "crates/pkg-repo" }
 pkg-check = { path = "crates/pkg-check" }
-pkg-store = { path = "crates/pkg-store" }
-pkg-hooks = { path = "crates/pkg-hooks" }
+pkg-store = { path = "poc/crates/pkg-store" }
+pkg-hooks = { path = "poc/crates/pkg-hooks" }
 
 # Shared external deps (pinned in one place)
 anyhow = "1"

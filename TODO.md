@@ -1,7 +1,7 @@
 # TODO
 
 Open work, roughly in order of value for effort. The POC questions are answered
-(see [docs/POC-RESULTS.md](docs/POC-RESULTS.md)) and the staging environment runs
+(see [poc/RESULTS.md](poc/RESULTS.md)) and the staging environment runs
 the whole pipeline on every upstream repository; everything here is what would
 turn it into something the migration can rely on. Pick an item, open a pull
 request (see [CONTRIBUTING.md](CONTRIBUTING.md)), and keep
@@ -20,7 +20,7 @@ request (see [CONTRIBUTING.md](CONTRIBUTING.md)), and keep
 - [ ] **Hook preview in `omarchy-cli check`.** Parse the libalpm `.hook` files in
       `/usr/share/libalpm/hooks` and `/etc/pacman.d/hooks` and list which ones the
       plan would trigger (`mkinitcpio`, `glib-compile-schemas`, …). Read-only;
-      `crates/pkg-hooks` already has the types.
+      `poc/crates/pkg-hooks` already has the types.
 - [ ] **`pkg-repo releases --json`** (and `--all` for every ring at once), so agents
       and scripts read release state without scraping text; `head` covers the
       common case today.
@@ -72,7 +72,7 @@ request (see [CONTRIBUTING.md](CONTRIBUTING.md)), and keep
       the team's custody (the workflows only need `OMARCHY_GPG_KEY` /
       `OMARCHY_GPG_KEYID`), the Cloudflare resources in the team's account, and
       `STABLE_ENVIRONMENT=stable` if the team wants a human before stable moves.
-- [ ] **Native install engine.** `crates/pkg-store` (redb state + journaled,
+- [ ] **Native install engine.** `poc/crates/pkg-store` (redb state + journaled,
       crash-safe transactions) is implemented and tested but not wired into the
       client. Wiring it means also writing pacman's local database
       (`/var/lib/pacman/local/<pkg>/{desc,files,mtree}`) and running `.hook` /

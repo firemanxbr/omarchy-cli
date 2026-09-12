@@ -29,7 +29,7 @@ them twice.
 | `pkg-extract` | end-to-end manifests from **real** `zlib` and `xz` packages (`tests/fixtures/`) | `tests/fixtures.rs` |
 | `pkg-repo` | `desc`/`files` rendering identical to `repo-add`, database determinism | unit + `tests/database.rs` |
 | `pkg-check` | pacman `desc` parsing, satisfiers, ABI check verdicts against a real `liblzma.so.5` | unit + `tests/check.rs` |
-| `pkg-store` | install / upgrade / remove, collisions, `.pacnew`, I/O failure rollback, crash recovery before and after commit | `tests/transactions.rs` against a temp root |
+| `pkg-store` (`poc/crates`) | install / upgrade / remove, collisions, `.pacnew`, I/O failure rollback, crash recovery before and after commit | `tests/transactions.rs` against a temp root |
 
 Useful invocations:
 
@@ -49,7 +49,7 @@ curl -sSLO "https://geo.mirror.pkgbuild.com/core/os/x86_64/<file>.pkg.tar.zst"
 ```
 
 Keep fixtures small (< 1 MB). Behavioural tests that need specific file layouts
-build **synthetic** archives at runtime with `crates/pkg-store/tests/common/mod.rs`
+build **synthetic** archives at runtime with `poc/crates/pkg-store/tests/common/mod.rs`
 (`make_pkg`), so no new fixture is needed for a new scenario.
 
 ### Manual inspection
@@ -151,28 +151,12 @@ You can also point the client at any rootfs by hand:
 OMARCHY_API=https://pkgs.firemanxbr.org omarchy-cli --root target/rootfs-2021 check xz
 ```
 
-## Benchmark
+## Benchmark (historical)
 
-```bash
-tests/bench-promotion.sh [N]    # default 10000
-```
-
-Seeds a throwaway local worker with N synthetic packages (`tests/bench/seed.py`
-generates the SQL; D1 caps statements at 100 KB so rows are batched) in an `edge`
-release, then times `promote`, `render`, the closure query, the release listing and
-— when a container runtime is present — `pacman -Sy` against the generated
-database.
-
-```bash
-tests/bench-current.sh [N] [SIZE_MB]    # default 1000 packages of 5 MB
-```
-
-Builds N valid `.pkg.tar.zst` files with random payloads and measures today's
-promotion mechanics (`rsync -a --delete` of the tree, real `repo-add` in an Arch
-container) next to the index at the same N. Run it on Linux x86_64 for fair
-`repo-add` numbers — under emulation on Apple Silicon it is roughly 10× slower;
-the Benchmark workflow (`.github/workflows/bench.yml`) does exactly that and
-uploads `results.json`. Results are recorded in [POC-RESULTS.md](POC-RESULTS.md).
+The proof-of-concept benchmarks — the index model at scale and today's rsync +
+repo-add mechanics at the same package count — live in `poc/bench/`
+(`bench-promotion.sh`, `bench-current.sh`, `seed.py`) with their results in
+[`poc/RESULTS.md`](../poc/RESULTS.md); the `Benchmark` workflow runs them by hand.
 
 ## Health check
 
