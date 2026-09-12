@@ -28,7 +28,7 @@ interface Manifest {
 }
 
 const OPS = [">=", "<=", "=", ">", "<"];
-export const SOURCES = ["core", "extra", "multilib", "alarm", "packages"] as const;
+export const SOURCES = ["core", "extra", "multilib", "alarm", "packages", "chaotic"] as const;
 
 /** Parses the Arch dependency syntax the Rust side serializes rules as. */
 export function parseRule(s: string): Rule {
@@ -123,8 +123,15 @@ export async function handleGetPackage(sha256: string, env: Env): Promise<Respon
 }
 
 /** `{ "sha256": [...], "arch": "x86_64" }` → the subset the index already knows for that repo arch. */
+/**
+ * Which of these sha256s are indexed for the architecture — and, for the
+ * filenames given, which object already sits under `<arch>/<filename>` in
+ * the pool. The layout holds one object per filename; an upstream that
+ * rebuilds the same version with different bytes (the OPR does, per channel)
+ * collides, and the publisher pins the object that is already there.
+ */
 export async function handleKnownPackages(request: Request, env: Env): Promise<Response> {
-  const body = (await request.json()) as { sha256: string[]; arch?: string };
+  const body = (await request.json()) as { sha256: string[]; filenames?: string[]; arch?: string };
   const repoArch = body.arch ?? "x86_64";
   if (!isRepoArch(repoArch)) return json({ error: "arch must be x86_64 or aarch64" }, 400);
   const list = (body.sha256 ?? []).filter((s) => /^[0-9a-f]{64}$/.test(s));
@@ -138,5 +145,16 @@ export async function handleKnownPackages(request: Request, env: Env): Promise<R
       .all<{ sha256: string }>();
     for (const r of rows.results) known.push(r.sha256);
   }
-  return json({ known });
+  const byFilename: Record<string, string> = {};
+  const names = (body.filenames ?? []).filter((f) => typeof f === "string" && f.length < 300);
+  for (let i = 0; i < names.length; i += 500) {
+    const chunk = names.slice(i, i + 500);
+    const rows = await env.DB.prepare(
+      "SELECT filename, sha256 FROM packages WHERE repo_arch = ? AND filename IN (SELECT value FROM json_each(?))",
+    )
+      .bind(repoArch, JSON.stringify(chunk))
+      .all<{ filename: string; sha256: string }>();
+    for (const r of rows.results) byFilename[r.filename] = r.sha256;
+  }
+  return json({ known, by_filename: byFilename });
 }

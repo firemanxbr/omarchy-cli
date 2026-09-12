@@ -3,9 +3,10 @@ name: Sync
 # Imports every upstream repository into the pool and pins it on a ring, then
 # renders the rings that changed. Arch, Arch Linux ARM and chaotic-aur feed
 # `edge` (promotion carries them forward); the OPR has its own edge / rc /
-# stable channels, so each is synced straight into the matching ring — the
-# pool's rc and stable serve what Omarchy promoted, not the OPR edge. Hourly;
-# a manual run can import everything at once.
+# stable channels (x86_64 only — aarch64 has just edge), so each is synced
+# straight into the matching ring — the pool's rc and stable serve what
+# Omarchy promoted, not the OPR edge. Hourly; a manual run can import
+# everything at once.
 on:
   schedule:
     - cron: "17 * * * *"
@@ -67,8 +68,8 @@ jobs:
           alarm-aarch64       alarm     aarch64 edge   http://os.archlinuxarm.org/aarch64/alarm                 alarm       $K/archlinuxarm.gpg  -
           extra-aarch64       extra     aarch64 edge   http://os.archlinuxarm.org/aarch64/extra                 extra       $K/archlinuxarm.gpg  -
           packages-aarch64    packages  aarch64 edge   https://pkgs.omarchy.org/edge/aarch64                    omarchy     $K/omarchy.gpg       -
-          packages-aarch64-rc packages  aarch64 rc     https://pkgs.omarchy.org/rc/aarch64                      omarchy     $K/omarchy.gpg       -
-          packages-aarch64-st packages  aarch64 stable https://pkgs.omarchy.org/stable/aarch64                  omarchy     $K/omarchy.gpg       -
+          packages-aarch64-rc packages  aarch64 rc     https://pkgs.omarchy.org/edge/aarch64                    omarchy     $K/omarchy.gpg       -
+          packages-aarch64-st packages  aarch64 stable https://pkgs.omarchy.org/edge/aarch64                    omarchy     $K/omarchy.gpg       -
           "
           WANT="${{ github.event.inputs.sources || 'all' }}"
           LIMIT="${{ github.event.inputs.limit || '1500' }}"

@@ -257,23 +257,44 @@ impl Api {
 
     /// Subset of `shas` the index already knows for `arch`.
     pub fn known(&self, shas: &[String], arch: &str) -> Result<Vec<String>, RepoError> {
+        Ok(self.known_with_filenames(shas, &[], arch)?.0)
+    }
+
+    /// Which sha256s are indexed for `arch`, and which of `filenames` already
+    /// have an object under `<arch>/<filename>` (filename → its sha256).
+    pub fn known_with_filenames(
+        &self,
+        shas: &[String],
+        filenames: &[String],
+        arch: &str,
+    ) -> Result<(Vec<String>, std::collections::HashMap<String, String>), RepoError> {
         #[derive(Deserialize)]
         struct Known {
             known: Vec<String>,
+            #[serde(default)]
+            by_filename: std::collections::HashMap<String, String>,
         }
         let mut out = Vec::new();
-        for chunk in shas.chunks(2000) {
+        let mut by_filename = std::collections::HashMap::new();
+        let mut i = 0;
+        while i < shas.len().max(filenames.len()) {
+            let sha_chunk = shas.get(i..(i + 2000).min(shas.len())).unwrap_or(&[]);
+            let name_chunk = filenames
+                .get(i..(i + 2000).min(filenames.len()))
+                .unwrap_or(&[]);
             let k: Known = with_retry("known", || {
                 let resp = self
                     .http
                     .post(self.url("/packages/known"))
-                    .json(&serde_json::json!({ "sha256": chunk, "arch": arch }))
+                    .json(&serde_json::json!({ "sha256": sha_chunk, "filenames": name_chunk, "arch": arch }))
                     .send()?;
                 Ok(Self::check(resp)?.json()?)
             })?;
             out.extend(k.known);
+            by_filename.extend(k.by_filename);
+            i += 2000;
         }
-        Ok(out)
+        Ok((out, by_filename))
     }
 
     /// Uploads an archive into the pool under `<arch>/<filename>`; multipart when large.

@@ -163,8 +163,9 @@ jobs:
         # (the hourly sync keeps them aligned afterwards).
         run: |
           for arch in x86_64 aarch64; do
+            channel="${{ needs.plan.outputs.to }}"; [[ "$arch" == aarch64 ]] && channel=edge   # the OPR has only edge for aarch64
             target/release/pkg-repo sync --source packages --arch "$arch" --ring "${{ needs.plan.outputs.to }}" \
-              --base-url "https://pkgs.omarchy.org/${{ needs.plan.outputs.to }}/$arch" --db-name omarchy \
+              --base-url "https://pkgs.omarchy.org/$channel/$arch" --db-name omarchy \
               --keyring "$RUNNER_TEMP/keyrings/omarchy.gpg" --work-dir "$RUNNER_TEMP/sync"
           done
       - name: Render
