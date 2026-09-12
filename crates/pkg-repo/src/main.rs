@@ -120,6 +120,10 @@ enum Command {
         /// package's upstream `.sig` must verify against it or it is not imported.
         #[arg(long)]
         keyring: Option<PathBuf>,
+        /// Sources that win over this one: names the ring already serves from
+        /// them are skipped (repeatable).
+        #[arg(long = "defer-to")]
+        defer_to: Vec<String>,
     },
     /// Creates a release on `--to` pinned to the current selection of `--from`.
     Promote {
@@ -249,6 +253,7 @@ fn main() -> Result<()> {
             work_dir,
             dry_run,
             keyring,
+            defer_to,
         } => run_sync(
             &remote,
             &SyncOptions {
@@ -263,6 +268,7 @@ fn main() -> Result<()> {
                 work_dir,
                 dry_run,
                 keyring,
+                defer_to,
             },
         ),
         Command::Promote {
@@ -300,19 +306,28 @@ fn main() -> Result<()> {
             summary,
             duration_ms,
             payload,
-        } => {
-            let api = Api::new(&remote.api, &remote.token)?;
-            let payload: Option<serde_json::Value> = payload
-                .map(|p| serde_json::from_str(&p))
-                .transpose()
-                .context("--payload must be JSON")?;
-            api.post_event(&serde_json::json!({
+        } => record_event(
+            &remote,
+            &serde_json::json!({
                 "kind": kind, "ring": ring, "source": source, "status": status,
-                "summary": summary, "duration_ms": duration_ms, "payload": payload,
-            }))?;
-            Ok(())
-        }
+                "summary": summary, "duration_ms": duration_ms,
+            }),
+            payload.as_deref(),
+        ),
     }
+}
+
+/// `pkg-repo event`: records a journal entry; `payload` is a JSON object.
+fn record_event(remote: &Remote, event: &serde_json::Value, payload: Option<&str>) -> Result<()> {
+    let api = Api::new(&remote.api, &remote.token)?;
+    let mut event = event.clone();
+    let payload: Option<serde_json::Value> = payload
+        .map(serde_json::from_str)
+        .transpose()
+        .context("--payload must be JSON")?;
+    event["payload"] = payload.unwrap_or(serde_json::Value::Null);
+    api.post_event(&event)?;
+    Ok(())
 }
 
 fn run_gate(remote: &Remote, args: &GateArgs) -> Result<()> {
@@ -355,6 +370,13 @@ fn run_sync(remote: &Remote, opts: &SyncOptions) -> Result<()> {
         report.removed,
         report.deferred
     );
+    if report.yielded > 0 {
+        println!(
+            "yielded {} package(s) to {}",
+            report.yielded,
+            opts.defer_to.join(", ")
+        );
+    }
     if let Some((id, seq)) = report.release {
         println!("release id {id} (#{seq})");
     }

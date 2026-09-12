@@ -47,6 +47,10 @@ pub struct SyncOptions {
     /// GPG keyring file the upstream `.sig` of every package must verify
     /// against; packages without a valid signature are not imported.
     pub keyring: Option<PathBuf>,
+    /// Sources whose packages win over this one: an upstream package whose
+    /// name the ring already serves from one of them is neither imported nor
+    /// pinned (chaotic-aur defers to Arch and the OPR).
+    pub defer_to: Vec<String>,
 }
 
 #[derive(Debug, Default)]
@@ -57,8 +61,11 @@ pub struct SyncReport {
     pub failed: Vec<Failed>,
     pub removed: usize,
     pub bytes_uploaded: u64,
+    /// `None` when the ring's selection of this source did not change.
     pub release: Option<(u64, u64)>,
     pub deferred: usize,
+    /// Upstream packages left to the sources in `defer_to`.
+    pub yielded: usize,
 }
 
 pub fn run(api: &Api, opts: &SyncOptions) -> Result<SyncReport, RepoError> {
@@ -84,6 +91,9 @@ pub fn run(api: &Api, opts: &SyncOptions) -> Result<SyncReport, RepoError> {
         ..SyncReport::default()
     };
     tracing::info!(source = %opts.source, packages = upstream.len(), "upstream database read");
+
+    let head = api.release_summary(&opts.ring)?;
+    let upstream = yield_to_other_sources(upstream, head.as_ref(), opts, &mut report);
 
     // 2. what the index already has
     let shas: Vec<String> = upstream.iter().map(|p| p.sha256.clone()).collect();
@@ -128,20 +138,31 @@ pub fn run(api: &Api, opts: &SyncOptions) -> Result<SyncReport, RepoError> {
         .map(|p| p.sha256.clone())
         .collect();
     let upstream_names: BTreeSet<&str> = upstream.iter().map(|p| p.name.as_str()).collect();
-    let remove: Vec<String> = match api.release_summary(&opts.ring)? {
-        Some(view) => view
-            .packages
-            .iter()
-            .filter(|p| {
-                p.source == opts.source
-                    && p.repo_arch == opts.arch
-                    && !upstream_names.contains(p.name.as_str())
-            })
-            .map(|p| p.name.clone())
-            .collect(),
-        None => Vec::new(),
-    };
+    let current: Vec<&crate::client::PackageSummary> = head
+        .as_ref()
+        .map(|v| {
+            v.packages
+                .iter()
+                .filter(|p| p.source == opts.source && p.repo_arch == opts.arch)
+                .collect()
+        })
+        .unwrap_or_default();
+    let remove: Vec<String> = current
+        .iter()
+        .filter(|p| !upstream_names.contains(p.name.as_str()))
+        .map(|p| p.name.clone())
+        .collect();
     report.removed = remove.len();
+
+    // Nothing to pin when the ring already serves exactly this selection: a
+    // release per hourly run per source would be noise.
+    let current_shas: BTreeSet<&str> = current.iter().map(|p| p.sha256.as_str()).collect();
+    let add_shas: BTreeSet<&str> = add.iter().map(String::as_str).collect();
+    if remove.is_empty() && current_shas == add_shas {
+        tracing::info!(source = %opts.source, arch = %opts.arch, "selection unchanged; no release");
+        post_sync_event(api, opts, &report, &base, started)?;
+        return Ok(report);
+    }
 
     let note = format!(
         "sync {} {}: {} new, {} removed, {} upstream",
@@ -158,16 +179,37 @@ pub fn run(api: &Api, opts: &SyncOptions) -> Result<SyncReport, RepoError> {
     report.release = Some((created.release.id, created.release.seq));
 
     // 5. event
-    post_sync_event(
-        api,
-        opts,
-        &report,
-        &base,
-        created.release.seq,
-        created.release.id,
-        started,
-    )?;
+    post_sync_event(api, opts, &report, &base, started)?;
     Ok(report)
+}
+
+/// Drops the upstream packages whose names the ring already serves from a
+/// source in `defer_to` (those win), counting them in `report.yielded`.
+fn yield_to_other_sources(
+    upstream: Vec<UpstreamPackage>,
+    head: Option<&crate::client::ReleaseSummaryView>,
+    opts: &SyncOptions,
+    report: &mut SyncReport,
+) -> Vec<UpstreamPackage> {
+    if opts.defer_to.is_empty() {
+        return upstream;
+    }
+    let owned_elsewhere: HashSet<&str> = head
+        .map(|v| {
+            v.packages
+                .iter()
+                .filter(|p| p.repo_arch == opts.arch && opts.defer_to.contains(&p.source))
+                .map(|p| p.name.as_str())
+                .collect()
+        })
+        .unwrap_or_default();
+    let before = upstream.len();
+    let kept: Vec<UpstreamPackage> = upstream
+        .into_iter()
+        .filter(|p| !owned_elsewhere.contains(p.name.as_str()))
+        .collect();
+    report.yielded = before - kept.len();
+    kept
 }
 
 fn post_sync_event(
@@ -175,8 +217,6 @@ fn post_sync_event(
     opts: &SyncOptions,
     report: &SyncReport,
     base: &str,
-    seq: u64,
-    release_id: u64,
     started: Instant,
 ) -> Result<(), RepoError> {
     let status = if report.failed.is_empty() {
@@ -184,27 +224,27 @@ fn post_sync_event(
     } else {
         "warn"
     };
+    let target = match report.release {
+        Some((_, seq)) => format!("{}#{seq}", opts.ring),
+        None => format!("{} unchanged", opts.ring),
+    };
     let summary = if report.failed.is_empty() {
         format!(
-            "{} {}: {} new packages ({}), {} removed → {}#{}",
+            "{} {}: {} new packages ({}), {} removed → {target}",
             opts.source,
             opts.arch,
             report.uploaded,
             human(report.bytes_uploaded),
             report.removed,
-            opts.ring,
-            seq
         )
     } else {
         format!(
-            "{} {}: {} new, {} failed, {} removed → {}#{}",
+            "{} {}: {} new, {} failed, {} removed → {target}",
             opts.source,
             opts.arch,
             report.uploaded,
             report.failed.len(),
             report.removed,
-            opts.ring,
-            seq
         )
     };
     api.post_event(&serde_json::json!({
@@ -223,11 +263,13 @@ fn post_sync_event(
             "bytes_uploaded": report.bytes_uploaded,
             "removed": report.removed,
             "deferred": report.deferred,
+            "yielded": report.yielded,
+            "defer_to": opts.defer_to,
             "concurrency": opts.concurrency,
             "throughput_bps": throughput(report.bytes_uploaded, started),
             "verified_against": opts.keyring.as_ref().map(|k| k.file_name().map(|f| f.to_string_lossy().into_owned())),
             "failed": report.failed.iter().map(|(f, e)| serde_json::json!({"file": f, "error": e})).collect::<Vec<_>>(),
-            "release_id": release_id,
+            "release_id": report.release.map(|(id, _)| id),
         }
     }))
 }
@@ -368,5 +410,91 @@ pub fn human(bytes: u64) -> String {
         format!("{bytes} B")
     } else {
         format!("{v:.1} {}", units[i])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::client::{PackageSummary, Release, ReleaseSummaryView};
+
+    fn up(name: &str) -> UpstreamPackage {
+        UpstreamPackage {
+            name: name.into(),
+            version: "1-1".into(),
+            filename: format!("{name}-1-1-x86_64.pkg.tar.zst"),
+            sha256: format!("sha-{name}"),
+            size_download: 1,
+        }
+    }
+
+    fn served(name: &str, source: &str, arch: &str) -> PackageSummary {
+        PackageSummary {
+            name: name.into(),
+            version: "1-1".into(),
+            arch: arch.into(),
+            filename: String::new(),
+            sha256: format!("sha-{name}"),
+            size_download: 1,
+            source: source.into(),
+            repo_arch: arch.into(),
+        }
+    }
+
+    fn opts(defer_to: &[&str]) -> SyncOptions {
+        SyncOptions {
+            source: "chaotic".into(),
+            upstream: String::new(),
+            base_url: None,
+            db_name: None,
+            arch: "x86_64".into(),
+            ring: "edge".into(),
+            limit: 0,
+            concurrency: 1,
+            work_dir: PathBuf::new(),
+            dry_run: true,
+            keyring: None,
+            defer_to: defer_to.iter().map(|s| (*s).to_owned()).collect(),
+        }
+    }
+
+    #[test]
+    fn names_served_by_a_deferred_to_source_are_yielded() {
+        let head = ReleaseSummaryView {
+            release: Release {
+                id: 1,
+                ring: "edge".into(),
+                seq: 1,
+                parent_id: None,
+                source_id: None,
+                note: None,
+                created_at: String::new(),
+            },
+            package_count: 3,
+            packages: vec![
+                served("dropbox", "packages", "x86_64"),
+                served("hyprshade", "extra", "x86_64"),
+                served("yay", "chaotic", "x86_64"),
+                served("dropbox", "packages", "aarch64"), // other arch: irrelevant
+            ],
+        };
+        let upstream = vec![up("dropbox"), up("hyprshade"), up("yay"), up("paru")];
+        let mut report = SyncReport::default();
+        let kept = yield_to_other_sources(
+            upstream.clone(),
+            Some(&head),
+            &opts(&["packages", "extra"]),
+            &mut report,
+        );
+        assert_eq!(
+            kept.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(),
+            ["yay", "paru"]
+        );
+        assert_eq!(report.yielded, 2);
+
+        let mut report = SyncReport::default();
+        let kept = yield_to_other_sources(upstream, Some(&head), &opts(&[]), &mut report);
+        assert_eq!(kept.len(), 4, "nothing yields without --defer-to");
+        assert_eq!(report.yielded, 0);
     }
 }

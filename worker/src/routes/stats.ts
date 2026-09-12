@@ -75,7 +75,7 @@ export async function handleStats(env: Env): Promise<Response> {
             json_extract(e.payload, '$.upstream_total') AS upstream_total, json_extract(e.payload, '$.deferred') AS deferred,
             json_extract(e.payload, '$.uploaded') AS uploaded, json_extract(e.payload, '$.removed') AS removed
        FROM events e JOIN (SELECT source, COALESCE(json_extract(payload, '$.arch'), 'x86_64') AS arch, MAX(id) AS id
-                             FROM events WHERE kind = 'sync' AND status != 'error' AND source IS NOT NULL
+                             FROM events WHERE kind = 'sync' AND status != 'error' AND source IS NOT NULL AND ring = 'edge'
                             GROUP BY source, COALESCE(json_extract(payload, '$.arch'), 'x86_64')) m ON m.id = e.id
       ORDER BY arch, e.source`,
   ).all<{ source: string; arch: string; status: string; created_at: string; upstream_total: number | null; deferred: number | null; uploaded: number | null; removed: number | null }>();
@@ -93,6 +93,8 @@ export async function handleStats(env: Env): Promise<Response> {
       source,
       arch,
       upstream: expected?.upstream ?? null,
+      optional: expected?.optional ?? false,
+      title: expected?.title ?? null,
       upstream_total: r?.upstream_total ?? null,
       indexed: have?.objects ?? 0,
       bytes: have?.bytes ?? 0,

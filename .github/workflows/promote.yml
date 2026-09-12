@@ -154,6 +154,18 @@ jobs:
         run: |
           target/release/pkg-repo promote --from "${{ needs.plan.outputs.from }}" --to "${{ needs.plan.outputs.to }}" --note "${{ needs.plan.outputs.note }}"
           echo "promoted=true" >> "$GITHUB_OUTPUT"
+      - name: Fetch upstream keyrings
+        run: tests/fetch-keyrings.sh "$RUNNER_TEMP/keyrings"
+      - name: Align the OPR channel of ${{ needs.plan.outputs.to }}
+        # The OPR has its own edge / rc / stable channels; a ring serves the
+        # matching one, so the promoted OPR packages are replaced right away
+        # (the hourly sync keeps them aligned afterwards).
+        run: |
+          for arch in x86_64 aarch64; do
+            target/release/pkg-repo sync --source packages --arch "$arch" --ring "${{ needs.plan.outputs.to }}" \
+              --base-url "https://pkgs.omarchy.org/${{ needs.plan.outputs.to }}/$arch" --db-name omarchy \
+              --keyring "$RUNNER_TEMP/keyrings/omarchy.gpg" --work-dir "$RUNNER_TEMP/sync"
+          done
       - name: Render
         run: |
           for arch in x86_64 aarch64; do

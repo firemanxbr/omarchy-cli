@@ -29,13 +29,14 @@ export function version(env: Env): RunningVersion {
  * Every upstream repository the pipeline mirrors (the SOURCES table of
  * sync.yml), so the dashboard can show what has not been synced yet.
  */
-export const EXPECTED_SOURCES: { source: string; arch: string; upstream: string }[] = [
-  { source: "core", arch: "x86_64", upstream: "mirror.omarchy.org" },
-  { source: "extra", arch: "x86_64", upstream: "mirror.omarchy.org" },
-  { source: "multilib", arch: "x86_64", upstream: "mirror.omarchy.org" },
-  { source: "packages", arch: "x86_64", upstream: "pkgs.omarchy.org" },
-  { source: "core", arch: "aarch64", upstream: "os.archlinuxarm.org" },
-  { source: "extra", arch: "aarch64", upstream: "os.archlinuxarm.org" },
-  { source: "alarm", arch: "aarch64", upstream: "os.archlinuxarm.org" },
-  { source: "packages", arch: "aarch64", upstream: "pkgs.omarchy.org" },
+export const EXPECTED_SOURCES: { source: string; arch: string; upstream: string; optional?: boolean; title: string }[] = [
+  { source: "core", arch: "x86_64", upstream: "mirror.omarchy.org", title: "Arch Linux core" },
+  { source: "extra", arch: "x86_64", upstream: "mirror.omarchy.org", title: "Arch Linux extra" },
+  { source: "multilib", arch: "x86_64", upstream: "mirror.omarchy.org", title: "Arch Linux multilib" },
+  { source: "packages", arch: "x86_64", upstream: "pkgs.omarchy.org", title: "Omarchy (OPR), the ring's channel" },
+  { source: "chaotic", arch: "x86_64", upstream: "builds.garudalinux.org", optional: true, title: "chaotic-aur: prebuilt AUR packages (only names no other source provides)" },
+  { source: "core", arch: "aarch64", upstream: "os.archlinuxarm.org", title: "Arch Linux ARM core" },
+  { source: "extra", arch: "aarch64", upstream: "os.archlinuxarm.org", title: "Arch Linux ARM extra" },
+  { source: "alarm", arch: "aarch64", upstream: "os.archlinuxarm.org", title: "Arch Linux ARM alarm" },
+  { source: "packages", arch: "aarch64", upstream: "pkgs.omarchy.org", title: "Omarchy (OPR), the ring's channel" },
 ];

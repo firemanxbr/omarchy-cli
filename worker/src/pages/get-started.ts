@@ -28,6 +28,7 @@ const BODY = String.raw`
     <div class="step">
       <h3>3. Configure pacman</h3>
       <p>Add these sections to <code>/etc/pacman.conf</code> above <code>[core]</code>/<code>[extra]</code> — or replace them, the pool serves the same packages. The list is generated from what the ring serves right now.</p>
+      <div class="choice" id="optional"></div>
       <pre><span class="copy" data-copy="conf">copy</span><span id="conf"></span></pre>
       <p>Then:</p>
       <pre><span class="copy" data-copy="up">copy</span><span id="up-cmd">sudo pacman -Syu</span></pre>
@@ -56,7 +57,7 @@ const SCRIPT = String.raw`
   var q = new URLSearchParams(location.search);
   var ring = RINGS.indexOf(q.get("ring")) >= 0 ? q.get("ring") : "stable";
   var arch = ARCHES.indexOf(q.get("arch")) >= 0 ? q.get("arch") : "x86_64";
-  var data = null;
+  var data = null, optional = {};
 
   function pick(id, values, current, onpick) {
     $("#" + id).innerHTML = values.map(function (v) { return '<button class="' + (v === current ? "on" : "") + '" data-v="' + v + '">' + v + '</button>'; }).join("");
@@ -68,7 +69,18 @@ const SCRIPT = String.raw`
     $("#ring-desc").textContent = DESC[ring];
     $("#key-cmd").innerHTML = 'curl -O ' + POOL + '/omarchy-staging.pub.asc\nsudo pacman-key --add omarchy-staging.pub.asc &amp;&amp; sudo pacman-key --lsign-key staging@firemanxbr.org';
     var r = data ? data.rings.filter(function (x) { return x.ring === ring; })[0] : null;
-    var dbs = r ? (r.artifacts || []).filter(function (a) { return a.kind === "db" && a.arch === arch; }) : [];
+    var cov = data ? data.coverage || [] : [];
+    var optionalSources = cov.filter(function (c) { return c.optional && c.arch === arch; });
+    $("#optional").innerHTML = optionalSources.map(function (c) {
+      return '<button type="button" class="' + (optional[c.source] ? "on" : "") + '" data-v="' + esc(c.source) + '" title="' + esc(c.title || "") + '">' + (optional[c.source] ? "✓ " : "+ ") + esc(c.source) + '</button>';
+    }).join("") + (optionalSources.length ? '<span class="muted" style="font-size:12.5px;align-self:center">optional repositories — off unless you switch them on</span>' : '');
+    $("#optional").querySelectorAll("button").forEach(function (b) { b.onclick = function () { var v = b.getAttribute("data-v"); optional[v] = !optional[v]; draw(); }; });
+    var dbs = r ? (r.artifacts || []).filter(function (a) {
+      if (a.kind !== "db" || a.arch !== arch) return false;
+      var src = a.repo.replace(/^omarchy-/, "").replace(new RegExp("-" + ring + "$"), "");
+      var opt = cov.filter(function (c) { return c.source === src && c.arch === arch; })[0];
+      return !(opt && opt.optional) || optional[src];
+    }) : [];
     $("#conf").innerHTML = dbs.length
       ? dbs.map(function (a) { return "[<b>" + esc(a.repo) + "</b>]\nSigLevel = Required DatabaseRequired\nServer = " + POOL + "/$arch"; }).join("\n\n")
       : (data ? '<span class="c"># ' + ring + ' has no databases for ' + arch + ' yet — check the overview</span>' : '<span class="c"># loading what ' + ring + ' serves…</span>');

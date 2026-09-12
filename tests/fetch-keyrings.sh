@@ -54,3 +54,6 @@ extract_keyring "http://os.archlinuxarm.org/aarch64/core" \
 
 curl -sfL "https://raw.githubusercontent.com/omacom/omarchy-iso/quattro/builder/omarchy.gpg" -o "$OUT/omarchy.gpg"
 echo "$OUT/omarchy.gpg: $(stat -c%s "$OUT/omarchy.gpg" 2>/dev/null || stat -f%z "$OUT/omarchy.gpg") bytes (omarchy-iso builder/omarchy.gpg)"
+extract_keyring "https://builds.garudalinux.org/repos/chaotic-aur/x86_64" \
+  "$(latest https://builds.garudalinux.org/repos/chaotic-aur/x86_64 chaotic-aur chaotic-keyring)" \
+  usr/share/pacman/keyrings/chaotic.gpg "$OUT/chaotic.gpg"
