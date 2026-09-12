@@ -6,6 +6,7 @@ use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
 use pkg_manifest::{PackageManifest, RepoIndex};
 use pkg_repo::client::{Api, ReleaseRequest};
+use pkg_repo::gate::{self, GateOptions};
 use pkg_repo::sync::{self, SyncOptions};
 use pkg_repo::{build_database, sign, Flavor};
 
@@ -131,6 +132,35 @@ enum Command {
         #[arg(long)]
         ring: String,
     },
+    /// Prints the id of a ring's current release (nothing, exit 1, if the ring is empty).
+    Head {
+        #[command(flatten)]
+        remote: Remote,
+        #[arg(long)]
+        ring: String,
+    },
+    /// Decides from the recorded health evidence whether `--from` may be promoted
+    /// into `--to`. Exit 0: promote; 3: nothing to promote; 1: blocked.
+    Gate {
+        #[command(flatten)]
+        remote: Remote,
+        #[arg(long)]
+        from: String,
+        #[arg(long)]
+        to: String,
+        /// Architectures that need evidence (repeatable).
+        #[arg(long = "arch", default_values_t = ["x86_64".to_owned(), "aarch64".to_owned()])]
+        arches: Vec<String>,
+        /// Days without a failed health check of `--from` required first.
+        #[arg(long, default_value_t = 0)]
+        soak_days: u32,
+        /// The latest health check of `--from` must be younger than this.
+        #[arg(long, default_value_t = 24)]
+        max_age_hours: u32,
+        /// Decide and print without recording a `gate` event.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Renders, signs and uploads the pacman databases of a ring's current release,
     /// one `omarchy-<source>-<ring>` repo per source.
     Render {
@@ -242,6 +272,39 @@ fn main() -> Result<()> {
             note,
         } => rollback(&remote, &ring, to, note.as_deref()),
         Command::Releases { remote, ring } => releases(&remote, &ring),
+        Command::Head { remote, ring } => {
+            let api = Api::new(&remote.api, &remote.token)?;
+            match api.history(&ring)?.releases.iter().find(|r| r.is_head != 0) {
+                Some(head) => {
+                    println!("{}", head.id);
+                    Ok(())
+                }
+                None => std::process::exit(1),
+            }
+        }
+        Command::Gate {
+            remote,
+            from,
+            to,
+            arches,
+            soak_days,
+            max_age_hours,
+            dry_run,
+        } => {
+            let api = Api::new(&remote.api, &remote.token)?;
+            let report = gate::run(
+                &api,
+                &GateOptions {
+                    from: &from,
+                    to: &to,
+                    arches: &arches,
+                    soak_days,
+                    max_age_hours,
+                    dry_run,
+                },
+            )?;
+            std::process::exit(report.verdict.exit_code());
+        }
         Command::Render {
             remote,
             ring,

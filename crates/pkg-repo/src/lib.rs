@@ -8,6 +8,7 @@
 
 pub mod client;
 pub mod desc;
+pub mod gate;
 pub mod sign;
 pub mod sync;
 pub mod syncdb;
