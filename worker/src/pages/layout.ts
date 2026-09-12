@@ -83,7 +83,7 @@ const CSS = String.raw`
   main { max-width: 1240px; margin: 0 auto; padding: 36px 32px 64px; }
   .lede { color: var(--muted); margin: 8px 0 0; max-width: 78ch; }
 
-  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); margin: 28px 0 40px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(210px, 100%), 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); margin: 28px 0 40px; }
   .tile { background: var(--panel); padding: 18px 20px; }
   .tile .k { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--dim); }
   .tile .v { font-family: Geist, sans-serif; font-size: 30px; font-weight: 600; margin-top: 4px; }
@@ -93,7 +93,7 @@ const CSS = String.raw`
   section > h2 { margin-bottom: 4px; }
   section > p.sub { color: var(--muted); margin: 0 0 16px; font-size: 14px; }
 
-  .rings { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+  .rings { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); gap: 16px; }
   .ring { border: 1px solid var(--line); background: var(--panel); padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; }
   .ring .head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
   .ring .name { font-family: Geist, sans-serif; font-size: 20px; font-weight: 600; }
@@ -111,7 +111,7 @@ const CSS = String.raw`
   .archhead { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
   .archname { font-family: "JetBrains Mono", monospace; font-size: 12.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--dim); }
   pre .c { color: var(--dim); }
-  .howto { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 16px; }
+  .howto { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr)); gap: 16px; }
   .howto .arch { border: 1px solid var(--line); background: var(--panel); padding: 16px 18px; }
   .src { border: 1px solid var(--line); padding: 2px 8px; font-size: 12.5px; background: var(--panel-2); }
   pre { margin: 0; background: var(--bg-deep); border: 1px solid var(--line); padding: 10px 12px; font-size: 12.5px; overflow-x: auto; color: var(--muted); }
@@ -130,7 +130,7 @@ const CSS = String.raw`
   footer { border-top: 1px solid var(--line); background: var(--bg-deep); padding: 22px 32px; font-size: 13px; color: var(--dim); display: flex; gap: 24px; flex-wrap: wrap; }
   footer a { color: var(--muted); text-decoration: none; }
 
-  .charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 16px; margin: 16px 0; }
+  .charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr)); gap: 16px; margin: 16px 0; }
   .chart { border: 1px solid var(--line); background: var(--panel); padding: 14px 16px 10px; min-width: 0; }
   .chart h3 { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
   .chart h3 span { font-family: "JetBrains Mono", monospace; font-size: 12px; font-weight: 400; color: var(--dim); }
@@ -145,7 +145,24 @@ const CSS = String.raw`
   .legend i { display: inline-block; width: 10px; height: 10px; margin-right: 5px; vertical-align: middle; }
   a.run { color: var(--muted); text-decoration: none; border-bottom: 1px dotted var(--dim); }
   a.run:hover { color: var(--text); }
-  @media (max-width: 720px) { header { flex-wrap: wrap; gap: 12px 18px; } main { padding: 24px 18px 48px; } }
+  #graph { overflow-x: auto; } #graph svg { min-width: 720px; }
+  @media (max-width: 720px) {
+    header { display: grid; grid-template-columns: 1fr auto; grid-template-areas: "brand chip" "nav nav" "status gh"; gap: 10px 12px; padding: 12px 16px; align-items: center; }
+    header .brand { grid-area: brand; } header .ver { grid-area: chip; justify-self: end; } header .spacer { display: none; }
+    header nav { grid-area: nav; display: flex; gap: 18px; overflow-x: auto; white-space: nowrap; padding-bottom: 4px; margin: 0 -16px; padding-left: 16px; padding-right: 16px; scrollbar-width: none; }
+    header nav::-webkit-scrollbar { display: none; }
+    header #status { grid-area: status; } header .gh { grid-area: gh; justify-self: end; }
+    main { padding: 20px 16px 40px; }
+    h1 { font-size: 22px; line-height: 1.25; } h2 { font-size: 19px; }
+    .lede { font-size: 14px; }
+    .tile .v { font-size: 24px; }
+    .searchbar input { flex-basis: 100%; }
+    .meta { margin-bottom: 24px; }
+    ul.plain.cols { columns: 1; }
+    .step pre { padding-right: 12px; padding-top: 34px; } .copy { top: 6px; }
+    footer { padding: 18px 16px; gap: 10px 14px; }
+    section { margin-bottom: 32px; }
+  }
 `;
 
 /** Helpers shared by every page script; runs before the page's own script. */
@@ -199,7 +216,7 @@ const HELPERS = String.raw`
   function liveStats(render, everyMs) {
     function load() {
       serviceStatus();
-      fetch("/api/v1/stats", { cache: "no-store" }).then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+      fetch("/api/v1/stats").then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
         .then(function (d) { pipelineFrom(d); render(d); })
         .catch(function () {});
     }

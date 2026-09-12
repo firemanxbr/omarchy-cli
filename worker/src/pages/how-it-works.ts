@@ -131,7 +131,7 @@ export function howItWorksHtml(poolUrl: string, version: RunningVersion): string
     description: "Where the packages come from, how they are verified and stored, how the rings move on evidence, and what a user trusts.",
     active: "how-it-works",
     body: BODY,
-    script: "liveStats(function () {}, 30000);",
+    script: "liveStats(function () {}, 120000);",
     poolUrl,
     version,
   });

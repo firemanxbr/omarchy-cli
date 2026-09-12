@@ -50,7 +50,7 @@ const SEARCH_SCRIPT = String.raw`
   $("#q").value = q.get("q") || "";
   $("#q").addEventListener("input", function () { clearTimeout(timer); timer = setTimeout(function () { sync(); run(); }, 250); });
   sync(); run();
-  liveStats(function () {}, 60000);
+  liveStats(function () {}, 120000);
 `;
 
 const PACKAGE_BODY = String.raw`
@@ -191,11 +191,21 @@ const PACKAGE_SCRIPT = String.raw`
     }).catch(function (e) { $("#files").textContent = "failed: " + e; });
   };
 
-  fetch("/api/v1/package/" + encodeURIComponent(name) + "?ring=" + ring + "&arch=" + arch).then(function (r) { return r.json(); }).then(function (d) {
-    if (d.error) { $("#desc").textContent = d.error; $("#graph").innerHTML = ""; return; }
-    render(d);
-  }).catch(function (e) { $("#desc").textContent = "failed to load: " + e; });
-  liveStats(function () {}, 60000);
+  // The index can be busy during a bulk import; a transient 5xx gets retried.
+  function loadPackage(attempt) {
+    fetch("/api/v1/package/" + encodeURIComponent(name) + "?ring=" + ring + "&arch=" + arch).then(function (r) {
+      if (r.status >= 500) throw new Error("index busy (HTTP " + r.status + ")");
+      return r.json();
+    }).then(function (d) {
+      if (d.error) { $("#desc").textContent = d.error; $("#graph").innerHTML = ""; return; }
+      render(d);
+    }).catch(function (e) {
+      if (attempt < 4) { $("#desc").textContent = "The index is busy (" + e.message + "); retrying…"; setTimeout(function () { loadPackage(attempt + 1); }, 4000 * attempt); }
+      else $("#desc").textContent = "Could not load this package right now: " + e.message + ". Reload to try again.";
+    });
+  }
+  loadPackage(1);
+  liveStats(function () {}, 120000);
 `;
 
 export function packagesHtml(poolUrl: string, version: RunningVersion): string {

@@ -110,7 +110,7 @@ __CHARTS__
     renderSystem(d);
   }
 
-  liveStats(render, 20000);
+  liveStats(render, 60000);
 `;
 
 export function overviewHtml(poolUrl: string, version: RunningVersion): string {

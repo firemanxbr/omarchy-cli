@@ -91,8 +91,8 @@ const SCRIPT = String.raw`
       $("#service").innerHTML = '<div class="tile"><div class="k">API</div><div class="v" style="color:var(--red)">down</div><div class="s">' + esc(String(e)) + '</div></div>';
     });
   }
-  renderService(); setInterval(renderService, 20000);
-  liveStats(render, 20000);
+  renderService(); setInterval(renderService, 60000);
+  liveStats(render, 60000);
 `;
 
 export function statusHtml(poolUrl: string, version: RunningVersion): string {

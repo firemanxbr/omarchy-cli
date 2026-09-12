@@ -76,7 +76,7 @@ export function isRing(s: string): s is Ring {
 const API = "/api/v1";
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     const path = url.pathname;
     const { method } = request;
@@ -90,7 +90,7 @@ export default {
 
     try {
       if (path.startsWith(API + "/")) {
-        const res = await api(method, path.slice(API.length), url, request, env);
+        const res = await cachedApi(method, path.slice(API.length), url, request, env, ctx);
         res.headers.set("access-control-allow-origin", "*");
         return res;
       }
@@ -113,6 +113,35 @@ export default {
     }
   },
 } satisfies ExportedHandler<Env>;
+
+/**
+ * GET responses that declare `cache-control: public, max-age=N` are kept in
+ * the edge cache for that long, so a hundred dashboards polling cost one D1
+ * round of queries per colo, not a hundred. Everything else goes straight
+ * through.
+ */
+async function cachedApi(method: string, path: string, url: URL, request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  if (method !== "GET") return api(method, path, url, request, env);
+  const cache = caches.default;
+  const key = new Request(url.toString(), { method: "GET" });
+  const hit = await cache.match(key);
+  // The platform may rewrite cache-control on stored responses, so the
+  // expiry we mean travels in a header of our own.
+  if (hit && Number(hit.headers.get("x-pool-expires") ?? 0) > Date.now()) {
+    const res = new Response(hit.body, hit);
+    res.headers.set("x-pool-cache", "hit");
+    return res;
+  }
+  const res = await api(method, path, url, request, env);
+  const maxAge = Number(/max-age=(\d+)/.exec(res.headers.get("cache-control") ?? "")?.[1] ?? 0);
+  if (res.ok && (res.headers.get("cache-control") ?? "").includes("public") && maxAge > 0) {
+    const stored = new Response(res.clone().body, res);
+    stored.headers.set("x-pool-expires", String(Date.now() + maxAge * 1000));
+    ctx.waitUntil(cache.put(key, stored));
+  }
+  res.headers.set("x-pool-cache", "miss");
+  return res;
+}
 
 function html(body: string): Response {
   return new Response(body, {
