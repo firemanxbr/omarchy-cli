@@ -17,6 +17,8 @@
  *   GET  /api/v1/releases/:ring/history
  *   POST /api/v1/releases                          create / promote / roll back
  *   PUT  /api/v1/releases/:id/artifacts/:kind?repo=&arch=
+ *   GET  /api/v1/search?q=&ring=&arch=          package search within a ring
+ *   GET  /api/v1/package/:name[/files]?ring=&arch=  package page data: rings, manifest, edges
  *   GET  /api/v1/graph?targets=a,b&ring=stable
  *   POST /api/v1/events   GET /api/v1/events       activity log
  *   GET  /api/v1/stats                             everything the dashboard shows
@@ -32,6 +34,7 @@ import { handleMultipartComplete, handleMultipartCreate, handleMultipartPart, ha
 import { handleGetPackage, handleKnownPackages, handlePostPackage } from "./routes/packages";
 import { handleCreateRelease, handleGetRelease, handleReleaseHistory, handlePutArtifact } from "./routes/releases";
 import { handleGraph } from "./routes/graph";
+import { handlePackage, handlePackageFiles, handleSearch } from "./routes/search";
 import { handleGetEvents, handlePostEvent } from "./routes/events";
 import { handleServiceStatus, handleStats } from "./routes/stats";
 import { handleGc, handleUnreferenced } from "./routes/gc";
@@ -40,6 +43,7 @@ import { getStartedHtml } from "./pages/get-started";
 import { howItWorksHtml } from "./pages/how-it-works";
 import { statusHtml } from "./pages/status";
 import { apiDocsHtml } from "./pages/api-docs";
+import { packageHtml, packagesHtml } from "./pages/packages";
 import { DASHBOARD_HOST, LEGACY_DASHBOARD_HOST, version } from "./meta";
 import { handleStatic } from "./routes/static";
 import { requireAuth } from "./auth";
@@ -94,6 +98,8 @@ export default {
       if (path === "/how-it-works") return html(howItWorksHtml(env.POOL_URL, version(env)));
       if (path === "/status") return html(statusHtml(env.POOL_URL, version(env)));
       if (path === "/api" || path === "/api/") return html(apiDocsHtml(env.POOL_URL, version(env)));
+      if (path === "/packages") return html(packagesHtml(env.POOL_URL, version(env)));
+      if (path.startsWith("/package/")) return html(packageHtml(decodeURIComponent(path.slice("/package/".length)), env.POOL_URL, version(env)));
       return json({ error: "not found" }, 404);
     } catch (err) {
       console.error(err);
@@ -124,6 +130,9 @@ async function api(method: string, path: string, url: URL, request: Request, env
   if (method === "GET" && path === "/version") return json(version(env), 200, { "cache-control": "public, max-age=30" });
   if (method === "GET" && path === "/status") return handleServiceStatus(env);
   if (method === "GET" && path === "/graph") return handleGraph(url, env);
+  if (method === "GET" && path === "/search") return handleSearch(url, env);
+  if ((m = path.match(/^\/package\/([A-Za-z0-9@._+-]+)$/)) && method === "GET") return handlePackage(m[1], url, env);
+  if ((m = path.match(/^\/package\/([A-Za-z0-9@._+-]+)\/files$/)) && method === "GET") return handlePackageFiles(m[1], url, env);
   if (method === "GET" && path === "/events") return handleGetEvents(url, env);
   if (method === "GET" && path === "/pool/unreferenced") return handleUnreferenced(url, env);
   if (method === "POST" && path === "/pool/gc") return requireAuth(request, env) ?? handleGc(url, env);

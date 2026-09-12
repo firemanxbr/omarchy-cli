@@ -18,6 +18,8 @@ const BODY = String.raw`
       <tr><td><code>GET /releases/:ring?arch=&amp;limit=&amp;offset=&amp;release_id=</code></td><td>Full manifests, paged (≤ 1000 per request; above 2000 packages paging is required). Add <code>include=files</code> for file lists. <code>release_id</code> pins a release across pages.</td></tr>
       <tr><td><code>GET /releases/:ring/history</code></td><td>The ring's releases, newest first, with lineage (parent, from) and which one is the head.</td></tr>
       <tr><td><code>GET /packages/:sha256</code></td><td>One package object's manifest.</td></tr>
+      <tr><td><code>GET /search?q=&amp;ring=&amp;arch=&amp;limit=</code></td><td>Packages in the ring whose name or description matches (exact and prefix matches first).</td></tr>
+      <tr><td><code>GET /package/:name?ring=&amp;arch=</code> · <code>/files</code></td><td>Everything the package page shows: the version in every ring, the manifest, declared dependencies and loaded sonames resolved to their providers, what depends on it (declared or by loading one of its libraries); the file list separately.</td></tr>
       <tr><td><code>GET /graph?ring=&amp;arch=&amp;targets=a,b</code></td><td>Dependency closure of the targets within the ring's release: the manifests <code>omarchy-cli check</code> evaluates.</td></tr>
       <tr><td><code>GET /events?kind=&amp;limit=</code></td><td>The journal: sync, gate, promote, render, health, abi, rollback, deploy, gc, metrics.</td></tr>
       <tr><td><code>GET /pool/unreferenced?keep=3</code></td><td>What retention would delete now.</td></tr>
