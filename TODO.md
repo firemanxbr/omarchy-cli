@@ -97,6 +97,10 @@ request (see [CONTRIBUTING.md](CONTRIBUTING.md)), and keep
       it already has for that filename and says so in the journal; ask whether
       channel builds could be promoted as-is instead of rebuilt.
 
+- [ ] **Health summary shows an empty package count** in the journal ("( packages
+      across N repos)") when pacman's progress output hides the TOTAL line; the
+      parse was relaxed, verify on the next runs.
+
 ## Housekeeping
 
 - [ ] Rotate the staging key (`docs/omarchy-staging.pub.asc`, expires 2027-09-12)
