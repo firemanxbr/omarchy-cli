@@ -66,7 +66,7 @@ CHECK
 
 out=$("$RUNTIME" run --rm --platform "$PLATFORM" -v "$WORK:/repo:ro" "$IMAGE" bash /repo/check.sh 2>&1)
 code=$?
-total=$(grep -oE '^TOTAL=[0-9]+' <<<"$out" | cut -d= -f2)
+total=$(grep -oE 'TOTAL=[0-9]+' <<<"$out" | tail -1 | cut -d= -f2)
 echo "$out"
 if [[ $code -eq 0 ]]; then
   post ok "$RING $ARCH: pacman -Sy + signed download OK ($total packages across $(wc -w <<<"$repos" | tr -d " ") repos)" \

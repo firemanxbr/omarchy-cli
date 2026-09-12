@@ -9,6 +9,14 @@ request (see [CONTRIBUTING.md](CONTRIBUTING.md)), and keep
 
 ## Quick wins (an hour or so each)
 
+- [ ] **Reuse rendered databases when an architecture's selection did not change.**
+      A new release is rendered for both architectures even when only one moved
+      (a sync of an aarch64 source re-renders the 15k-package x86_64 `extra`
+      database, ~45 s). The worker can copy the parent release's artifact rows
+      for an architecture whose package set is identical.
+- [ ] **Prune `metrics` snapshots and old `security` matches** older than 90 days
+      in the GC workflow; both grow steadily.
+
 - [ ] **Hook preview in `omarchy-cli check`.** Parse the libalpm `.hook` files in
       `/usr/share/libalpm/hooks` and `/etc/pacman.d/hooks` and list which ones the
       plan would trigger (`mkinitcpio`, `glib-compile-schemas`, …). Read-only;
@@ -26,6 +34,18 @@ request (see [CONTRIBUTING.md](CONTRIBUTING.md)), and keep
       that costs the pool (cheap, but worth knowing).
 
 ## Medium (half a day)
+
+- [ ] **OSV for language ecosystems.** The security layer covers Arch and Debian
+      trackers, KEV and EPSS. OSV.dev (GHSA, PyPI, crates.io, Go, npm) would add
+      advisories for packages whose upstream is a language ecosystem — needs a
+      package → ecosystem/name mapping (the `url` in `.PKGINFO` is a start).
+- [ ] **Statically linked binaries.** Go binaries embed their module list
+      (`debug/buildinfo`), Rust ones only with `cargo-auditable`; extract it in
+      `pkg-extract` so CVEs in vendored crates/modules are visible, since no
+      soname reveals them.
+- [ ] **Security in the promotion gate.** Block a promotion that would move a
+      package from a clean version to one with an open advisory (exact
+      confidence) when the source ring also serves a clean one.
 
 - [ ] **Worker unit tests.** Cover `POST /api/v1/releases` (promote, rollback,
       add/remove, per-arch), the paged release view, `/graph?arch=` and `/stats`
@@ -78,4 +98,9 @@ upstream keyrings · resilient publishing (retries, parallel imports, per-source
 reports) · every Arch, Arch Linux ARM and OPR repository mirrored on both
 architectures · paged release view · evidence-driven promotion with ABI check and
 automatic rollback · releases of the pool itself on every merge · dashboard with
-coverage, charts and pipeline metrics.
+coverage, charts and pipeline metrics · user-facing dashboard (rings guidance, Get
+started, How it works, Status, API docs, mobile) · package search and package page
+with dependency graph · OPR channels per ring, chaotic-aur as optional repo ·
+security layer (Arch + Debian trackers, KEV, EPSS, confidence levels, exposure
+through the graph, fast-track of fixes, `omarchy-cli security`) · paged release
+view and linear release creation at 30k packages · edge-cached API reads.
