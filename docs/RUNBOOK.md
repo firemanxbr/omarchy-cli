@@ -1,0 +1,107 @@
+# Runbook
+
+Operating the staging environment. Nothing here is done by hand on the servers:
+every write goes through the worker with the publish token, which lives only in
+GitHub Actions secrets; humans and agents operate the pipeline through the
+workflows and the publisher.
+
+| | |
+|---|---|
+| Dashboard | https://dashboard-omarchy.firemanxbr.org |
+| Index API | https://pkgs.firemanxbr.org/api/v1/stats |
+| Pool (static, what pacman reads) | https://pool.firemanxbr.org/x86_64/ · `/aarch64/` |
+| Database signing key | `docs/omarchy-staging.pub.asc` · https://pool.firemanxbr.org/omarchy-staging.pub.asc (expires 2027-09-12) |
+| Workflows | Sync (hourly) · Promote (edge→rc daily, rc→stable Mondays, manual) · Health (daily, both arches) · GC (Sundays) |
+
+## Trust model
+
+* **Packages are never re-signed.** The sync imports a package only if its
+  upstream `.sig` verifies against the upstream project's keyring
+  (`archlinux.gpg`, `archlinuxarm.gpg`, `omarchy.gpg` — built by
+  `tests/fetch-keyrings.sh`). A machine using the pool verifies packages with the
+  keys it already trusts (`archlinux-keyring`, `archlinuxarm-keyring`, Omarchy's).
+* **Only the databases are signed by the staging key.** Trusting the pool means
+  trusting one key for `omarchy-*-<ring>.db`; nothing else.
+* **The pool is append-only.** The worker refuses to overwrite an existing object;
+  the only deletions are retention (`gc`), which never touches anything the last
+  three releases of any ring reference, nor anything younger than seven days.
+* **Releases are append-only.** Rollback creates a new release pointing at an old
+  selection; history is never rewritten. Every action posts an event.
+* **stable needs a human.** Promotions into `stable` run in the GitHub environment
+  `stable`, which requires a reviewer's approval; edge → rc is automatic.
+* **Nobody holds R2 credentials.** Reads are public objects; writes go through
+  the worker with `PUBLISH_TOKEN` (GitHub secret); the R2 bucket has no API tokens.
+
+## Everyday operations
+
+```bash
+# manual runs (repository variables OMARCHY_API/OMARCHY_POOL and secrets are set)
+gh workflow run sync.yml -f sources="core-x86_64 packages-x86_64" -f limit=0
+gh workflow run promote.yml -f from=edge -f to=rc -f note="…"
+gh workflow run promote.yml -f from=rc -f to=stable -f note="…"   # waits for approval
+gh workflow run health.yml
+gh workflow run gc.yml -f keep=3
+```
+
+Approve a stable promotion: GitHub → Actions → the waiting Promote run → *Review
+deployments* → approve. The run then promotes, renders both architectures and
+health-checks stable.
+
+Locally, with `OMARCHY_API`, `OMARCHY_PUBLISH_TOKEN` (and the GPG key) set:
+
+```bash
+pkg-repo releases --ring stable                    # history, head marked *
+pkg-repo rollback --ring stable --to <release id>  # then render
+pkg-repo render --ring stable --arch x86_64 --sign <key id>
+pkg-repo gc --keep 3                               # report; add --delete to free the pool
+```
+
+## Kill switch
+
+```bash
+for w in sync promote health gc; do gh workflow disable "$w.yml"; done   # stop all writes
+cd worker && npx wrangler secret put PUBLISH_TOKEN                       # or rotate the token
+```
+
+Reads keep working (static objects); nothing changes until the workflows are
+enabled again.
+
+## Reset (ephemeral by design)
+
+Everything is reproducible from `main` plus the secrets; a full rebuild from the
+mirrors takes a few hours.
+
+```bash
+cd worker
+npx wrangler d1 execute omarchy-repo --remote --command "DELETE FROM release_artifacts; DELETE FROM ring_heads; DELETE FROM release_packages; DELETE FROM releases; DELETE FROM package_files; DELETE FROM package_requires; DELETE FROM package_provides; DELETE FROM package_file_lists; DELETE FROM packages; DELETE FROM events; DELETE FROM sqlite_sequence;"
+# optionally empty the bucket (objects are re-uploaded by the next sync, or kept and re-indexed)
+gh workflow run sync.yml -f limit=0
+```
+
+## Rotate the database signing key
+
+```bash
+export GNUPGHOME=~/.cache/omarchy-cli-poc/gnupg
+gpg --batch --quiet --passphrase '' --quick-generate-key "Omarchy Staging Signing <staging@firemanxbr.org>" ed25519 sign 1y
+KEY=$(gpg --list-keys --with-colons staging@firemanxbr.org | awk -F: '/^fpr/{print $10; exit}')   # newest
+gpg --armor --export "$KEY" > docs/omarchy-staging.pub.asc
+gpg --batch --armor --export-secret-keys "$KEY" | gh secret set OMARCHY_GPG_KEY
+gh secret set OMARCHY_GPG_KEYID --body "$KEY"
+cd worker && npx wrangler r2 object put omarchy-packages/omarchy-staging.pub.asc --file ../docs/omarchy-staging.pub.asc --remote
+gh workflow run promote.yml -f from=rc -f to=rc   # re-render each ring with the new key
+```
+
+Clients must import the new public key (`pacman-key --add … && --lsign-key`).
+
+## Add a source or an architecture
+
+Add a line to the `SOURCES` table in `.github/workflows/sync.yml` (id, source,
+arch, directory URL, db name, keyring). If it is a new upstream project, add its
+keyring to `tests/fetch-keyrings.sh`. New architectures also need a health image
+in `tests/health-check.sh` and a runner in `health.yml`.
+
+## Budget
+
+R2 storage is the only cost that grows (~$0.015/GB-month; the full x86_64 Arch
+set is ~110 GB). Retention keeps it bounded to what the last three releases per
+ring reference. Workers Paid ($5/month) covers D1 and the worker.

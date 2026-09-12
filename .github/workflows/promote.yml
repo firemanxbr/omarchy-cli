@@ -31,6 +31,9 @@ env:
 jobs:
   promote:
     runs-on: ubuntu-latest
+    # Promotions into stable wait for a human approval (GitHub environment
+    # `stable`, required reviewer); edge → rc is automatic.
+    environment: ${{ (github.event.inputs.to == 'stable' || github.event.schedule == '0 7 * * 1') && 'stable' || 'automatic' }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master

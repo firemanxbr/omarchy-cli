@@ -13,8 +13,8 @@ and a **thin client** that understands releases and blocks unsafe partial upgrad
 
 > Status: proof of concept — results in [docs/POC-RESULTS.md](docs/POC-RESULTS.md).
 > See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design,
-> [docs/TESTING.md](docs/TESTING.md) for how to verify it, and [TODO.md](TODO.md)
-> if you want to help.
+> [docs/TESTING.md](docs/TESTING.md) for how to verify it, [docs/RUNBOOK.md](docs/RUNBOOK.md)
+> to operate the staging environment, and [TODO.md](TODO.md) if you want to help.
 
 ## The staging environment
 
