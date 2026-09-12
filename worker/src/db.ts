@@ -1,7 +1,7 @@
 /** Index queries shared by several routes. */
 
 import type { Env, Ring } from "./index";
-import { gunzipJson } from "./gzip";
+
 
 export interface ReleaseRow {
   id: number;
@@ -87,7 +87,9 @@ export async function releaseManifests(
         .all<{ package_id: number; gz: ArrayBuffer | number[] }>();
       for (const l of lists.results) {
         const m = byId.get(l.package_id);
-        if (m) m.files = await gunzipJson<string[]>(l.gz);
+        // Still compressed: the reader (pkg-repo render) inflates it; a page
+        // of 500 chaotic-aur games decompressed here exceeded the Worker.
+        if (m) (m as { files_gz?: string }).files_gz = toBase64(l.gz);
       }
     }
   }
@@ -103,4 +105,11 @@ export async function releaseSummary(env: Env, releaseId: number): Promise<{ pac
     .bind(releaseId)
     .first<{ package_count: number; size_download: number }>();
   return row ?? { package_count: 0, size_download: 0 };
+}
+
+function toBase64(gz: ArrayBuffer | number[]): string {
+  const bytes = gz instanceof ArrayBuffer ? new Uint8Array(gz) : Uint8Array.from(gz);
+  let s = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(s);
 }

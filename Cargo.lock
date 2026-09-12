@@ -876,6 +876,7 @@ name = "pkg-repo"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "base64",
  "clap",
  "flate2",
  "hex",

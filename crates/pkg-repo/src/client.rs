@@ -119,8 +119,31 @@ pub struct IndexedManifest {
     pub source: String,
     #[serde(default = "default_arch")]
     pub repo_arch: String,
+    /// The file list, gzip + base64, as `include=files` returns it (inflating
+    /// 500 of them per page was too much for the worker); `release()` moves
+    /// it into `manifest.files`.
+    #[serde(default)]
+    pub files_gz: Option<String>,
     #[serde(flatten)]
     pub manifest: PackageManifest,
+}
+
+impl IndexedManifest {
+    /// Inflates `files_gz` into `manifest.files`.
+    fn inflate_files(&mut self) -> Result<(), RepoError> {
+        use base64::Engine;
+        use std::io::Read;
+        let Some(gz) = self.files_gz.take() else {
+            return Ok(());
+        };
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(gz)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        let mut json = String::new();
+        flate2::read::GzDecoder::new(&bytes[..]).read_to_string(&mut json)?;
+        self.manifest.files = serde_json::from_str(&json)?;
+        Ok(())
+    }
 }
 
 fn default_source() -> String {
@@ -489,6 +512,10 @@ impl Api {
                 Ok(Self::check(resp)?.json()?)
             })?;
             let got = page.packages.len() as u64;
+            let mut page = page;
+            for p in &mut page.packages {
+                p.inflate_files()?;
+            }
             match &mut view {
                 None => view = Some(page),
                 Some(v) => v.packages.extend(page.packages),

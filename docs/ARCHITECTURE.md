@@ -59,7 +59,7 @@ Migrations live in `worker/migrations/`.
 | `POST /api/v1/packages?source=core` | index a manifest with its provenance |
 | `POST /api/v1/packages/known` | which sha256s the index already has (the sync's diff) |
 | `GET /api/v1/version` · `/status` | running release; service check measured now (index and pool reachable, timings) — what *online* in the dashboard header means |
-| `GET /api/v1/releases/:ring` · `/history` | current release, package list, lineage. `?fields=summary` is small; full manifests are paged (`?arch=&limit=≤1000&offset=&release_id=` — above 2000 packages an unpaged request is refused with 413, since a 15k-package ring with file lists exceeds one Worker invocation) |
+| `GET /api/v1/releases/:ring` · `/history` | current release, package list, lineage. `?fields=summary` is small; full manifests are paged (`?arch=&limit=≤1000&offset=&release_id=` — above 2000 packages an unpaged request is refused with 413, since a 15k-package ring with file lists exceeds one Worker invocation); `include=files` returns each file list still gzip-compressed (`files_gz`, base64) and the reader inflates it — 500 decompressed lists of chaotic-aur games per page exceeded the Worker |
 | `POST /api/v1/releases` | create / promote / roll back a release |
 | `PUT /api/v1/releases/:id/artifacts/:kind?repo=` | store a rendered database beside the packages |
 | `GET /api/v1/graph?targets=a,b&ring=stable&arch=` | dependency closure for the client's safety check — follows declared dependencies through *declared* provides (`package_provides.declared`, from `.PKGINFO`), as pacman does; the sonames a binary loads or ships never route the closure (a package bundling its own libstdc++ is not a provider of `libstdc++.so`) |
