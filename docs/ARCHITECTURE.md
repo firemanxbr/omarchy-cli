@@ -65,6 +65,7 @@ Migrations live in `worker/migrations/`.
 | `GET /api/v1/security?ring=&arch=` · `PUT /security/advisories` · `PUT /security/matches` | open advisories on what a ring serves (per package: confidence, severity, KEV/EPSS, rings already serving a clean version, how many packages depend on it or load one of its libraries); the writes are the Security workflow's |
 | `GET /api/v1/search?q=` · `/package/:name[/files]` | search within a ring; a package's versions per ring, manifest, forward edges (declared dependencies and loaded sonames resolved to providers) and reverse edges (declared, or by loading one of its libraries) — the package page and, later, CVE propagation |
 | `GET /api/v1/pool/unreferenced` · `POST /api/v1/pool/gc` | retention: what the last N releases do not reference |
+| `GET /api/v1/factory` · `POST /factory/{requests,enqueue,claim}` · `/factory/tasks/:id/{heartbeat,complete,fail,cancel}` | the factory's brain: package requests, build tasks with leases, the workers pulling them ([factory/README.md](../factory/README.md)) |
 | `POST /api/v1/events` · `GET /api/v1/events` · `GET /api/v1/stats` | activity log and the dashboard's data |
 | `GET /` | the dashboard |
 

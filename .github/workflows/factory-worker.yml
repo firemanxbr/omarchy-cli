@@ -1,0 +1,44 @@
+name: Factory worker
+run-name: Build worker (${{ inputs.arch }})
+
+# One ephemeral build worker on a GitHub-hosted runner — free on a public
+# repository, x86_64 and aarch64 natively. It is not the orchestrator: the
+# pool's scheduler starts it when tasks are queued and no worker of that
+# architecture is alive, and it asks Cloudflare for work like any other
+# worker (factory/worker/omarchy-build-worker.sh). Every task builds in a
+# fresh Arch container on the runner; signing and publishing happen on the
+# runner, outside the container. It exits after a few minutes without work;
+# the job cap keeps a stuck build from running for six hours.
+
+on:
+  workflow_dispatch:
+    inputs:
+      arch:
+        description: Architecture to build for
+        type: choice
+        options: [x86_64, aarch64]
+        default: x86_64
+      idle_exit:
+        description: Seconds without work before the worker exits
+        default: "300"
+
+jobs:
+  worker:
+    name: ${{ inputs.arch }} worker
+    runs-on: ${{ inputs.arch == 'aarch64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    timeout-minutes: 340
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build until the queue is empty
+        env:
+          OMARCHY_API: ${{ vars.OMARCHY_API }}
+          OMARCHY_POOL: ${{ vars.OMARCHY_POOL }}
+          FACTORY_TOKEN: ${{ secrets.FACTORY_TOKEN }}
+          OMARCHY_PUBLISH_TOKEN: ${{ secrets.OMARCHY_PUBLISH_TOKEN }}
+          OMARCHY_GPG_KEY: ${{ secrets.OMARCHY_GPG_KEY }}
+          OMARCHY_GPG_KEYID: ${{ secrets.OMARCHY_GPG_KEYID }}
+          WORKER_ARCH: ${{ inputs.arch }}
+          WORKER_ID: gh-${{ inputs.arch }}-${{ github.run_id }}
+          WORKER_LABELS: '{"where":"github-hosted","runner":"${{ runner.name }}","run":"${{ github.run_id }}"}'
+          IDLE_EXIT: ${{ inputs.idle_exit }}
+        run: bash factory/worker/omarchy-build-worker.sh

@@ -84,8 +84,9 @@ crates/
 worker/           Cloudflare Worker (TypeScript): index API, dashboard pages, scheduler; D1 migrations
 tests/            end-to-end scripts (real pacman), health check, ABI gate, keyring fetcher
 docs/             architecture, runbook, testing, migration, diagrams, the database key
+factory/          the factory: worker script, reviewed PKGBUILDs (a tenant; moves out later)
 poc/              the proof of concept: results, benchmarks, parked crates
-.github/          CI, E2E, Release (every merge), Sync, Promote, Health, Security, Metrics, GC
+.github/          CI, E2E, Release (every merge), Sync, Promote, Health, Security, Metrics, GC, Factory
 ```
 
 ## Releases

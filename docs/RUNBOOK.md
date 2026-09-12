@@ -133,6 +133,29 @@ cd worker && npx wrangler secret put GITHUB_TOKEN < ~/.cache/omarchy-cli-poc/git
 Without the secret the trigger logs "idle" and the workflow files' own
 schedules are all there is.
 
+## The factory
+
+What no upstream ships is built from `factory/pkgbuilds` by workers that pull
+tasks from the pool ([factory/README.md](../factory/README.md)). Day to day:
+
+- **Add a package**: open a pull request with
+  `factory/pkgbuilds/<group>/<name>/PKGBUILD`; the group's CODEOWNERS review
+  it; merging queues the builds. Check first that no source ships it for the
+  architecture (`curl $OMARCHY_API/api/v1/package/<name>`) — the enqueue
+  refuses those architectures.
+- **Rebuild**: *Actions → Factory enqueue → Run workflow* with `group/name`
+  (`override` builds even a name upstream ships).
+- **A failed task**: the Factory page shows the error and the log tail
+  (`GET /api/v1/factory/tasks/:id` has the full tail). Fix the PKGBUILD in a
+  pull request; merging queues it again.
+- **Workers**: the scheduler starts a hosted runner when tasks wait and no
+  worker is alive; a laptop or VM runs the same container (README, *Run a
+  worker*). Every worker holds the publish token and the signing key: treat
+  the machine as you would the CI runner.
+- **Tokens**: `FACTORY_TOKEN` (worker secret + GitHub secret) authenticates
+  workers only; rotate it with `npx wrangler secret put FACTORY_TOKEN` and
+  `gh secret set FACTORY_TOKEN`, then restart workers.
+
 ## Known limits
 
 * **D1 under a bulk import.** Importing a whole repository (thousands of

@@ -223,6 +223,24 @@ architectures, Coverage lists every source, the journal shows `dispatch` lines
 from the scheduler. Point a test machine at `stable` with *Get started* and run
 `pacman -Syu`.
 
+## F2. The factory
+
+`factory/` (worker script, PKGBUILDs, CODEOWNERS) and the two
+`factory-*.yml` workflows are a **tenant** of this repository, not part of the
+pool: they should move to their own repository once a home exists (the
+contract is in [factory/README.md](../factory/README.md), *The contract*).
+Until then, moving the pool moves them too:
+
+- Secrets: `FACTORY_TOKEN` on the worker (`npx wrangler secret put
+  FACTORY_TOKEN`, any random string) and, for hosted runners, the same value as
+  the GitHub secret `FACTORY_TOKEN` (A3). Workers you run elsewhere get it by
+  hand.
+- `REPO_URL` in `factory/worker/omarchy-build-worker.sh` and `repo` in
+  `worker/src/routes/factory.ts` name the repository holding the PKGBUILDs.
+- When the factory leaves, delete `factory/`, the two workflows and the
+  CODEOWNERS lines; keep `worker/src/routes/factory.ts`, migration 0007 and the
+  `factory` source — they are the pool's side of the contract.
+
 ## G. What the old owner keeps, and can then remove
 
 Nothing of the new deployment depends on the old accounts. When the new one is

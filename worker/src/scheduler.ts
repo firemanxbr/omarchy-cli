@@ -1,4 +1,5 @@
 import type { Env } from "./index";
+import { requeueExpiredLeases } from "./routes/factory";
 
 /**
  * The pool's own scheduler. GitHub's cron is best-effort — on 2026-09-12 it
@@ -28,6 +29,7 @@ export const RULES: Rule[] = [
   { workflow: "sync.yml", every: 60 },
   { workflow: "metrics.yml", every: 30 },
   { workflow: "security.yml", every: 180 },
+  { workflow: "factory-enqueue.yml", every: 60 },
   { workflow: "promote.yml", at: { hour: 6, minute: 0 }, inputs: { from: "edge", to: "rc", note: "daily rc" } },
   { workflow: "promote.yml", at: { hour: 9, minute: 0 }, inputs: { from: "rc", to: "stable", note: "daily stable" } },
   { workflow: "health.yml", at: { hour: 8, minute: 30 } },
@@ -89,8 +91,32 @@ export function isDue(rule: Rule, runs: RunSummary[], now: Date): { due: boolean
   return { due: false, why: "no rule" };
 }
 
+/**
+ * The factory queue lives in D1; workers can run anywhere. GitHub's hosted
+ * runners are one free, ephemeral place to run them (x86_64 and aarch64
+ * natively on a public repository), so when tasks are queued for an
+ * architecture and no worker of that architecture is alive, the scheduler
+ * starts one there. It is a worker like any other: it claims from Cloudflare.
+ */
+export async function factoryDemand(env: Env, now = new Date()): Promise<{ arch: string; queued: number; alive: number }[]> {
+  const rows = await env.DB.prepare(
+    `SELECT arch, COUNT(*) AS queued,
+            (SELECT COUNT(*) FROM build_workers w WHERE w.arch = t.arch AND w.last_seen > ?) AS alive
+       FROM build_tasks t WHERE status = 'queued' GROUP BY arch`,
+  )
+    .bind(new Date(now.getTime() - 10 * 60000).toISOString())
+    .all<{ arch: string; queued: number; alive: number }>();
+  return rows.results;
+}
+
 export async function runScheduler(env: Env, now = new Date()): Promise<string[]> {
   const log: string[] = [];
+  try {
+    const n = await requeueExpiredLeases(env);
+    if (n) log.push(`factory: ${n} expired lease(s) back in the queue`);
+  } catch (e) {
+    log.push(`factory requeue: ${String(e)}`);
+  }
   if (!env.GITHUB_TOKEN) {
     log.push("GITHUB_TOKEN not set; scheduler idle");
     return log;
@@ -114,6 +140,27 @@ export async function runScheduler(env: Env, now = new Date()): Promise<string[]
     } catch (e) {
       log.push(`${rule.workflow}: ${String(e)}`);
     }
+  }
+  try {
+    for (const d of await factoryDemand(env, now)) {
+      if (d.alive > 0) {
+        log.push(`factory ${d.arch}: ${d.queued} queued, ${d.alive} worker(s) alive`);
+        continue;
+      }
+      const runs = await recentRuns(env, "factory-worker.yml");
+      const busy = runs.find((r) => (r.display_title ?? "").includes(d.arch) && ["queued", "in_progress", "waiting", "pending"].includes(r.status));
+      if (busy) {
+        log.push(`factory ${d.arch}: a hosted worker is ${busy.status}`);
+        continue;
+      }
+      await dispatch(env, "factory-worker.yml", { arch: d.arch });
+      log.push(`factory ${d.arch}: hosted worker dispatched for ${d.queued} queued task(s)`);
+      await env.DB.prepare("INSERT INTO events (kind, ring, source, status, summary, payload) VALUES ('dispatch', NULL, 'factory', 'ok', ?, ?)")
+        .bind(`hosted ${d.arch} build worker started by the pool scheduler — ${d.queued} task(s) queued, no worker alive`, JSON.stringify({ workflow: "factory-worker.yml", arch: d.arch, queued: d.queued }))
+        .run();
+    }
+  } catch (e) {
+    log.push(`factory workers: ${String(e)}`);
   }
   return log;
 }

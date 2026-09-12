@@ -28,7 +28,7 @@ interface Manifest {
 }
 
 const OPS = [">=", "<=", "=", ">", "<"];
-export const SOURCES = ["core", "extra", "multilib", "alarm", "packages", "chaotic"] as const;
+export const SOURCES = ["core", "extra", "multilib", "alarm", "packages", "chaotic", "factory"] as const;
 
 /** Parses the Arch dependency syntax the Rust side serializes rules as. */
 export function parseRule(s: string): Rule {

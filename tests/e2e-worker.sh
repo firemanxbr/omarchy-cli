@@ -45,7 +45,7 @@ step "Fresh local worker on :$PORT"
 rm -rf "$E2E" && mkdir -p "$E2E"
 cd "$ROOT/worker"
 WRANGLER_STATE="$E2E/wrangler-state"
-echo "PUBLISH_TOKEN=$OMARCHY_PUBLISH_TOKEN" > "$E2E/.dev.vars"
+printf 'PUBLISH_TOKEN=%s\nFACTORY_TOKEN=e2e-factory\n' "$OMARCHY_PUBLISH_TOKEN" > "$E2E/.dev.vars"
 npx wrangler d1 migrations apply omarchy-repo --local --persist-to "$WRANGLER_STATE" >/dev/null
 npx wrangler dev --ip 0.0.0.0 --port "$PORT" --persist-to "$WRANGLER_STATE" \
   --env-file "$E2E/.dev.vars" --var "POOL_URL:http://$HOST_FROM_CONTAINER:$PORT/pool" > "$E2E/wrangler.log" 2>&1 &
@@ -120,6 +120,41 @@ grep -q '"via":"zlib"' <<<"$pkg_sec" || echo "note: xz is not exposed through zl
 status_body=$(curl -s "$OMARCHY_API/api/v1/status")
 grep -q '"state":"online"' <<<"$status_body" || { echo "service status not online: $status_body"; exit 1; }
 echo "databases, signatures, package blobs, Range requests, stats, pages, security and service status OK"
+
+step "Factory: enqueue, claim with a lease, fail → requeue, complete after publish"
+fauth=(-H "authorization: Bearer e2e-factory" -H "content-type: application/json")
+# The guard: xz is served by 'packages' for x86_64 → refused there; aarch64 has nobody → queued.
+enq=$(curl -s -X POST "$OMARCHY_API/api/v1/factory/enqueue" "${auth[@]}" -d '{"name":"xz","group":"community","pkgbuild_ref":"deadbeef","reason":"pkgbuild-changed","arches":["x86_64","aarch64"]}')
+grep -q '"arches":\["aarch64"\]' <<<"$enq" || { echo "enqueue did not skip the upstream-served arch: $enq"; exit 1; }
+grep -q '"source":"packages"' <<<"$enq" || { echo "enqueue did not name who ships it: $enq"; exit 1; }
+refused=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/enqueue" "${auth[@]}" -d '{"name":"xz","group":"community","pkgbuild_ref":"deadbeef","reason":"x","arches":["x86_64"]}')
+[[ "$refused" == 409 ]] || { echo "expected 409 for a name upstream ships, got $refused"; exit 1; }
+tid=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["tasks"][0])' <<<"$enq")
+[[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/claim" "${auth[@]}" -d '{"worker":"w","arch":"aarch64"}')" == 401 ]] || { echo "publish token must not claim"; exit 1; }
+claim=$(curl -s -X POST "$OMARCHY_API/api/v1/factory/claim" "${fauth[@]}" -d '{"worker":"w1","arch":"aarch64","hostname":"e2e"}')
+grep -q "\"id\":$tid," <<<"$claim" || { echo "claim did not return the queued task: $claim"; exit 1; }
+[[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/claim" "${fauth[@]}" -d '{"worker":"w2","arch":"aarch64"}')" == 204 ]] || { echo "second worker must get nothing"; exit 1; }
+[[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/tasks/$tid/heartbeat" "${fauth[@]}" -d '{"worker":"w2"}')" == 409 ]] || { echo "a stranger must not heartbeat"; exit 1; }
+curl -sf -X POST "$OMARCHY_API/api/v1/factory/tasks/$tid/heartbeat" "${fauth[@]}" -d '{"worker":"w1"}' >/dev/null
+failed=$(curl -s -X POST "$OMARCHY_API/api/v1/factory/tasks/$tid/fail" "${fauth[@]}" -d '{"worker":"w1","error":"boom"}')
+grep -q '"status":"queued"' <<<"$failed" || { echo "first failure must requeue: $failed"; exit 1; }
+claim2=$(curl -s -X POST "$OMARCHY_API/api/v1/factory/claim" "${fauth[@]}" -d '{"worker":"w2","arch":"aarch64"}')
+grep -q '"attempts":2' <<<"$claim2" || { echo "second claim must be attempt 2: $claim2"; exit 1; }
+[[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/tasks/$tid/complete" "${fauth[@]}" -d '{"worker":"w2","sha256":"0000","filename":"nope"}')" == 409 ]] || { echo "complete before publish must be refused"; exit 1; }
+# The "build result" must be in the pool: the xz object already published
+# stands in for it (the fixtures are x86_64 packages; the brain checks the
+# pool, not the architecture of the bytes).
+xz_sha=$(sha256sum "$E2E/pkgs/xz-5.8.4-1-x86_64.pkg.tar.zst" | cut -d' ' -f1)
+done_body=$(curl -s -X POST "$OMARCHY_API/api/v1/factory/tasks/$tid/complete" "${fauth[@]}" -d "{\"worker\":\"w2\",\"sha256\":\"$xz_sha\",\"filename\":\"xz-5.8.4-1-x86_64.pkg.tar.zst\",\"version\":\"5.8.4-1\",\"duration_ms\":1200}")
+grep -q '"status":"done"' <<<"$done_body" || { echo "complete failed: $done_body"; exit 1; }
+fac=$(curl -s "$OMARCHY_API/api/v1/factory")
+grep -q '"builds_done":1' <<<"$fac" || { echo "worker stats missing: $fac"; exit 1; }
+built=$(curl -s "$OMARCHY_API/api/v1/factory/built")
+grep -q '"name":"xz","arch":"aarch64"' <<<"$built" || { echo "built list missing the task: $built"; exit 1; }
+fpage=$(curl -s "$OMARCHY_API/factory"); grep -q "Factory" <<<"$fpage" || { echo "factory page not served"; exit 1; }
+# A signature for bytes the pool does not serve under that filename is refused.
+[[ "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$OMARCHY_API/api/v1/pool/$(printf 'a%.0s' {1..64})/sig?filename=xz-5.8.4-1-x86_64.pkg.tar.zst&arch=x86_64" -H "authorization: Bearer $OMARCHY_PUBLISH_TOKEN" --data-binary "@$E2E/pkgs/xz-5.8.4-1-x86_64.pkg.tar.zst.sig")" == 409 ]] || { echo "a mismatching signature must be refused"; exit 1; }
+echo "factory queue, lease, requeue, guard and completion OK"
 
 step "pacman in $IMAGE against the worker mirror"
 gpg --armor --export "$KEYID" > "$E2E/omarchy-poc.pub.asc"
