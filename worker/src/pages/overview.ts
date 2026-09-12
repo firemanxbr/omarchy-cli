@@ -190,10 +190,18 @@ const CHARTS = String.raw`  // ---- tiny SVG charts (no library; the page has no
     var pool = d.pool, refAny = pool.referenced_by_any_release || {}, rec = pool.reclaimable || { objects: 0, bytes: 0 };
     var ringBytes = d.rings.reduce(function (x, r) { return x + (r.bytes || 0); }, 0);
     var pending = Math.max(0, (pool.objects || 0) - (refAny.objects || 0));
+    var lastSyncEv = latest(d.events, "sync"), synced = (d.coverage || []).filter(function (c) { return c.upstream_total != null; }).length, expected = (d.coverage || []).length;
+    var sec = d.security || {}, secEv = latest(d.latest, "security");
+    var now = new Date(), utcH = now.getUTCHours() + now.getUTCMinutes() / 60;
+    var nextRc = utcH < 6 ? 6 - utcH : 30 - utcH, nextStable = utcH < 9 ? 9 - utcH : 33 - utcH;
+    var fmtH = function (h) { return h < 1 ? Math.round(h * 60) + " min" : Math.floor(h) + " h " + Math.round((h % 1) * 60) + " min"; };
     var tiles = [
       ["Jobs running now", a ? num(a.running) : "—", a ? "GitHub Actions jobs executing or queued" : "no metrics snapshot yet"],
       ["Runs, 7 days", a ? num(a.runs) : "—", a ? num(a.failures) + " failed · " + num(a.runs - a.failures - a.running) + " succeeded" : ""],
       ["Runner minutes, 7 days", a ? num(a.minutes) : "—", "GitHub-hosted, x86_64 and arm64"],
+      ["Sources", synced + " / " + expected, lastSyncEv ? "last sync " + ago(lastSyncEv.created_at) + " · every hour" : "no sync yet"],
+      ["Next promotion", "edge → rc in " + fmtH(nextRc), "rc → stable in " + fmtH(nextStable) + " · 06:00 and 09:00 UTC daily"],
+      ["Security data", sec.updated_at ? ago(sec.updated_at) : "never", num(sec.advisories) + " advisories · Arch + Debian trackers, KEV, EPSS · every 3 h" + (secEv && secEv.status !== "ok" ? " · last run " + secEv.status : "")],
       ["Stored once", bytes(pool.bytes), num(pool.objects) + " objects, one per sha256"],
       ["Served by the rings", bytes(ringBytes), "what three copied trees would hold"],
       ["Reclaimable", bytes(rec.bytes), num(rec.objects) + " objects past retention" + (pending ? " · " + num(pending) + " awaiting a release" : "")],
