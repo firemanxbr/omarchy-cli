@@ -150,3 +150,32 @@ export async function handleStats(env: Env): Promise<Response> {
     { "cache-control": "public, max-age=30" },
   );
 }
+
+/**
+ * Service status, measured now: the index (one D1 query) and the pool (an R2
+ * HEAD of the latest rendered database). This is what "online" means in the
+ * header — the pipeline's own state (syncs, health) is a separate matter.
+ */
+export async function handleServiceStatus(env: Env): Promise<Response> {
+  const t0 = Date.now();
+  const index = await env.DB.prepare("SELECT COUNT(*) AS n FROM ring_heads")
+    .first<{ n: number }>()
+    .then((r) => ({ ok: true, ms: Date.now() - t0, rings: r?.n ?? 0 }))
+    .catch((e: unknown) => ({ ok: false, ms: Date.now() - t0, error: String(e) }));
+  // The most recently rendered database is an object the pipeline guarantees;
+  // before any render, listing the bucket is the check.
+  const last = await env.DB.prepare("SELECT r2_key FROM release_artifacts WHERE kind = 'db' ORDER BY created_at DESC LIMIT 1")
+    .first<{ r2_key: string }>()
+    .catch(() => null);
+  const t1 = Date.now();
+  const pool = await (last
+    ? env.PACKAGES.head(last.r2_key).then((o) => ({ ok: o !== null, ms: Date.now() - t1, key: last.r2_key, error: o === null ? "rendered database missing from the pool" : undefined }))
+    : env.PACKAGES.list({ limit: 1 }).then(() => ({ ok: true, ms: Date.now() - t1, key: null, error: undefined }))
+  ).catch((e: unknown) => ({ ok: false, ms: Date.now() - t1, key: null, error: String(e) }));
+  const ok = index.ok && pool.ok;
+  return json(
+    { ok, state: ok ? "online" : "degraded", api: { ok: true }, index, pool, checked_at: new Date().toISOString() },
+    ok ? 200 : 503,
+    { "cache-control": "no-store" },
+  );
+}
