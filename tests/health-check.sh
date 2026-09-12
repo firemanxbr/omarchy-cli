@@ -46,13 +46,13 @@ fi
   echo "SigLevel = Required DatabaseRequired"
   for repo in $repos; do printf '\n[%s]\nServer = %s/$arch\n' "$repo" "$POOL"; done
 } > "$WORK/pacman.conf"
-cp "$ROOT/docs/omarchy-poc.pub.asc" "$WORK/"
+cp "$ROOT/docs/omarchy-staging.pub.asc" "$WORK/omarchy-poc.pub.asc"
 cat > "$WORK/check.sh" <<CHECK
 set -euo pipefail
 pacman-key --init >/dev/null 2>&1
 pacman-key --populate $KEYRING >/dev/null 2>&1 || true
 pacman-key --add /repo/omarchy-poc.pub.asc >/dev/null 2>&1
-pacman-key --lsign-key poc@omarchy.invalid >/dev/null 2>&1
+pacman-key --lsign-key staging@firemanxbr.org >/dev/null 2>&1
 pacman --config /repo/pacman.conf -Sy
 total=0
 for repo in $(grep -oE '^\[[a-z0-9-]+\]' /repo/pacman.conf | tr -d '[]' | grep -v options); do

@@ -36,8 +36,14 @@ Server = https://pool.firemanxbr.org/$arch
 Server = https://pool.firemanxbr.org/$arch
 ```
 
-Databases and packages are signed with a throwaway key (`docs/omarchy-poc.pub.asc`,
-expires 2026-10-11): `pacman-key --add docs/omarchy-poc.pub.asc && pacman-key --lsign-key poc@omarchy.invalid`.
+Databases are signed with the staging key (`docs/omarchy-staging.pub.asc`, also at
+`https://pool.firemanxbr.org/omarchy-staging.pub.asc`, expires 2027-09-12); packages
+keep their upstream Arch / Arch Linux ARM / Omarchy signatures:
+
+```bash
+curl -O https://pool.firemanxbr.org/omarchy-staging.pub.asc
+sudo pacman-key --add omarchy-staging.pub.asc && sudo pacman-key --lsign-key staging@firemanxbr.org
+```
 
 The index API lives at **https://pkgs.firemanxbr.org/api/v1/** and the thin client
 uses it by default:

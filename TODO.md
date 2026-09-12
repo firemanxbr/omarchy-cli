@@ -71,10 +71,7 @@ PR, and keep [docs/TESTING.md](docs/TESTING.md) in step with what you add.
 
 ## Housekeeping
 
-- [ ] Replace the throwaway POC key (`docs/omarchy-poc.pub.asc`, expires
-      2026-10-11) before it expires or the staging mirror stops validating.
-- [ ] `tests/e2e-client.sh` depends on `pkgs.firemanxbr.org` being up; mirror the
-      fixture publish into the script (like `e2e-worker.sh`) so CI does not depend on
-      staging.
+- [ ] Rotate the staging key (`docs/omarchy-staging.pub.asc`, expires 2027-09-12)
+      before it expires; the workflows read it from the `OMARCHY_GPG_KEY` secret.
 - [ ] Pin the `archlinux:base` image digests used by the e2e scripts for
       reproducible runs.

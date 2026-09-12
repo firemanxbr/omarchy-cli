@@ -69,6 +69,12 @@ const HTML = String.raw`<!doctype html>
   .kv dt { color: var(--dim); }
   .kv dd { margin: 0; }
   .sources { display: flex; flex-wrap: wrap; gap: 6px; }
+  .arch { border-top: 1px solid var(--line); padding-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+  .archhead { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .archname { font-family: "JetBrains Mono", monospace; font-size: 12.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--dim); }
+  pre .c { color: var(--dim); }
+  .howto { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 16px; }
+  .howto .arch { border: 1px solid var(--line); background: var(--panel); padding: 16px 18px; }
   .src { border: 1px solid var(--line); padding: 2px 8px; font-size: 12.5px; background: var(--panel-2); }
   pre { margin: 0; background: var(--bg-deep); border: 1px solid var(--line); padding: 10px 12px; font-size: 12.5px; overflow-x: auto; color: var(--muted); }
   pre b { color: var(--green); font-weight: 500; }
@@ -104,8 +110,8 @@ const HTML = String.raw`<!doctype html>
 
 <main>
   <h1>One pool, three rings, zero copies</h1>
-  <p class="lede">Packages are uploaded once into an immutable pool. <code>edge</code>, <code>rc</code> and <code>stable</code> are pinned selections in an index; promotion is an index write and the pacman databases are rendered from it. This page shows the pipeline running on the real Arch <code>core</code>/<code>extra</code>/<code>multilib</code> packages.</p>
-  <div class="notice"><b>Evidence environment.</b> Throwaway signing key, no SLA, may be reset at any time. Do not point a real machine's pacman here.</div>
+  <p class="lede">Packages are uploaded once into an immutable pool. <code>edge</code>, <code>rc</code> and <code>stable</code> are pinned selections in an index; promotion is an index write and the pacman databases are rendered from it. This page shows the pipeline running on the real Arch <code>core</code>/<code>extra</code>/<code>multilib</code> (x86_64), Arch Linux ARM (aarch64) and Omarchy (OPR) packages.</p>
+  <div class="notice"><b>Evidence environment.</b> Databases are signed with a staging key; packages keep their upstream signatures. No SLA, may be reset. Use it on test machines.</div>
 
   <div class="tiles" id="tiles"></div>
 
@@ -116,9 +122,15 @@ const HTML = String.raw`<!doctype html>
   </section>
 
   <section>
+    <h2>Try it</h2>
+    <p class="sub">Point a test machine or a container at <code>stable</code>. It is an evidence environment — expect resets.</p>
+    <div class="howto" id="howto"></div>
+  </section>
+
+  <section>
     <h2>Activity</h2>
     <p class="sub">Syncs from the upstream mirror, promotions, renders and health checks, newest first.</p>
-    <div class="table-wrap"><table id="events"><thead><tr><th>Status</th><th>Kind</th><th>Ring</th><th>Source</th><th>Summary</th><th class="num">Took</th><th>When</th></tr></thead><tbody></tbody></table></div>
+    <div class="table-wrap"><table id="events"><thead><tr><th>Status</th><th>Kind</th><th>Ring</th><th>Source / arch</th><th>Summary</th><th class="num">Took</th><th>When</th></tr></thead><tbody></tbody></table></div>
   </section>
 
   <section>
@@ -145,40 +157,64 @@ const HTML = String.raw`<!doctype html>
   function num(n) { return Number(n || 0).toLocaleString("en-US"); }
   function ago(iso) { if (!iso) return "—"; var s = (Date.now() - Date.parse(iso)) / 1000; if (s < 60) return Math.floor(s) + "s ago"; if (s < 3600) return Math.floor(s / 60) + "m ago"; if (s < 86400) return Math.floor(s / 3600) + "h ago"; return Math.floor(s / 86400) + "d ago"; }
   function dur(ms) { if (ms == null) return ""; if (ms < 1000) return ms + " ms"; if (ms < 60000) return (ms / 1000).toFixed(1) + " s"; return Math.floor(ms / 60000) + "m " + Math.round((ms % 60000) / 1000) + "s"; }
-  function latest(list, kind, ring, source) { for (var i = 0; i < list.length; i++) { var e = list[i]; if (e.kind === kind && (ring == null || e.ring === ring) && (source == null || e.source === source)) return e; } return null; }
+  function latest(list, kind, ring, source) {
+    for (var i = 0; i < list.length; i++) { var e = list[i]; if (e.kind === kind && (ring == null || e.ring === ring) && (source == null || e.source === source)) return e; }
+    // Events recorded before the architecture was tracked have no source; they were x86_64.
+    if (source === "x86_64") for (var j = 0; j < list.length; j++) { var f = list[j]; if (f.kind === kind && (ring == null || f.ring === ring) && !f.source) return f; }
+    return null;
+  }
 
   function render(d) {
     var pool = d.pool, refHeads = pool.referenced_by_heads || {}, refAny = pool.referenced_by_any_release || {};
     var ringBytes = d.rings.reduce(function (a, r) { return a + (r.bytes || 0); }, 0);
     var lastSync = latest(d.events, "sync");
-    var reclaimable = Math.max(0, (pool.bytes || 0) - (refAny.bytes || 0));
+    var rec = pool.reclaimable || { objects: 0, bytes: 0 };
+    var pending = Math.max(0, (pool.objects || 0) - (refAny.objects || 0));
     var tiles = [
       ["Pool objects", num(pool.objects), num(pool.names) + " package names, uploaded once"],
       ["Stored once", bytes(pool.bytes), "keyed by sha256 in one bucket"],
       ["Served by the rings", bytes(ringBytes), "what three copied trees would hold"],
-      ["Reclaimable", bytes(reclaimable), num((pool.objects || 0) - (refAny.objects || 0)) + " objects no release references"],
+      ["Reclaimable", bytes(rec.bytes), num(rec.objects) + " objects past retention" + (pending ? " · " + num(pending) + " awaiting a release" : "")],
       ["Last sync", lastSync ? ago(lastSync.created_at) : "never", lastSync ? esc(lastSync.summary) : "waiting for the first run"]
     ];
     $("#tiles").innerHTML = tiles.map(function (t) { return '<div class="tile"><div class="k">' + t[0] + '</div><div class="v num">' + t[1] + '</div><div class="s">' + t[2] + '</div></div>'; }).join("");
 
+    var ARCHES = ["x86_64", "aarch64"];
     $("#rings").innerHTML = d.rings.map(function (r) {
       var rel = r.release;
-      var health = latest(d.latest, "health", r.ring);
-      var rendered = (r.artifacts || []).filter(function (a) { return a.kind === "db"; });
-      var conf = rendered.length
-        ? rendered.map(function (a) { return "[<b>" + esc(a.repo) + "</b>]\nServer = " + POOL + "/$arch"; }).join("\n\n")
-        : "# no database rendered yet";
-      var srcs = (r.sources || []).map(function (s) { return '<span class="src">' + esc(s.source) + ' <span class="muted">' + num(s.packages) + '</span></span>'; }).join("");
-      return '<div class="ring">' +
-        '<div class="head"><span class="name">' + r.ring + '</span>' +
+      var archBlocks = ARCHES.map(function (arch) {
+        var srcs = (r.sources || []).filter(function (s) { return s.arch === arch; });
+        var dbs = (r.artifacts || []).filter(function (a) { return a.kind === "db" && a.arch === arch; });
+        if (!srcs.length && !dbs.length) return "";
+        var health = latest(d.latest, "health", r.ring, arch);
+        var conf = dbs.length
+          ? dbs.map(function (a) { return "[<b>" + esc(a.repo) + "</b>]\nServer = " + POOL + "/$arch"; }).join("\n\n")
+          : "# no database rendered yet";
+        return '<div class="arch"><div class="archhead"><span class="archname">' + arch + '</span>' +
           (health ? '<span class="pill ' + health.status + '">health ' + health.status + ' · ' + ago(health.created_at) + '</span>' : '<span class="pill none">no health check yet</span>') + '</div>' +
+          '<div class="sources">' + srcs.map(function (s) { return '<span class="src">' + esc(s.source) + ' <span class="muted">' + num(s.packages) + '</span></span>'; }).join("") + '</div>' +
+          '<pre>' + conf + '</pre></div>';
+      }).join("");
+      return '<div class="ring">' +
+        '<div class="head"><span class="name">' + r.ring + '</span><span class="rel">' + num(r.package_count) + ' pkgs · ' + bytes(r.bytes) + '</span></div>' +
         (rel ? '<div class="rel">release <b>#' + rel.seq + '</b> (id ' + rel.id + ') · ' + ago(rel.created_at) + (rel.note ? ' · ' + esc(rel.note) : '') + '</div>' : '<div class="rel">no release yet</div>') +
-        '<dl class="kv"><dt>packages</dt><dd class="num">' + num(r.package_count) + '</dd><dt>size</dt><dd class="num">' + bytes(r.bytes) + '</dd>' +
-        '<dt>databases</dt><dd>' + (rendered.length ? rendered.map(function (a) { return esc(a.repo) + '.db <span class="muted">(' + ago(a.created_at) + ')</span>'; }).join('<br>') : '<span class="muted">not rendered</span>') + '</dd></dl>' +
-        '<div class="sources">' + (srcs || '<span class="muted">empty</span>') + '</div>' +
-        '<pre>' + conf + '</pre>' +
+        (archBlocks || '<div class="muted">empty</div>') +
       '</div>';
     }).join("");
+
+    // How to use: whatever stable serves right now, per architecture.
+    var stable = d.rings.filter(function (r) { return r.ring === "stable"; })[0];
+    $("#howto").innerHTML = ARCHES.map(function (arch) {
+      var dbs = stable ? (stable.artifacts || []).filter(function (a) { return a.kind === "db" && a.arch === arch; }) : [];
+      if (!dbs.length) return "";
+      return '<div class="arch"><div class="archhead"><span class="archname">' + arch + '</span></div><pre>' +
+        '<span class="c"># 1. trust the staging database key (packages keep their upstream signatures)</span>\n' +
+        'curl -O ' + POOL + '/omarchy-staging.pub.asc\n' +
+        'sudo pacman-key --add omarchy-staging.pub.asc &amp;&amp; sudo pacman-key --lsign-key staging@firemanxbr.org\n\n' +
+        '<span class="c"># 2. /etc/pacman.conf — put these above [core]/[extra], or replace them</span>\n' +
+        dbs.map(function (a) { return "[<b>" + esc(a.repo) + "</b>]\nSigLevel = Required DatabaseRequired\nServer = " + POOL + "/$arch"; }).join("\n\n") +
+        '\n\n<span class="c"># 3.</span>\nsudo pacman -Syu</pre></div>';
+    }).join("") || '<p class="muted">stable has no rendered databases yet.</p>';
 
     $("#events tbody").innerHTML = d.events.map(function (e) {
       return '<tr><td><span class="dot ' + e.status + '"></span>' + e.status + '</td><td><span class="kind">' + esc(e.kind) + '</span></td><td>' + esc(e.ring || "") + '</td><td>' + esc(e.source || "") + '</td><td>' + esc(e.summary) + '</td><td class="num">' + dur(e.duration_ms) + '</td><td class="when" title="' + esc(e.created_at) + '">' + ago(e.created_at) + '</td></tr>';

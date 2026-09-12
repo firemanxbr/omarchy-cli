@@ -37,6 +37,14 @@ export async function handleStats(env: Env): Promise<Response> {
     `SELECT COUNT(*) AS objects, COALESCE(SUM(size_download), 0) AS bytes FROM packages
       WHERE id IN (SELECT package_id FROM release_packages)`,
   ).first<{ objects: number; bytes: number }>();
+  // What GC would actually delete now: unreferenced by the last 3 releases and past the grace period.
+  const reclaimable = await env.DB.prepare(
+    `SELECT COUNT(*) AS objects, COALESCE(SUM(size_download), 0) AS bytes FROM packages
+      WHERE id NOT IN (SELECT rp.package_id FROM release_packages rp
+                        WHERE rp.release_id IN (SELECT id FROM releases r WHERE r.id IN (
+                          SELECT id FROM releases r2 WHERE r2.ring = r.ring ORDER BY seq DESC LIMIT 3)))
+        AND created_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-7 days')`,
+  ).first<{ objects: number; bytes: number }>();
   const bySource = await env.DB.prepare(
     "SELECT source, repo_arch AS arch, COUNT(*) AS objects, COALESCE(SUM(size_download), 0) AS bytes FROM packages GROUP BY source, repo_arch ORDER BY repo_arch, source",
   ).all();
@@ -61,7 +69,7 @@ export async function handleStats(env: Env): Promise<Response> {
     {
       generated_at: new Date().toISOString(),
       rings,
-      pool: { ...pool, by_source: bySource.results, referenced_by_heads: referenced, referenced_by_any_release: anyRelease },
+      pool: { ...pool, by_source: bySource.results, referenced_by_heads: referenced, referenced_by_any_release: anyRelease, reclaimable },
       releases: releases.results,
       events: events.results.map(parse),
       latest: lastByKind.results.map(parse),
