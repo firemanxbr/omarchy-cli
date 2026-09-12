@@ -106,9 +106,20 @@ search_body=$(curl -s "$OMARCHY_API/api/v1/search?q=zlib&ring=stable")
 grep -q '"name":"zlib"' <<<"$search_body" || { echo "search did not find zlib: $search_body"; exit 1; }
 pkg_body=$(curl -s "$OMARCHY_API/api/v1/package/zlib?ring=stable")
 grep -q '"shown_ring":"stable"' <<<"$pkg_body" || { echo "package page data missing: $pkg_body"; exit 1; }
+# Security: an advisory on the served zlib object shows up in the ring's report,
+# and what loads libz.so.1 counts as exposed.
+zlib_sha=$(python3 -c 'import json,sys; d=json.load(sys.stdin); print([p["sha256"] for p in d["packages"] if p["name"]=="zlib"][0])' <<<"$(curl -s "$OMARCHY_API/api/v1/releases/stable?fields=summary")")
+auth=(-H "authorization: Bearer $OMARCHY_PUBLISH_TOKEN" -H "content-type: application/json")
+curl -sf -X PUT "$OMARCHY_API/api/v1/security/advisories" "${auth[@]}" -d '{"advisories":[{"id":"arch:AVG-9999:zlib","source":"arch","package":"zlib","cves":["CVE-2099-0001"],"severity":"high","status":"vulnerable","fixed":null,"url":"https://security.archlinux.org/AVG-9999"}],"cves":[{"cve":"CVE-2099-0001","kev":true,"epss":0.9}]}' >/dev/null
+curl -sf -X PUT "$OMARCHY_API/api/v1/security/matches" "${auth[@]}" -d "{\"matches\":[{\"sha256\":\"$zlib_sha\",\"advisory\":\"arch:AVG-9999:zlib\",\"match\":\"exact\",\"status\":\"vulnerable\"}]}" >/dev/null
+sec_body=$(curl -s "$OMARCHY_API/api/v1/security?ring=stable")
+grep -q '"name":"zlib"' <<<"$sec_body" || { echo "security report missing zlib: $sec_body"; exit 1; }
+grep -q '"kev":1\|"kev":true' <<<"$sec_body" || { echo "KEV flag missing: $sec_body"; exit 1; }
+pkg_sec=$(curl -s "$OMARCHY_API/api/v1/package/xz?ring=stable")
+grep -q '"via":"zlib"' <<<"$pkg_sec" || echo "note: xz is not exposed through zlib in the fixtures ($(python3 -c 'import json,sys; print(json.load(sys.stdin)["security"])' <<<"$pkg_sec"))"
 status_body=$(curl -s "$OMARCHY_API/api/v1/status")
 grep -q '"state":"online"' <<<"$status_body" || { echo "service status not online: $status_body"; exit 1; }
-echo "databases, signatures, package blobs, Range requests, stats, pages and service status OK"
+echo "databases, signatures, package blobs, Range requests, stats, pages, security and service status OK"
 
 step "pacman in $IMAGE against the worker mirror"
 gpg --armor --export "$KEYID" > "$E2E/omarchy-poc.pub.asc"

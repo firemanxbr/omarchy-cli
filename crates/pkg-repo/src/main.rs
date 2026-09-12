@@ -7,6 +7,7 @@ use clap::{Args, Parser, Subcommand};
 use pkg_manifest::{PackageManifest, RepoIndex};
 use pkg_repo::client::{Api, ReleaseRequest};
 use pkg_repo::gate::{self, GateOptions};
+use pkg_repo::security::{self, SecurityOptions};
 use pkg_repo::sync::{self, SyncOptions};
 use pkg_repo::{build_database, sign, Flavor};
 
@@ -44,6 +45,28 @@ struct GateArgs {
     #[arg(long, default_value_t = 24)]
     max_age_hours: u32,
     /// Decide and print without recording a `gate` event.
+    #[arg(long)]
+    dry_run: bool,
+}
+
+#[derive(Args)]
+struct SecurityArgs {
+    /// Arch Security Tracker dump (`https://security.archlinux.org/issues/all.json`).
+    #[arg(long)]
+    arch_tracker: PathBuf,
+    /// Debian Security Tracker dump (`https://security-tracker.debian.org/tracker/data/json`).
+    #[arg(long)]
+    debian: Option<PathBuf>,
+    /// CISA Known Exploited Vulnerabilities JSON.
+    #[arg(long)]
+    kev: Option<PathBuf>,
+    /// FIRST EPSS scores CSV (decompressed).
+    #[arg(long)]
+    epss: Option<PathBuf>,
+    /// Rings whose served objects are matched (repeatable).
+    #[arg(long = "ring", default_values_t = ["edge".to_owned(), "rc".to_owned(), "stable".to_owned()])]
+    rings: Vec<String>,
+    /// Match and report without writing to the index.
     #[arg(long)]
     dry_run: bool,
 }
@@ -195,6 +218,14 @@ enum Command {
         #[arg(long)]
         delete: bool,
     },
+    /// Matches public vulnerability advisories against what the rings serve
+    /// and records them in the index.
+    Security {
+        #[command(flatten)]
+        remote: Remote,
+        #[command(flatten)]
+        args: SecurityArgs,
+    },
     /// Records an event for the dashboard (health checks, gates, notes).
     Event {
         #[command(flatten)]
@@ -286,6 +317,7 @@ fn main() -> Result<()> {
         Command::Releases { remote, ring } => releases(&remote, &ring),
         Command::Head { remote, ring } => head(&remote, &ring),
         Command::Gate { remote, args } => run_gate(&remote, &args),
+        Command::Security { remote, args } => run_security(&remote, args),
         Command::Render {
             remote,
             ring,
@@ -327,6 +359,22 @@ fn record_event(remote: &Remote, event: &serde_json::Value, payload: Option<&str
         .context("--payload must be JSON")?;
     event["payload"] = payload.unwrap_or(serde_json::Value::Null);
     api.post_event(&event)?;
+    Ok(())
+}
+
+fn run_security(remote: &Remote, args: SecurityArgs) -> Result<()> {
+    let api = Api::new(&remote.api, &remote.token)?;
+    security::run(
+        &api,
+        &SecurityOptions {
+            arch_tracker: args.arch_tracker,
+            debian: args.debian,
+            kev: args.kev,
+            epss: args.epss,
+            rings: args.rings,
+            dry_run: args.dry_run,
+        },
+    )?;
     Ok(())
 }
 

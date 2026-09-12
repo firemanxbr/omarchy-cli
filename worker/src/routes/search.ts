@@ -149,11 +149,53 @@ export async function handlePackage(name: string, url: URL, env: Env): Promise<R
     requiredBy.set(r.name, e);
   }
 
+  // Security: advisories on this object, and open ones on what it depends on
+  // or loads (direct exposure; deeper levels are the graph's job).
+  const advisoriesOf = async (ids: number[]) =>
+    ids.length
+      ? (
+          await env.DB.prepare(
+            `SELECT pa.package_id, pa.match, pa.status AS object_status, a.id, a.source AS tracker, a.package, a.cves, a.severity, a.fixed, a.summary, a.url,
+                    (SELECT MAX(c.kev) FROM cve_meta c WHERE c.cve IN (SELECT value FROM json_each(a.cves))) AS kev,
+                    (SELECT MAX(c.epss) FROM cve_meta c WHERE c.cve IN (SELECT value FROM json_each(a.cves))) AS epss
+               FROM package_advisories pa JOIN advisories a ON a.id = pa.advisory_id
+              WHERE pa.package_id IN (SELECT value FROM json_each(?))
+              ORDER BY CASE a.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END`,
+          )
+            .bind(JSON.stringify(ids))
+            .all<{ package_id: number; match: string; object_status: string; id: string; tracker: string; package: string; cves: string; severity: string; fixed: string | null; summary: string | null; url: string; kev: number | null; epss: number | null }>()
+        ).results.map((r) => ({ ...r, cves: JSON.parse(r.cves) as string[], kev: !!r.kev }))
+      : [];
+  const own = await advisoriesOf([chosen.id]);
+  const providerNames = [...new Set([...depends, ...links].map((x) => x.provider?.name).filter((n): n is string => !!n))];
+  const providerIds = providerNames.length
+    ? (
+        await env.DB.prepare(
+          `SELECT p.id, p.name FROM release_packages rp JOIN packages p ON p.id = rp.package_id
+            WHERE rp.release_id = ?1 AND p.repo_arch = ?2 AND p.name IN (SELECT value FROM json_each(?3))`,
+        )
+          .bind(head.id, s.arch, JSON.stringify(providerNames))
+          .all<{ id: number; name: string }>()
+      ).results
+    : [];
+  const providerAdvisories = (await advisoriesOf(providerIds.map((p) => p.id))).filter((a) => a.object_status === "vulnerable");
+  const nameOfId = new Map(providerIds.map((p) => [p.id, p.name]));
+  const exposed = providerAdvisories.map((a) => ({
+    via: nameOfId.get(a.package_id),
+    declared: depends.some((d) => d.provider?.name === nameOfId.get(a.package_id)),
+    sonames: links.filter((l) => l.provider?.name === nameOfId.get(a.package_id)).map((l) => l.soname),
+    advisory: { id: a.id, tracker: a.tracker, cves: a.cves, severity: a.severity, fixed: a.fixed, summary: a.summary, url: a.url, match: a.match, kev: a.kev, epss: a.epss },
+  }));
+
   return json(
     {
       name: chosen.name,
       arch: s.arch,
       shown_ring: pick.ring,
+      security: {
+        advisories: own.map((a) => ({ id: a.id, tracker: a.tracker, cves: a.cves, severity: a.severity, status: a.object_status, match: a.match, fixed: a.fixed, summary: a.summary, url: a.url, kev: a.kev, epss: a.epss })),
+        exposed,
+      },
       rings: inRings,
       package: { version: chosen.version, arch: chosen.arch, source: chosen.source, filename: chosen.filename, sha256: chosen.sha256, size_download: chosen.size_download, size_installed: chosen.size_installed, has_signature: chosen.has_signature === 1, created_at: chosen.created_at },
       manifest,

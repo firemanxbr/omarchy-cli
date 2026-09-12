@@ -59,6 +59,15 @@ const PACKAGE_BODY = String.raw`
   <p class="lede" id="desc"></p>
   <div class="meta" id="meta"></div>
 
+  <section id="sec-section">
+    <h2>Security <span id="sec-badge"></span></h2>
+    <p class="sub">Advisories on this version, and open advisories on what it depends on or loads (direct exposure). Confidence: <b>exact</b> = the tracker knows this distribution's version; <b>name-version</b> = Debian fixed it in a newer version than ours; <b>name-only</b> = still open upstream, possibly affected.</p>
+    <div class="charts">
+      <div class="chart"><h3>On this package</h3><div id="sec-own"></div></div>
+      <div class="chart"><h3>Exposed through</h3><div id="sec-exposed"></div></div>
+    </div>
+  </section>
+
   <section>
     <h2>In the rings</h2>
     <p class="sub">The version each ring serves for <span id="arch-label"></span>. Same sha256 means the very same file.</p>
@@ -94,6 +103,8 @@ const PACKAGE_SCRIPT = String.raw`
   function link(n) { return '<a href="/package/' + encodeURIComponent(n) + '?ring=' + ring + '&arch=' + arch + '">' + esc(n) + '</a>'; }
 
   function graph(d) {
+    var vulnProviders = {};
+    ((d.security && d.security.exposed) || []).forEach(function (e) { vulnProviders[e.via] = vulnProviders[e.via] || []; vulnProviders[e.via].push(e.advisory); });
     var left = d.required_by.slice(0, 22), moreLeft = d.required_by.length - left.length;
     var right = {};
     d.depends.forEach(function (x) { var k = x.provider ? x.provider.name : x.name; right[k] = right[k] || { name: k, provided: !!x.provider, declared: false, sonames: [] }; right[k].declared = true; });
@@ -103,11 +114,13 @@ const PACKAGE_SCRIPT = String.raw`
     var body = '<defs><marker id="m" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L10 5L0 10z" fill="#8b93b8"/></marker></defs>';
     function node(x, y, w, n, color, title, sub) {
       var href = '/package/' + encodeURIComponent(n) + '?ring=' + ring + '&arch=' + arch;
-      return '<a href="' + href + '"><rect x="' + x + '" y="' + (y - 10) + '" width="' + w + '" height="21" rx="3" fill="#13141c" stroke="' + color + '"/><text x="' + (x + 8) + '" y="' + (y + 4) + '" fill="#c0caf5" font-size="12">' + esc(n.length > 34 ? n.slice(0, 33) + "…" : n) + '</text>' + (sub ? '<text x="' + (x + w - 8) + '" y="' + (y + 4) + '" fill="#8b93b8" font-size="10" text-anchor="end">' + esc(sub) + '</text>' : '') + '<title>' + esc(title) + '</title></a>';
+      var vuln = vulnProviders[n];
+      var badge = vuln ? '<circle cx="' + (x + w - 4) + '" cy="' + (y - 8) + '" r="6" fill="#f7768e"><title>' + esc(vuln.length + " open advisor" + (vuln.length > 1 ? "ies" : "y") + ": " + vuln.map(function (a) { return a.cves.join(","); }).join("; ")) + '</title></circle><text x="' + (x + w - 4) + '" y="' + (y - 5) + '" fill="#0c0e10" font-size="9" text-anchor="middle" font-weight="700">!</text>' : '';
+      return '<a href="' + href + '"><rect x="' + x + '" y="' + (y - 10) + '" width="' + w + '" height="21" rx="3" fill="#13141c" stroke="' + (vuln ? "#f7768e" : color) + '"/><text x="' + (x + 8) + '" y="' + (y + 4) + '" fill="#c0caf5" font-size="12">' + esc(n.length > 34 ? n.slice(0, 33) + "…" : n) + '</text>' + (sub ? '<text x="' + (x + w - 8) + '" y="' + (y + 4) + '" fill="#8b93b8" font-size="10" text-anchor="end">' + esc(sub) + '</text>' : '') + '<title>' + esc(title) + '</title></a>' + badge;
     }
-    // centre
-    var cy = H / 2;
-    body += '<rect x="' + (cx - 90) + '" y="' + (cy - 14) + '" width="180" height="29" rx="3" fill="#9ece6a"/><text x="' + cx + '" y="' + (cy + 5) + '" text-anchor="middle" fill="#0c0e10" font-size="13" font-weight="600">' + esc(d.name) + '</text>';
+    // centre: red when this version itself has an open advisory
+    var cy = H / 2, ownOpen = ((d.security && d.security.advisories) || []).filter(function (a) { return a.status === "vulnerable"; }).length;
+    body += '<rect x="' + (cx - 90) + '" y="' + (cy - 14) + '" width="180" height="29" rx="3" fill="' + (ownOpen ? "#f7768e" : "#9ece6a") + '"/><text x="' + cx + '" y="' + (cy + 5) + '" text-anchor="middle" fill="#0c0e10" font-size="13" font-weight="600">' + esc(d.name) + '</text>';
     left.forEach(function (n, i) {
       var y = 20 + i * rh, color = n.declared ? "#7aa2f7" : "#9ece6a";
       body += '<path d="M' + (20 + colW) + ' ' + y + ' C ' + (cx - 160) + ' ' + y + ', ' + (cx - 160) + ' ' + cy + ', ' + (cx - 92) + ' ' + cy + '" fill="none" stroke="' + color + '" stroke-opacity="0.45" marker-end="url(#m)"/>';
@@ -145,12 +158,28 @@ const PACKAGE_SCRIPT = String.raw`
       return '<tr' + (r === ring ? ' style="background:var(--panel-2)"' : '') + '><td>' + r + (r === ring ? ' <span class="pill ok">shown</span>' : ' <a class="run" href="?ring=' + r + '&arch=' + arch + '">show</a>') + '</td><td class="mono">' + esc(row.version) + '</td><td>#' + row.release_seq + '</td><td><span class="src">' + esc(row.source) + '</span></td><td class="mono" title="' + esc(row.sha256) + '">' + esc(row.sha256.slice(0, 16)) + '…</td><td class="num">' + bytes(row.size_download) + '</td></tr>';
     }).join("");
     graph(d);
+    renderSecurity(d);
     $("#deps").innerHTML = d.depends.length ? '<ul class="plain">' + d.depends.map(function (x) { return '<li>' + (x.provider ? link(x.provider.name) + ' <span class="muted">' + esc(x.provider.version) + '</span>' + (x.provider.name !== x.name ? ' <span class="muted">provides ' + esc(x.name) + '</span>' : '') : esc(x.name) + ' <span class="muted">not in this ring</span>') + '</li>'; }).join("") + '</ul>' : '<div class="empty">no declared dependencies</div>';
     $("#links").innerHTML = d.links.length ? '<ul class="plain">' + d.links.map(function (x) { return '<li><span class="mono">' + esc(x.soname) + '</span> <span class="muted">← ' + (x.provider ? link(x.provider.name) : "not in this ring") + '</span></li>'; }).join("") + '</ul>' : '<div class="empty">no ELF binaries, or nothing dynamically linked</div>';
     $("#rb-count").textContent = d.required_by.length + (d.required_by.length >= 400 ? "+" : "");
     $("#rb").innerHTML = d.required_by.length ? '<ul class="plain cols">' + d.required_by.map(function (x) { return '<li>' + link(x.name) + ' <span class="muted" title="' + esc(x.sonames.join(", ")) + '">' + (x.declared ? "declared" : "") + (x.declared && x.sonames.length ? " + " : "") + (x.sonames.length ? "loads " + x.sonames.length + " lib" + (x.sonames.length > 1 ? "s" : "") : "") + '</span></li>'; }).join("") + '</ul>' : '<div class="empty">nothing in ' + ring + ' depends on it</div>';
     var prov = (m.provides || []).filter(function (x) { return x.split(/[<>=]/)[0] !== d.name; });
     $("#provides").innerHTML = prov.length ? '<ul class="plain cols">' + prov.map(function (x) { return '<li class="mono">' + esc(x) + '</li>'; }).join("") + '</ul>' : '<div class="empty">only itself</div>';
+  }
+
+  function sevPill(s) { var c = { critical: "var(--red)", high: "var(--red)", medium: "var(--amber)", low: "var(--blue)", unknown: "var(--dim)" }[s] || "var(--dim)"; return '<span class="pill" style="color:' + c + ';border-color:' + c + '">' + s + '</span>'; }
+  function advLine(a) {
+    return '<li>' + sevPill(a.severity) + ' <a class="run" href="' + esc(a.url) + '">' + esc(a.cves.join(", ") || a.id) + '</a> <span class="muted">' + esc(a.match) + (a.fixed ? ' · fixed in ' + esc(a.fixed) : '') + (a.kev ? ' · <span style="color:var(--red)">exploited in the wild</span>' : '') + (a.epss != null && a.epss >= 0.1 ? ' · EPSS ' + (a.epss * 100).toFixed(0) + '%' : '') + '</span>' + (a.summary ? '<div class="muted" style="font-size:12.5px">' + esc(a.summary.length > 160 ? a.summary.slice(0, 159) + "…" : a.summary) + '</div>' : '') + '</li>';
+  }
+  function renderSecurity(d) {
+    var s = d.security || { advisories: [], exposed: [] };
+    var open = s.advisories.filter(function (a) { return a.status === "vulnerable"; }), fixed = s.advisories.filter(function (a) { return a.status !== "vulnerable"; });
+    $("#sec-badge").innerHTML = open.length ? '<span class="pill error">' + open.length + ' open</span>' : (s.exposed.length ? '<span class="pill warn">exposed via ' + s.exposed.length + '</span>' : '<span class="pill ok">no open advisory</span>');
+    $("#sec-own").innerHTML = (open.length ? '<ul class="plain">' + open.map(advLine).join("") + '</ul>' : '<div class="empty">no open advisory on ' + esc(d.package.version) + '</div>') +
+      (fixed.length ? '<details style="margin-top:8px"><summary class="muted" style="cursor:pointer;font-size:12.5px">' + fixed.length + ' advisor' + (fixed.length > 1 ? "ies" : "y") + ' fixed in this version</summary><ul class="plain">' + fixed.map(advLine).join("") + '</ul></details>' : '');
+    $("#sec-exposed").innerHTML = s.exposed.length ? '<ul class="plain">' + s.exposed.map(function (e) {
+      return '<li>' + sevPill(e.advisory.severity) + ' ' + link(e.via) + ' <span class="muted">' + (e.declared ? "declared" : "") + (e.declared && e.sonames.length ? " + " : "") + (e.sonames.length ? "loads " + esc(e.sonames.join(", ")) : "") + ' · <a class="run" href="' + esc(e.advisory.url) + '">' + esc(e.advisory.cves.join(", ")) + '</a> · ' + esc(e.advisory.match) + '</span></li>';
+    }).join("") + '</ul>' : '<div class="empty">nothing it depends on or loads has an open advisory</div>';
   }
 
   $("#load-files").onclick = function () {
