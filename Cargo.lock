@@ -775,7 +775,7 @@ dependencies = [
 
 [[package]]
 name = "omarchy-cli"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -815,7 +815,7 @@ checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
 
 [[package]]
 name = "pkg-check"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "pkg-extract",
  "pkg-manifest",
@@ -835,7 +835,7 @@ checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
 
 [[package]]
 name = "pkg-extract"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -855,7 +855,7 @@ dependencies = [
 
 [[package]]
 name = "pkg-hooks"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "thiserror",
  "tracing",
@@ -863,7 +863,7 @@ dependencies = [
 
 [[package]]
 name = "pkg-manifest"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "schemars",
  "serde",
@@ -873,7 +873,7 @@ dependencies = [
 
 [[package]]
 name = "pkg-repo"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -895,7 +895,7 @@ dependencies = [
 
 [[package]]
 name = "pkg-store"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "hex",
  "pkg-extract",

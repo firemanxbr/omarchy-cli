@@ -39,6 +39,8 @@ const HTML = String.raw`<!doctype html>
   header .spacer { flex: 1; }
   .btn { background: var(--green); color: var(--green-ink); font-weight: 500; padding: 6px 14px; text-decoration: none; font-size: 14px; }
   .btn:hover { filter: brightness(1.08); }
+  .ver { font-size: 12.5px; letter-spacing: .04em; color: var(--green); border: 1px solid var(--green); padding: 2px 8px; text-decoration: none; white-space: nowrap; }
+  .ver:hover { background: var(--green); color: var(--green-ink); }
 
   main { max-width: 1240px; margin: 0 auto; padding: 36px 32px 64px; }
   .notice { border: 1px solid var(--line); background: var(--panel-2); padding: 12px 16px; font-size: 13.5px; color: var(--muted); margin: 0 0 32px; display: flex; gap: 14px; align-items: baseline; flex-wrap: wrap; }
@@ -97,7 +99,8 @@ const HTML = String.raw`<!doctype html>
 </head>
 <body>
 <header>
-  <a class="brand" href="/"><span class="mark">▣</span> omarchy packaging <span class="muted">/ staging</span></a>
+  <a class="brand" href="/"><span class="mark">▣</span> omarchy-pool <span class="muted">/ staging</span></a>
+  __VERSION_CHIP__
   <nav>
     <a href="/api/v1/stats">API</a>
     <a href="https://github.com/firemanxbr/omarchy-pool">Source</a>
@@ -141,7 +144,7 @@ const HTML = String.raw`<!doctype html>
 </main>
 
 <footer>
-  <span>Omarchy packaging staging · pool + index proof of concept</span>
+  <span>omarchy-pool staging · __VERSION_LINE__</span>
   <a href="__POOL_URL__/x86_64/">pool</a>
   <a href="/api/v1/events">events</a>
   <a href="https://github.com/firemanxbr/omarchy-pool/blob/main/docs/TESTING.md">reproduce</a>
@@ -238,6 +241,25 @@ const HTML = String.raw`<!doctype html>
 </body>
 </html>`;
 
-export function dashboardHtml(poolUrl: string): string {
-  return HTML.split("__POOL_URL__").join(poolUrl.replace(/\/$/, ""));
+export interface RunningVersion {
+  version: string;
+  commit: string | null;
+  deployed_at: string | null;
+  release_url: string | null;
+  commit_url: string | null;
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c] ?? c);
+}
+
+export function dashboardHtml(poolUrl: string, v: RunningVersion): string {
+  const tag = escapeHtml(v.version);
+  const chip = v.release_url
+    ? `<a class="ver" href="${escapeHtml(v.release_url)}" title="running release">${tag}</a>`
+    : `<span class="ver" title="local build">${tag}</span>`;
+  const commit = v.commit && v.commit_url ? ` · <a href="${escapeHtml(v.commit_url)}">${escapeHtml(v.commit.slice(0, 7))}</a>` : "";
+  const deployed = v.deployed_at ? ` · deployed <time datetime="${escapeHtml(v.deployed_at)}">${escapeHtml(v.deployed_at.replace("T", " ").replace(/\.\d+Z$/, "Z"))}</time>` : "";
+  const line = `running ${v.release_url ? `<a href="${escapeHtml(v.release_url)}">${tag}</a>` : tag}${commit}${deployed}`;
+  return HTML.split("__POOL_URL__").join(poolUrl.replace(/\/$/, "")).replace("__VERSION_CHIP__", chip).replace("__VERSION_LINE__", line);
 }

@@ -1,4 +1,5 @@
 import { json, RINGS, type Env } from "../index";
+import { version } from "../meta";
 import { ringHead } from "../db";
 
 /** Everything the dashboard shows, in one round trip. */
@@ -68,6 +69,7 @@ export async function handleStats(env: Env): Promise<Response> {
   return json(
     {
       generated_at: new Date().toISOString(),
+      version: version(env),
       rings,
       pool: { ...pool, by_source: bySource.results, referenced_by_heads: referenced, referenced_by_any_release: anyRelease, reclaimable },
       releases: releases.results,

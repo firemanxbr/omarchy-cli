@@ -11,7 +11,8 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.0"
+# Versions come from git tags (see .github/workflows/release.yml); this stays 0.0.0.
+version = "0.0.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/firemanxbr/omarchy-pool"

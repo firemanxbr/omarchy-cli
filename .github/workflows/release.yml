@@ -1,0 +1,198 @@
+name: Release
+
+# Every merge into main becomes a release. CI and E2E run again on the merged
+# commit, the next version is derived from the last tag (patch by default; the
+# merged pull request's label `release:minor` or `release:major` bumps the
+# other numbers), binaries are built for both architectures, a GitHub release
+# is published with generated notes and the worker is deployed carrying that
+# version. Versions start at v0.0.1 and grow one step at a time.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "patch | minor | major (overrides the pull request label)"
+        default: ""
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+  e2e:
+    uses: ./.github/workflows/e2e.yml
+    permissions:
+      contents: read
+
+  version:
+    name: Next version
+    needs: [ci, e2e]
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.next.outputs.version }}
+      previous: ${{ steps.next.outputs.previous }}
+      bump: ${{ steps.next.outputs.bump }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: next
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUMP_INPUT: ${{ github.event.inputs.bump }}
+        run: |
+          set -euo pipefail
+          previous=$(git tag --list 'v*' --sort=-v:refname | head -1)
+          existing=$(git tag --points-at HEAD --list 'v*' | head -1)
+          bump="$BUMP_INPUT"
+          if [[ -z "$bump" ]]; then
+            labels=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" --jq '.[].labels[].name' 2>/dev/null || true)
+            if grep -qx 'release:major' <<<"$labels"; then bump=major
+            elif grep -qx 'release:minor' <<<"$labels"; then bump=minor
+            else bump=patch; fi
+          fi
+          if [[ -n "$existing" ]]; then
+            version="$existing"; bump=none
+          elif [[ -z "$previous" ]]; then
+            version=v0.0.1
+          else
+            IFS=. read -r major minor patch <<<"${previous#v}"
+            case "$bump" in
+              major) version="v$((major + 1)).0.0" ;;
+              minor) version="v$major.$((minor + 1)).0" ;;
+              patch) version="v$major.$minor.$((patch + 1))" ;;
+              *) echo "unknown bump '$bump'"; exit 1 ;;
+            esac
+          fi
+          echo "previous=$previous version=$version bump=$bump"
+          { echo "previous=$previous"; echo "version=$version"; echo "bump=$bump"; } >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build (${{ matrix.arch }})
+    needs: version
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    env:
+      POOL_VERSION: ${{ needs.version.outputs.version }}
+      POOL_COMMIT: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      # Keep in sync with rust-toolchain.toml.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.1
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p pkg-extract -p pkg-repo -p omarchy-cli
+      - name: Package
+        run: |
+          set -euo pipefail
+          name="omarchy-pool-${POOL_VERSION}-${{ matrix.arch }}-linux"
+          mkdir -p "dist/$name"
+          cp target/release/pkg-extract target/release/pkg-repo target/release/omarchy-cli "dist/$name/"
+          cp README.md LICENSE docs/omarchy-staging.pub.asc "dist/$name/"
+          tar -C dist -czf "dist/$name.tar.gz" "$name"
+          (cd dist && sha256sum "$name.tar.gz" > "$name.tar.gz.sha256")
+          "dist/$name/omarchy-cli" --version
+          "dist/$name/pkg-repo" --version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.arch }}
+          path: dist/*.tar.gz*
+          if-no-files-found: error
+
+  publish:
+    name: GitHub release
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.version.outputs.version }}
+      PREVIOUS: ${{ needs.version.outputs.previous }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Create the release
+        run: |
+          set -euo pipefail
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            echo "release $VERSION already exists; skipping"; exit 0
+          fi
+          args=(--target "$GITHUB_SHA" --title "$VERSION" --generate-notes)
+          [[ -n "$PREVIOUS" ]] && args+=(--notes-start-tag "$PREVIOUS")
+          gh release create "$VERSION" "${args[@]}" dist/* docs/omarchy-staging.pub.asc
+
+  deploy:
+    name: Deploy worker
+    needs: [version, publish]
+    runs-on: ubuntu-latest
+    environment:
+      name: pool
+      url: https://omarchy-pool.firemanxbr.org
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      OMARCHY_API: ${{ vars.OMARCHY_API }}
+      OMARCHY_PUBLISH_TOKEN: ${{ secrets.OMARCHY_PUBLISH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: worker/package-lock.json
+      - run: npm ci
+        working-directory: worker
+      - name: Migrate and deploy
+        if: env.CLOUDFLARE_API_TOKEN != ''
+        working-directory: worker
+        run: |
+          set -euo pipefail
+          npx wrangler d1 migrations apply omarchy-repo --remote
+          npx wrangler deploy \
+            --var "POOL_VERSION:$VERSION" \
+            --var "POOL_COMMIT:$GITHUB_SHA" \
+            --var "POOL_DEPLOYED_AT:$(date -u +%FT%TZ)"
+      - name: Verify the running version
+        if: env.CLOUDFLARE_API_TOKEN != ''
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 12); do
+            running=$(curl -sf "$OMARCHY_API/api/v1/version" | jq -r .version || true)
+            [[ "$running" == "$VERSION" ]] && { echo "running $running"; exit 0; }
+            sleep 5
+          done
+          echo "expected $VERSION, got ${running:-nothing}"; exit 1
+      - name: Record the deploy
+        if: env.CLOUDFLARE_API_TOKEN != ''
+        run: |
+          curl -sf -X POST "$OMARCHY_API/api/v1/events" \
+            -H "authorization: Bearer $OMARCHY_PUBLISH_TOKEN" -H "content-type: application/json" \
+            -d "$(jq -nc --arg v "$VERSION" --arg sha "$GITHUB_SHA" --arg bump "${{ needs.version.outputs.bump }}" \
+                  --arg run "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+                  --arg rel "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$VERSION" \
+                  '{kind: "deploy", status: "ok", summary: ("omarchy-pool " + $v + " deployed"),
+                    payload: {version: $v, commit: $sha, bump: $bump, run_url: $run, release_url: $rel}}')" >/dev/null
+      - name: Not deployed
+        if: env.CLOUDFLARE_API_TOKEN == ''
+        run: echo "::warning::CLOUDFLARE_API_TOKEN is not set — release $VERSION was published but the worker was not deployed (docs/RUNBOOK.md, Releasing)."

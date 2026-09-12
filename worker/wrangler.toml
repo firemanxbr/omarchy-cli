@@ -4,8 +4,11 @@ compatibility_date = "2026-09-01"
 account_id = "34f1918ac9ca522150a1830ea9b61a40"
 
 # Custom domain on firemanxbr.org (zone must exist in this account).
+# omarchy-pool.firemanxbr.org is the dashboard; dashboard-omarchy is its former
+# name and only redirects there.
 routes = [
   { pattern = "pkgs.firemanxbr.org", custom_domain = true },
+  { pattern = "omarchy-pool.firemanxbr.org", custom_domain = true },
   { pattern = "dashboard-omarchy.firemanxbr.org", custom_domain = true }
 ]
 
@@ -30,6 +33,10 @@ bucket_name = "omarchy-packages"
 DEFAULT_RING = "stable"
 # Static origin for packages and databases (the R2 bucket's custom domain).
 POOL_URL = "https://pool.firemanxbr.org"
+# Overridden by the Release workflow (`wrangler deploy --var POOL_VERSION:v0.0.1 ...`).
+POOL_VERSION = "dev"
+POOL_COMMIT = ""
+POOL_DEPLOYED_AT = ""
 
 # Secrets (set with `wrangler secret put <NAME>`):
 #   PUBLISH_TOKEN  — bearer token required by the CI publisher on PUT /api/v1/packages

@@ -11,7 +11,7 @@ use pkg_repo::{build_database, sign, Flavor};
 
 /// Publishes packages into the pool, pins releases and renders pacman databases.
 #[derive(Parser)]
-#[command(name = "pkg-repo", version, about)]
+#[command(name = "pkg-repo", version = pkg_manifest::BUILD_VERSION, about)]
 struct Cli {
     #[command(subcommand)]
     command: Command,

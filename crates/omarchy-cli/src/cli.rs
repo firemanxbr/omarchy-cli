@@ -13,7 +13,7 @@ use crate::state::{self, Pinned};
 
 /// Release-aware package client for Omarchy. Drives pacman; never bypasses it.
 #[derive(Parser)]
-#[command(name = "omarchy-cli", version, about)]
+#[command(name = "omarchy-cli", version = pkg_manifest::BUILD_VERSION, about)]
 pub struct Cli {
     #[arg(long, global = true, default_value = "/etc/omarchy-cli/config.toml")]
     pub config: PathBuf,
