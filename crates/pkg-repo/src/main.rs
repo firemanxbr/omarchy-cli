@@ -471,11 +471,24 @@ fn run_sync(remote: &Remote, opts: &SyncOptions) -> Result<()> {
     for (file, err) in &report.failed {
         eprintln!("FAILED {file}: {err}");
     }
-    if report.failed.is_empty() {
-        Ok(())
-    } else {
-        anyhow::bail!("{} package(s) failed to import", report.failed.len())
+    // A package upstream serves broken (bad signature, missing file) is left
+    // out and reported as a warning in the journal; it must not fail the run
+    // — the release without it is still correct, and a promotion that aligns
+    // the OPR channel must not be undone because one package was refused.
+    // Only a sync that could import nothing it tried is an error.
+    if !report.failed.is_empty() && report.uploaded == 0 && report.release.is_none() {
+        anyhow::bail!(
+            "{} package(s) failed to import and nothing was pinned",
+            report.failed.len()
+        );
     }
+    if !report.failed.is_empty() {
+        eprintln!(
+            "warning: {} package(s) left out (see the journal); the release is without them",
+            report.failed.len()
+        );
+    }
+    Ok(())
 }
 
 fn sorted(mut packages: Vec<PackageManifest>) -> Vec<PackageManifest> {
