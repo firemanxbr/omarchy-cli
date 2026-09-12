@@ -475,10 +475,12 @@ fn run_sync(remote: &Remote, opts: &SyncOptions) -> Result<()> {
     // out and reported as a warning in the journal; it must not fail the run
     // — the release without it is still correct, and a promotion that aligns
     // the OPR channel must not be undone because one package was refused.
-    // Only a sync that could import nothing it tried is an error.
-    if !report.failed.is_empty() && report.uploaded == 0 && report.release.is_none() {
+    // Only a sync where nothing at all is served — every import failed and
+    // the index had none of the upstream before — is an error; an unchanged
+    // selection with one refused package is the normal hourly case.
+    if !report.failed.is_empty() && report.uploaded == 0 && report.already_indexed == 0 {
         anyhow::bail!(
-            "{} package(s) failed to import and nothing was pinned",
+            "{} package(s) failed to import and none of this source is indexed",
             report.failed.len()
         );
     }
