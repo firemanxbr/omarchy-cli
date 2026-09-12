@@ -18,23 +18,11 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 latest() { # base-url db-name package-name → filename from the sync db
+  # GNU tar detects gzip/xz/zstd on its own; %FILENAME% precedes %NAME% in a desc.
   curl -sfL -A "pkg-repo" "$1/$2.db" -o "$TMP/$2.db"
-  python3 - "$TMP/$2.db" "$3" <<'PY'
-import io, sys, tarfile
-raw = open(sys.argv[1], "rb").read()
-if raw[:4] == b"\x28\xb5\x2f\xfd":
-    import compression.zstd as zstd  # Python 3.14+
-    raw = zstd.decompress(raw)
-t = tarfile.open(fileobj=io.BytesIO(raw), mode="r:*")
-for m in t.getmembers():
-    if m.name.endswith("/desc"):
-        d = t.extractfile(m).read().decode()
-        name = d.split("%NAME%\n", 1)[1].split("\n", 1)[0]
-        if name == sys.argv[2]:
-            print(d.split("%FILENAME%\n", 1)[1].split("\n", 1)[0]); break
-PY
+  tar -xOf "$TMP/$2.db" --wildcards '*/desc' 2>/dev/null \
+    | awk -v want="$3" '/^%FILENAME%$/ { getline f } /^%NAME%$/ { getline n; if (n == want) { print f; exit } }'
 }
-
 extract_keyring() { # base-url filename path-in-archive out
   curl -sfL -A "pkg-repo" "$1/$2" -o "$TMP/$2"
   case "$2" in
