@@ -17,8 +17,10 @@ const DIAGRAM = String.raw`
   <!-- sources -->
   <rect class="box src" x="20" y="30" width="230" height="64" rx="3"/><text class="t" x="34" y="54">Arch Linux · x86_64</text><text class="s" x="34" y="76">core · extra · multilib</text><text class="d" x="34" y="90">mirror.omarchy.org · archlinux keyring</text>
   <rect class="box src" x="20" y="110" width="230" height="64" rx="3"/><text class="t" x="34" y="134">Arch Linux ARM · aarch64</text><text class="s" x="34" y="156">core · extra · alarm</text><text class="d" x="34" y="170">os.archlinuxarm.org · ALARM keyring</text>
-  <rect class="box src" x="20" y="190" width="230" height="64" rx="3"/><text class="t" x="34" y="214">Omarchy (OPR) · both</text><text class="s" x="34" y="236">omarchy packages, edge channel</text><text class="d" x="34" y="250">pkgs.omarchy.org · Omarchy key</text>
-  <text class="d" x="20" y="285">upstream repositories, read every hour</text>
+  <rect class="box src" x="20" y="190" width="230" height="64" rx="3"/><text class="t" x="34" y="214">Omarchy (OPR) · both</text><text class="s" x="34" y="236">edge / rc / stable channels</text><text class="d" x="34" y="250">pkgs.omarchy.org · Omarchy key</text>
+  <rect class="box src" x="20" y="270" width="230" height="64" rx="3"/><text class="t" x="34" y="294">chaotic-aur · x86_64 <tspan class="d">optional</tspan></text><text class="s" x="34" y="316">prebuilt AUR, only unclaimed names</text><text class="d" x="34" y="330">builds.garudalinux.org · chaotic key</text>
+  <path class="ln" d="M250 302 L318 302 L318 142 L340 142"/>
+  <text class="d" x="20" y="362">upstream repositories, read every hour</text>
   <!-- verify -->
   <path class="ln" d="M250 62 L318 62 L318 142 L340 142"/><path class="ln" d="M250 142 L340 142"/><path class="ln" d="M250 222 L318 222 L318 142 L340 142"/>
   <rect class="box amber" x="342" y="104" width="190" height="76" rx="3"/><text class="t" x="356" y="130">Verify</text><text class="s" x="356" y="150">sha256 from the upstream db</text><text class="s" x="356" y="166">signature by the project's key</text>
@@ -55,7 +57,8 @@ const BODY = String.raw`
     <div class="table-wrap"><table><thead><tr><th>Source</th><th>Architecture</th><th>Repositories</th><th>Verified against</th></tr></thead><tbody>
       <tr><td>Arch Linux (via the Omarchy mirror)</td><td>x86_64</td><td><code>core</code> <code>extra</code> <code>multilib</code></td><td><code>archlinux-keyring</code></td></tr>
       <tr><td>Arch Linux ARM</td><td>aarch64</td><td><code>core</code> <code>extra</code> <code>alarm</code></td><td><code>archlinuxarm-keyring</code></td></tr>
-      <tr><td>Omarchy Package Repository (OPR)</td><td>x86_64 · aarch64</td><td><code>omarchy</code> (edge channel)</td><td>Omarchy's signing key</td></tr>
+      <tr><td>Omarchy Package Repository (OPR)</td><td>x86_64 · aarch64</td><td><code>omarchy</code> — the OPR's own <code>edge</code> / <code>rc</code> / <code>stable</code> channel goes into the matching ring</td><td>Omarchy's signing key</td></tr>
+      <tr><td>chaotic-aur <span class="muted">(optional)</span></td><td>x86_64</td><td><code>chaotic-aur</code>: prebuilt AUR packages; only names no other source provides, so Arch and the OPR always win</td><td><code>chaotic-keyring</code></td></tr>
     </tbody></table></div>
   </section>
 

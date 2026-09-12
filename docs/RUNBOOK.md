@@ -142,6 +142,15 @@ Clients must import the new public key (`pacman-key --add … && --lsign-key`).
 
 ## Add a source or an architecture
 
+A source is one row in the `SOURCES` table of `sync.yml`: id, source name, arch,
+**ring** (`edge` for anything promotion should carry forward; the OPR's own
+channels go straight into the matching ring), the directory holding the `.db`,
+the db name, the keyring `tests/fetch-keyrings.sh` produces, and the sources it
+defers to (`chaotic` defers to `core,extra,multilib,packages`: a name one of
+them serves is never imported from chaotic-aur). Add the same source to
+`EXPECTED_SOURCES` in `worker/src/meta.ts` (with `optional: true` for a repo
+users opt into on *Get started*) and to the sources table on *How it works*.
+
 Add a line to the `SOURCES` table in `.github/workflows/sync.yml` (id, source,
 arch, directory URL, db name, keyring). If it is a new upstream project, add its
 keyring to `tests/fetch-keyrings.sh`. New architectures also need a health image

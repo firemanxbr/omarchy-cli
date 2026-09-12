@@ -178,12 +178,7 @@ pub fn run(api: &Api, opts: &GateOptions<'_>) -> Result<GateReport, RepoError> {
         .iter()
         .find(|r| r.is_head != 0)
         .map(|r| r.id);
-    let to_source = api
-        .history(opts.to)?
-        .releases
-        .iter()
-        .find(|r| r.is_head != 0)
-        .and_then(|r| r.source_id);
+    let to_source = last_promotion_source(&api.history(opts.to)?.releases);
     let now = now_unix();
     let report = evaluate(&events, now, from_head, to_source, opts);
 
@@ -242,6 +237,20 @@ pub fn run(api: &Api, opts: &GateOptions<'_>) -> Result<GateReport, RepoError> {
         }
     }))?;
     Ok(report)
+}
+
+/// The release the last promotion into a ring copied from: walk from the
+/// head through releases without a `source_id` (syncs of the OPR channel into
+/// the ring, rollbacks re-pin with one) until one has it.
+fn last_promotion_source(history: &[crate::client::HistoryEntry]) -> Option<u64> {
+    let mut cur = history.iter().find(|r| r.is_head != 0);
+    while let Some(r) = cur {
+        if let Some(src) = r.source_id {
+            return Some(src);
+        }
+        cur = r.parent_id.and_then(|p| history.iter().find(|x| x.id == p));
+    }
+    None
 }
 
 #[allow(clippy::cast_possible_wrap)] // fits until the year 292 billion
@@ -424,6 +433,31 @@ mod tests {
         let r = evaluate(&events, NOW, Some(10), None, &opts(&arches, 0));
         assert_eq!(r.verdict, Verdict::Promote);
         assert_eq!(r.evidence[0].abi_status, None);
+    }
+
+    #[test]
+    fn last_promotion_is_found_through_sync_releases() {
+        let entry = |id: u64, parent: Option<u64>, source: Option<u64>, head: u8| {
+            crate::client::HistoryEntry {
+                id,
+                seq: id,
+                parent_id: parent,
+                source_id: source,
+                note: None,
+                created_at: String::new(),
+                package_count: 0,
+                is_head: head,
+            }
+        };
+        // head 12 = OPR sync, parent 11 = OPR sync, parent 10 = promotion from 7
+        let history = vec![
+            entry(12, Some(11), None, 1),
+            entry(11, Some(10), None, 0),
+            entry(10, Some(9), Some(7), 0),
+            entry(9, None, Some(3), 0),
+        ];
+        assert_eq!(last_promotion_source(&history), Some(7));
+        assert_eq!(last_promotion_source(&[entry(1, None, None, 1)]), None);
     }
 
     #[test]
