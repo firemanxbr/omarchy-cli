@@ -34,7 +34,8 @@ import { handleGraph } from "./routes/graph";
 import { handleGetEvents, handlePostEvent } from "./routes/events";
 import { handleStats } from "./routes/stats";
 import { handleGc, handleUnreferenced } from "./routes/gc";
-import { dashboardHtml } from "./dashboard";
+import { overviewHtml } from "./pages/overview";
+import { getStartedHtml } from "./pages/get-started";
 import { DASHBOARD_HOST, LEGACY_DASHBOARD_HOST, version } from "./meta";
 import { handleStatic } from "./routes/static";
 import { requireAuth } from "./auth";
@@ -84,11 +85,8 @@ export default {
       if (path.startsWith("/pool/") && (method === "GET" || method === "HEAD")) {
         return await handleStatic(decodeURIComponent(path.slice("/pool/".length)), request, env);
       }
-      if (path === "/" || path === "/index.html") {
-        return new Response(dashboardHtml(env.POOL_URL, version(env)), {
-          headers: { "content-type": "text/html; charset=utf-8", "cache-control": "public, max-age=60" },
-        });
-      }
+      if (path === "/" || path === "/index.html") return html(overviewHtml(env.POOL_URL, version(env)));
+      if (path === "/get-started") return html(getStartedHtml(env.POOL_URL, version(env)));
       return json({ error: "not found" }, 404);
     } catch (err) {
       console.error(err);
@@ -96,6 +94,12 @@ export default {
     }
   },
 } satisfies ExportedHandler<Env>;
+
+function html(body: string): Response {
+  return new Response(body, {
+    headers: { "content-type": "text/html; charset=utf-8", "cache-control": "public, max-age=60" },
+  });
+}
 
 function cors(): HeadersInit {
   return {
