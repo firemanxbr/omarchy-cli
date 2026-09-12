@@ -59,7 +59,7 @@ const SCRIPT = String.raw`
         ["Critical / high", num(count("critical")) + " / " + num(count("high")), num(count("medium")) + " medium · " + num(count("low")) + " low · " + num(count("unknown")) + " unknown"],
         ["Exploited in the wild", num(rows.filter(function (r) { return r.kev; }).length), "CISA KEV"],
         ["Fix available in another ring", num(rows.filter(function (r) { return r.v.fixed_in.length; }).length), "fast-track candidates"],
-        ["Packages exposed", num(d.totals && d.totals.exposed || 0), "depend on, or load a library of, a vulnerable one"]
+        ["Packages exposed", num(d.totals && d.totals.exposed || 0), "depend on, or load a library of, a package with a confident advisory"]
       ];
       tiles.forEach(function (t, i) { var el = $("#tiles"), cell = el.children[i]; if (!cell) { cell = document.createElement("div"); cell.className = "tile"; el.appendChild(cell); } setTile(cell, '<div class="k">' + t[0] + '</div><div class="v num">' + t[1] + '</div><div class="s">' + t[2] + '</div>'); });
       $("#updated").textContent = (d.updated_at ? "Advisories refreshed " + ago(d.updated_at) + " · " : "No security run recorded yet · ") + num(d.advisories_total) + " advisories in the index";
