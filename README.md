@@ -1,105 +1,107 @@
 # omarchy-pool
 
-The package pool for the [Omarchy](https://omarchy.org) repository migration:
-an **immutable package pool** on Cloudflare R2, an **index** on D1 where `edge`,
-`rc` and `stable` are pinned selections, **generated, signed pacman databases**
-served statically, a **publisher** that syncs Arch, Arch Linux ARM and Omarchy
-packages into it with upstream signature verification, a public **dashboard**, and
-a **thin client** (`omarchy-cli`) that understands releases and blocks unsafe
-partial upgrades.
+One package repository for [Omarchy](https://omarchy.org): every Arch Linux, Arch
+Linux ARM and Omarchy (OPR) package, verified against its project's signing key,
+stored once in an **immutable pool**, and served in three **rings** —
+`edge` follows upstream in real time, `rc` is what passed a real pacman and an ABI
+check on both architectures a day later, `stable` is what stayed healthy in `rc`
+for another day — with **automatic rollback** when a promotion fails its checks.
+Packages stay unmodified `makepkg` output; pacman reads generated, signed
+databases as plain static files; a **thin client** adds release awareness and an
+ELF-level safety check; a **security layer** matches public advisories to what
+each ring serves and fast-tracks fixes.
 
-* Packages stay unmodified `makepkg` output — no new format, no new build tool.
-* Promoting a release is an index write, not a 275 GB copy.
-* pacman keeps working through generated `repo-add` databases.
-* `omarchy-cli` drives pacman and adds release awareness plus an ABI-level safety
-  check built from the ELF soname graph.
+**Live:** https://omarchy-pool.firemanxbr.org · packages and databases at
+https://pool.firemanxbr.org · API at https://pkgs.firemanxbr.org/api/v1
 
-> Status: proof of concept — results in [docs/POC-RESULTS.md](docs/POC-RESULTS.md).
-> See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design,
-> [docs/TESTING.md](docs/TESTING.md) for how to verify it, [docs/RUNBOOK.md](docs/RUNBOOK.md)
-> to operate the staging environment, and [TODO.md](TODO.md) if you want to help.
+## Use it
 
-## The staging environment
-
-**Dashboard: https://omarchy-pool.firemanxbr.org** — the pool, the three rings,
-every sync/promotion/render/health check as it happens.
-
-The pipeline runs hourly on GitHub Actions: it imports Arch `core`, `extra` and
-`multilib` from the Omarchy edge mirror into one immutable pool on R2, pins them on
-`edge`, promotes `edge → rc` daily and `rc → stable` weekly, renders and signs one
-pacman database per source and ring, and checks each ring with a real pacman.
-Packages and databases are plain objects served from **https://pool.firemanxbr.org**:
-
-```ini
-# /etc/pacman.conf — databases live beside the packages; only the repo name changes per ring
-[omarchy-core-stable]
-Server = https://pool.firemanxbr.org/$arch
-
-[omarchy-extra-stable]
-Server = https://pool.firemanxbr.org/$arch
-```
-
-Databases are signed with the staging key (`docs/omarchy-staging.pub.asc`, also at
-`https://pool.firemanxbr.org/omarchy-staging.pub.asc`, expires 2027-09-12); packages
-keep their upstream Arch / Arch Linux ARM / Omarchy signatures:
+Three steps, generated for your ring and architecture on
+[Get started](https://omarchy-pool.firemanxbr.org/get-started):
 
 ```bash
+# 1. trust the key that signs the databases (packages keep their upstream signatures)
 curl -O https://pool.firemanxbr.org/omarchy-staging.pub.asc
 sudo pacman-key --add omarchy-staging.pub.asc && sudo pacman-key --lsign-key staging@firemanxbr.org
+
+# 2. /etc/pacman.conf — one host for every repository and both architectures
+[omarchy-core-stable]
+SigLevel = Required DatabaseRequired
+Server = https://pool.firemanxbr.org/$arch
+[omarchy-extra-stable]
+SigLevel = Required DatabaseRequired
+Server = https://pool.firemanxbr.org/$arch
+[omarchy-multilib-stable]
+SigLevel = Required DatabaseRequired
+Server = https://pool.firemanxbr.org/$arch
+[omarchy-packages-stable]
+SigLevel = Required DatabaseRequired
+Server = https://pool.firemanxbr.org/$arch
+
+# 3.
+sudo pacman -Syu
 ```
 
-The index API lives at **https://pkgs.firemanxbr.org/api/v1/** and the thin client
-uses it by default:
+Change `stable` to `rc` or `edge` to change rings. The optional
+`[omarchy-chaotic-<ring>]` adds prebuilt AUR packages (x86_64).
+
+The thin client ships with every [release](https://github.com/firemanxbr/omarchy-pool/releases):
 
 ```bash
-omarchy-cli status          # pinned release vs. what stable serves now
-omarchy-cli check xz        # ABI safety check against this machine, exit 2 if unsafe
-omarchy-cli upgrade         # pacman -U from the pool, then pin the release
-omarchy-cli security        # installed packages with open advisories, and where the fix is
+omarchy-cli status                    # what the ring would change on this machine
+omarchy-cli check <pkg>               # ABI safety check before an out-of-band install, exit 2 if unsafe
+omarchy-cli upgrade                   # pacman -U from the pool, then pin the release
+omarchy-cli security                  # installed packages with open advisories, and where the fix is
 omarchy-cli upgrade --security-only
 ```
 
-This is an evidence environment: throwaway signing key, no SLA, may be reset.
+## How it works
 
-## Releases
+Read [How it works](https://omarchy-pool.firemanxbr.org/how-it-works) on the
+dashboard, or [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design:
+the pool and index, the release model, promotion by evidence (health + ABI gate,
+one-day soak, automatic rollback), the sources, the security layer, the pipeline.
 
-Every merge into `main` is a release: [`release.yml`](.github/workflows/release.yml)
-re-runs CI and E2E, tags the next version (`v0.0.1`, `v0.0.2`, … — patch by default,
-`release:minor` / `release:major` labels on the pull request bump the rest), builds
-`pkg-repo`, `omarchy-cli` and `pkg-extract` for x86_64 and aarch64, publishes a
-[GitHub release](https://github.com/firemanxbr/omarchy-pool/releases) and deploys the
-worker. The dashboard header and `https://pkgs.firemanxbr.org/api/v1/version` show
-what is running. See [CONTRIBUTING.md](CONTRIBUTING.md).
+| | |
+|---|---|
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | design, API, pipeline, security |
+| [docs/RUNBOOK.md](docs/RUNBOOK.md) | operating it: workflows, promotions, keys, the kill switch, the scheduler, known limits |
+| [docs/TESTING.md](docs/TESTING.md) | how every piece is verified, locally and in CI |
+| [docs/MIGRATION.md](docs/MIGRATION.md) | moving the whole thing to another Cloudflare account and GitHub organisation |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | pull requests, releases, versions |
+| [TODO.md](TODO.md) | open work, and findings to report upstream |
+| [poc/](poc/) | the proof of concept this grew out of: the three questions, the evidence, the benchmarks, the parked native engine |
 
 ## Layout
 
 ```
 crates/
-  pkg-manifest/   shared types, dependency rules, Arch-compatible vercmp
-  pkg-extract/    .pkg.tar.zst inspection → PackageManifest (lib + CI binary)
-  pkg-repo/       renders signed repo-add databases from a release
-  pkg-resolver/   dependency / ABI safety checks
-  pkg-store/      redb state store + transactional FS engine (future engine)
-  pkg-hooks/      libalpm .hook compatibility (later)
+  pkg-manifest/   shared types, dependency rules, Arch-compatible vercmp, the build version
+  pkg-extract/    .pkg.tar.{zst,xz} inspection → PackageManifest (lib + binary)
+  pkg-repo/       the publisher: sync, publish, promote, gate, fast-track, render, security, gc
+  pkg-check/      the ABI safety check (ELF symbol versions against a system)
   omarchy-cli/    the thin client
-worker/           Cloudflare Worker (TypeScript): pool, index, releases, pacman mirror
-docs/             architecture, testing, diagrams
+worker/           Cloudflare Worker (TypeScript): index API, dashboard pages, scheduler; D1 migrations
+tests/            end-to-end scripts (real pacman), health check, ABI gate, keyring fetcher
+docs/             architecture, runbook, testing, migration, diagrams, the database key
+poc/              the proof of concept: results, benchmarks, parked crates
+.github/          CI, E2E, Release (every merge), Sync, Promote, Health, Security, Metrics, GC
 ```
+
+## Releases
+
+Every merge into `main` is a release: [`release.yml`](.github/workflows/release.yml)
+re-runs CI and E2E, tags the next version (`v0.0.1`, `v0.0.2`, … — patch by default,
+`release:minor` / `release:major` labels bump the rest), builds the binaries for
+x86_64 and aarch64, publishes a GitHub release and deploys the worker. The dashboard
+header and `/api/v1/version` show what is running. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Development
 
 ```bash
-cargo build --workspace
-cargo test --workspace
-cargo clippy --workspace --all-targets
-```
-
-Worker:
-
-```bash
-cd worker && npm install
-npm run typecheck
-npm run dev            # local wrangler with a local D1
+cargo build --workspace && cargo test --workspace && cargo clippy --workspace --all-targets
+cd worker && npm install && npm run typecheck && npm test
+tests/e2e-worker.sh          # real pacman through a local worker (docker or podman)
 ```
 
 ## License

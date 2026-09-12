@@ -2,11 +2,9 @@ name: Benchmark
 
 # Current promotion mechanics (rsync + repo-add) versus the index, measured on a
 # native x86_64 runner so repo-add is not slowed down by emulation.
+# Historical (proof-of-concept evidence, poc/RESULTS.md); run by hand.
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths: ["tests/bench-current.sh", "tests/bench/**", ".github/workflows/bench.yml"]
 
 jobs:
   current-vs-index:
@@ -25,7 +23,7 @@ jobs:
       - run: npm ci
         working-directory: worker
       - run: sudo apt-get install -y -q zstd rsync >/dev/null
-      - run: tests/bench-current.sh 1000 5
+      - run: poc/bench/bench-current.sh 1000 5
       - uses: actions/upload-artifact@v4
         with:
           name: bench-current-results

@@ -1,7 +1,7 @@
 # POC results
 
 Evidence for the three questions in the repository migration outline. Everything
-below is reproducible with the scripts in `tests/` (see [TESTING.md](TESTING.md))
+below is reproducible with the scripts in `tests/` (see [TESTING.md](../docs/TESTING.md))
 against the staging deployment. Nothing touches production.
 
 **Live:** https://omarchy-pool.firemanxbr.org — the pipeline running hourly on
@@ -99,7 +99,7 @@ shared libraries on disk) and drives `pacman -U` with URLs from the release.
 Two scripts, both run on a native x86_64 GitHub Actions runner
 (`.github/workflows/bench.yml`) with the tools production uses today:
 
-**`tests/bench-current.sh 1000 5`** builds 1,000 valid packages of 5 MB (4.9 GB),
+**`poc/bench/bench-current.sh 1000 5`** builds 1,000 valid packages of 5 MB (4.9 GB),
 then measures what `omacom/omarchy-mirror` and `omacom/omarchy-pkgs` do on a
 promotion — `rsync -a --delete` of the ring tree and `repo-add` over every archive
 (pacman 7.1) — next to the index model at the same package count.
@@ -110,7 +110,7 @@ promotion — `rsync -a --delete` of the ring tree and `repo-add` over every arc
 | Promotion: upload + prune the second R2 bucket | — | 30–60 min as reported by the team | not needed |
 | Database: `repo-add` vs `pkg-repo render` | 58.9 s | ~55 min | **0.18 s**, 0 archives read |
 
-**`tests/bench-promotion.sh 10000`** seeds 10,000 synthetic packages
+**`poc/bench/bench-promotion.sh 10000`** seeds 10,000 synthetic packages
 (≈176 GB at 18 MB average, the 275 GB / ~15k ratio of a ring) and measures the
 index model alone: promote **37 ms** and **27 ms**, render 512 ms
 (`omarchy.db` 987 KB, `omarchy.files` 2.1 MB), closure query 132 ms, the release
@@ -174,6 +174,6 @@ the dashboard.
 tests/e2e-pacman.sh   # local file:// mirror, pacman in a container
 tests/e2e-worker.sh   # local worker (wrangler dev), publish → promote → render → pacman
 tests/e2e-client.sh   # thin client: safe vs blocked systems, real upgrade in a container
-tests/bench-promotion.sh 10000   # index model at scale: promotion / render / pacman -Sy
-tests/bench-current.sh 1000 5    # today's rsync + repo-add vs the index, same package count
+poc/bench/bench-promotion.sh 10000   # index model at scale: promotion / render / pacman -Sy
+poc/bench/bench-current.sh 1000 5    # today's rsync + repo-add vs the index, same package count
 ```

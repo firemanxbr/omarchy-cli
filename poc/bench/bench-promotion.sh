@@ -8,11 +8,11 @@
 #   - a dependency-closure query
 #   - optionally, `pacman -Sy` + `-Sl` against the generated database
 #
-# Usage: tests/bench-promotion.sh [N=10000]
+# Usage: poc/bench/bench-promotion.sh [N=10000]
 set -euo pipefail
 
 N="${1:-10000}"
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 BENCH="$ROOT/target/bench"
 PORT="${OMARCHY_BENCH_PORT:-8791}"
 RUNTIME="$(command -v podman || command -v docker || true)"
@@ -30,7 +30,7 @@ PKG_REPO="$ROOT/target/release/pkg-repo"
 
 step "Seed a fresh local index with $N packages"
 rm -rf "$BENCH" && mkdir -p "$BENCH"
-python3 "$ROOT/tests/bench/seed.py" "$N" > "$BENCH/seed.sql"
+python3 "$ROOT/poc/bench/seed.py" "$N" > "$BENCH/seed.sql"
 cd "$ROOT/worker"
 STATE="$BENCH/wrangler-state"
 npx wrangler d1 migrations apply omarchy-repo --local --persist-to "$STATE" >/dev/null

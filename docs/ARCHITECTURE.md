@@ -1,16 +1,15 @@
 # Architecture
 
-`omarchy-cli` is a proof of concept for the Omarchy repository migration. It answers
-three questions:
-
-1. Can an **immutable package pool plus an index** cleanly represent complete releases?
-2. Can **valid, signed pacman databases** be generated from that index?
-3. Does a **thin Omarchy client** give enough control to justify becoming part of the system?
+omarchy-pool is a package repository for Omarchy built on three ideas: an
+**immutable package pool plus an index** that represents complete releases, **signed
+pacman databases generated from that index**, and a **thin client** that
+understands releases. It began as a proof of concept answering exactly those three
+questions — the evidence is kept in [`poc/RESULTS.md`](../poc/RESULTS.md) — and now
+runs as the staging environment at https://omarchy-pool.firemanxbr.org.
 
 Packages are standard Arch `.pkg.tar.zst` archives produced by `makepkg`; they are never
-modified. Nothing here touches production: the staging deployment lives at
-`https://pkgs.firemanxbr.org` (Cloudflare Worker + D1 + R2) and results are collected
-in [POC-RESULTS.md](POC-RESULTS.md).
+modified. The deployment is a Cloudflare Worker + D1 + R2; the pipeline is GitHub
+Actions.
 
 ## The problem
 
@@ -209,21 +208,11 @@ The client drives pacman rather than replacing it. What it adds:
 `vercmp` is a byte-for-byte port of `alpm_pkg_vercmp` so the client and pacman
 always agree on ordering.
 
-## Future: native transaction engine (`crates/pkg-store`)
+## Not on the product path
 
-Built and tested, but not on the POC path. If the thin client proves itself, this
-is the engine that would let it stop shelling out to pacman: a single redb state
-file plus a journaled, crash-safe filesystem transaction.
-
-![Transaction lifecycle](diagrams/transaction-lifecycle.svg)
-
-## Roadmap
-
-| Step | Deliverable | Answers |
-|---|---|---|
-| 1 ✅ | `pkg-extract`: manifest from unmodified archives; `index` for local repos | groundwork |
-| 2 ✅ | `pkg-store`: redb + journaled transactions (parked) | future |
-| 3 ✅ | Index schema with releases; `pkg-repo publish` / `promote`; worker API | Q1 |
-| 4 ✅ | `pkg-repo render`: signed `repo-add` databases per release; worker mirror routes; validated with pacman 7.1 in a container, over `file://` and through the worker | Q2 |
-| 5 ✅ | Thin `omarchy-cli`: `status`, `check`, `install`, `upgrade`, `search`, `info`, `list` over pacman; ABI check validated on a 2021 system (blocked) and a current one (upgrade through pacman) | Q3 |
-| 6 | libalpm hook compatibility, native engine wiring | later |
+`poc/crates/pkg-store` (a redb state store plus a journaled, crash-safe filesystem
+transaction — the engine that would let the client stop shelling out to pacman)
+and `poc/crates/pkg-hooks` (libalpm `.hook` types) are built and tested but not
+wired in: the thin client did not need them. They stay in the workspace so they
+keep compiling; see [`poc/README.md`](../poc/README.md). Open work is in
+[`TODO.md`](../TODO.md).
