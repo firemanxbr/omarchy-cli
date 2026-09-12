@@ -54,6 +54,12 @@ api() { # method path [json]
 
 prepare() {
   log "worker $WORKER_ID ($ARCH) preparing"
+  # pacman's download sandbox (seccomp + landlock) has no place in an
+  # already-isolated, sometimes emulated container.
+  sed -i -e 's/^#\?DisableSandboxSyscalls/DisableSandboxSyscalls/' -e 's/^#\?DisableSandboxFilesystem/DisableSandboxFilesystem/' /etc/pacman.conf
+  for opt in DisableSandboxSyscalls DisableSandboxFilesystem; do
+    grep -q "^$opt" /etc/pacman.conf || sed -i "0,/^\[options\]/s//[options]\n$opt/" /etc/pacman.conf
+  done
   pacman-key --init >/dev/null 2>&1 || true
   if [[ -f /etc/pacman.d/gnupg/trustdb.gpg && ! -s /etc/pacman.d/gnupg/pubring.kbx ]]; then
     pacman-key --populate >/dev/null 2>&1 || true
@@ -87,7 +93,7 @@ prepare() {
   elif [[ -n "${OMARCHY_GPG_KEY_FILE:-}" ]]; then
     gpg --batch --import "$OMARCHY_GPG_KEY_FILE" >/dev/null 2>&1
   elif [[ -n "${OMARCHY_GPG_HOME:-}" ]]; then
-    cp -a "$OMARCHY_GPG_HOME/." "$GNUPGHOME/" && chmod -R go-rwx "$GNUPGHOME"
+    tar -C "$OMARCHY_GPG_HOME" --exclude='S.*' --exclude='*.lock' -cf - . | tar -C "$GNUPGHOME" -xf - && chmod -R go-rwx "$GNUPGHOME"
   fi
   gpg --batch --list-secret-keys "$OMARCHY_GPG_KEYID" >/dev/null 2>&1 || { log "signing key $OMARCHY_GPG_KEYID is not in the keyring"; exit 2; }
   # Trust the factory key so pacman accepts factory-built dependencies.

@@ -229,7 +229,7 @@ export interface PageOptions {
   title: string;
   description: string;
   /** Which nav entry is highlighted. */
-  active: "overview" | "packages" | "security" | "get-started" | "pipeline" | "how-it-works";
+  active: "overview" | "packages" | "security" | "factory" | "get-started" | "pipeline" | "how-it-works";
   body: string;
   script?: string;
   poolUrl: string;
@@ -240,6 +240,7 @@ export const NAV: { key: PageOptions["active"]; href: string; label: string }[] 
   { key: "overview", href: "/", label: "Overview" },
   { key: "packages", href: "/packages", label: "Packages" },
   { key: "security", href: "/security", label: "Security" },
+  { key: "factory", href: "/factory", label: "Factory" },
   { key: "get-started", href: "/get-started", label: "Get started" },
   { key: "pipeline", href: "/#pipeline", label: "Pipeline" },
   { key: "how-it-works", href: "/how-it-works", label: "How it works" },

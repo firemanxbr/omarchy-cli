@@ -82,10 +82,31 @@ export async function providedBy(env: Env, name: string): Promise<{ source: stri
   return rows.results;
 }
 
-function upstreamConflict(provided: { source: string; arch: string; version: string }[], arches: string[]): string | null {
-  const hit = provided.filter((p) => !["factory", "chaotic"].includes(p.source) && arches.includes(p.arch));
-  if (!hit.length) return null;
-  return `${hit[0].source} already ships this package (${hit.map((h) => `${h.version} for ${h.arch}`).join(", ")}); it enters the pool's cycle as it is. Pass override:true to build it here anyway.`;
+/**
+ * Splits the requested architectures into the ones the factory should build
+ * and the ones an upstream source already covers (skipped, with who ships
+ * them). Per architecture: the OPR ships many names for x86_64 only, and
+ * those are exactly what the factory builds for aarch64.
+ */
+function splitByUpstream(provided: { source: string; arch: string; version: string }[], arches: string[], override: boolean | undefined): { build: string[]; skipped: { arch: string; source: string; version: string }[] } {
+  const skipped: { arch: string; source: string; version: string }[] = [];
+  const build = arches.filter((arch) => {
+    const hit = provided.find((p) => p.arch === arch && !["factory", "chaotic"].includes(p.source));
+    if (!hit || override) return true;
+    skipped.push({ arch, source: hit.source, version: hit.version });
+    return false;
+  });
+  return { build, skipped };
+}
+
+function nothingToBuild(skipped: { arch: string; source: string; version: string }[]): Response {
+  return json(
+    {
+      error: `an upstream source already ships this package for every requested architecture (${skipped.map((s) => `${s.source} ${s.version} for ${s.arch}`).join(", ")}); it enters the pool's cycle as it is. Pass override:true to build it here anyway.`,
+      skipped,
+    },
+    409,
+  );
 }
 
 /** Queue one task per architecture unless an identical one is already queued or running. */
@@ -118,17 +139,16 @@ export async function handleCreateRequest(request: Request, env: Env): Promise<R
   if (!b.name || !/^[a-z0-9@._+-]+$/.test(b.name)) return json({ error: "name must be a pacman package name" }, 400);
   const group = b.group ?? "community";
   const arches = parseArches(b.arches);
-  const provided = await providedBy(env, b.name);
-  const conflict = b.override ? null : upstreamConflict(provided, arches);
-  if (conflict) return json({ error: conflict, provided }, 409);
+  const { build, skipped } = splitByUpstream(await providedBy(env, b.name), arches, b.override);
+  if (!build.length) return nothingToBuild(skipped);
   const row = await env.DB.prepare(
     `INSERT INTO build_requests (name, "group", arches, requested_by, reason) VALUES (?, ?, ?, ?, ?)
-     ON CONFLICT (name) DO UPDATE SET reason = COALESCE(excluded.reason, reason) RETURNING *`,
+     ON CONFLICT (name) DO UPDATE SET reason = COALESCE(excluded.reason, reason), arches = excluded.arches RETURNING *`,
   )
-    .bind(b.name, group, JSON.stringify(arches), b.requested_by ?? null, b.reason ?? null)
+    .bind(b.name, group, JSON.stringify(build), b.requested_by ?? null, b.reason ?? null)
     .first();
-  await event(env, "request", "ok", `${b.name} requested for ${arches.join(", ")}${b.requested_by ? " by " + b.requested_by : ""}`, { name: b.name, group, arches, requested_by: b.requested_by ?? null });
-  return json({ request: row }, 201);
+  await event(env, "request", "ok", `${b.name} requested for ${build.join(", ")}${b.requested_by ? " by " + b.requested_by : ""}`, { name: b.name, group, arches: build, skipped, requested_by: b.requested_by ?? null });
+  return json({ request: row, skipped }, 201);
 }
 
 export async function handleApproveRequest(id: number, request: Request, env: Env): Promise<Response> {
@@ -157,12 +177,12 @@ export async function handleEnqueue(request: Request, env: Env): Promise<Respons
   const b = (await request.json()) as { name?: string; group?: string; arches?: unknown; pkgbuild_ref?: string; reason?: string; version?: string; priority?: number; override?: boolean };
   if (!b.name || !b.group || !b.pkgbuild_ref || !b.reason) return json({ error: "name, group, pkgbuild_ref and reason are required" }, 400);
   const arches = parseArches(b.arches);
-  const provided = await providedBy(env, b.name);
-  const conflict = b.override ? null : upstreamConflict(provided, arches);
-  if (conflict) return json({ error: conflict, provided }, 409);
-  const tasks = await enqueue(env, { name: b.name, group: b.group, arches, pkgbuild_ref: b.pkgbuild_ref, reason: b.reason, version: b.version ?? null, priority: b.priority });
-  await event(env, "enqueue", "ok", `${b.name}${b.version ? " " + b.version : ""}: ${tasks.length} build task(s) queued (${b.reason})`, { name: b.name, arches, pkgbuild_ref: b.pkgbuild_ref, reason: b.reason, tasks });
-  return json({ tasks }, 201);
+  const { build, skipped } = splitByUpstream(await providedBy(env, b.name), arches, b.override);
+  if (!build.length) return nothingToBuild(skipped);
+  const tasks = await enqueue(env, { name: b.name, group: b.group, arches: build, pkgbuild_ref: b.pkgbuild_ref, reason: b.reason, version: b.version ?? null, priority: b.priority });
+  const note = skipped.length ? `; ${skipped.map((s) => `${s.arch} skipped, ${s.source} ships ${s.version}`).join(", ")}` : "";
+  await event(env, "enqueue", "ok", `${b.name}${b.version ? " " + b.version : ""}: ${tasks.length} build task(s) queued for ${build.join(", ")} (${b.reason})${note}`, { name: b.name, arches: build, skipped, pkgbuild_ref: b.pkgbuild_ref, reason: b.reason, tasks });
+  return json({ tasks, arches: build, skipped }, 201);
 }
 
 export async function handleCancelTask(id: number, env: Env): Promise<Response> {

@@ -1,0 +1,53 @@
+# Maintainer: Omarchy packaging <https://github.com/firemanxbr/omarchy-pool>
+# Upstream PKGBUILD: AUR walker (Andrej Benz). The OPR ships it for x86_64;
+# the factory builds it for aarch64.
+
+pkgname=walker
+pkgver=2.17.0
+pkgrel=1
+pkgdesc='wayland application runner'
+url='https://github.com/abenz1267/walker'
+arch=('x86_64' 'aarch64')
+license=('GPL')
+makedepends=('cargo' 'gobject-introspection' 'glibc' 'protobuf')
+depends=('gtk4-layer-shell' 'poppler-glib' 'cairo')
+conflicts=('walker')
+provides=('walker')
+source=("${url}/archive/refs/tags/v${pkgver}.tar.gz")
+sha256sums=("c3498742a9866422b2947340a515eeb7932333bb8f99b171d159c0a7ece0a12f")
+
+build() {
+    cd ${pkgname}-${pkgver}
+    export RUSTUP_TOOLCHAIN=stable
+    export CARGO_TARGET_DIR=target
+    cargo build --release
+}
+
+package() {
+    cd ${pkgname}-${pkgver}/target/release
+    install -Dm 755 walker -t "${pkgdir}/usr/bin"
+
+    cd ../../
+    install -Dm 644 LICENSE -t "${pkgdir}/usr/share/licenses/${pkgname}"
+
+    cd resources
+    install -Dm 644 config.toml -t "${pkgdir}/etc/xdg/walker"
+
+    cd themes/default
+    install -Dm 644 item.xml -t "${pkgdir}/etc/xdg/walker/themes/default"
+    install -Dm 644 item_calc.xml -t "${pkgdir}/etc/xdg/walker/themes/default"
+    install -Dm 644 item_clipboard.xml -t "${pkgdir}/etc/xdg/walker/themes/default"
+    install -Dm 644 item_dmenu.xml -t "${pkgdir}/etc/xdg/walker/themes/default"
+    install -Dm 644 item_files.xml -t "${pkgdir}/etc/xdg/walker/themes/default"
+    install -Dm 644 item_providerlist.xml -t "${pkgdir}/etc/xdg/walker/themes/default"
+    install -Dm 644 item_symbols.xml -t "${pkgdir}/etc/xdg/walker/themes/default"
+    install -Dm 644 item_symbols_grid.xml -t "${pkgdir}/etc/xdg/walker/themes/default"
+    install -Dm 644 item_archlinuxpkgs.xml -t "${pkgdir}/etc/xdg/walker/themes/default"
+    install -Dm 644 item_dnfpackages.xml -t "${pkgdir}/etc/xdg/walker/themes/default"
+    install -Dm 644 item_todo.xml -t "${pkgdir}/etc/xdg/walker/themes/default"
+    install -Dm 644 item_unicode.xml -t "${pkgdir}/etc/xdg/walker/themes/default"
+    install -Dm 644 layout.xml -t "${pkgdir}/etc/xdg/walker/themes/default"
+    install -Dm 644 keybind.xml -t "${pkgdir}/etc/xdg/walker/themes/default"
+    install -Dm 644 preview.xml -t "${pkgdir}/etc/xdg/walker/themes/default"
+    install -Dm 644 style.css -t "${pkgdir}/etc/xdg/walker/themes/default"
+}

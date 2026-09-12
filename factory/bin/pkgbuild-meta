@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Prints shell assignments describing a PKGBUILD without sourcing it as root
 # on the caller's machine: META_ARCHES (JSON, the pool's architectures the
-# package builds for; `any` builds once on x86_64) and META_VERSION.
+# package builds for; `any` builds on each, the pool keeps one object per
+# architecture directory) and META_VERSION.
 set -euo pipefail
 f="${1:?PKGBUILD path}"
 # A throwaway bash sources the file with functions neutralised; PKGBUILDs are
@@ -14,7 +15,7 @@ IFS=$'\t' read -r arches pkgver pkgrel epoch < <(bash -c '
 list='[]'
 for a in $arches; do
   case "$a" in
-    any) list='["x86_64"]'; break ;;
+    any) list='["x86_64","aarch64"]'; break ;;
     x86_64|aarch64) list="$(jq -c --arg a "$a" '. + [$a]' <<<"$list")" ;;
   esac
 done
