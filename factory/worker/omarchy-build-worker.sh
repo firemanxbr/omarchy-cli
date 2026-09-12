@@ -56,11 +56,15 @@ inside() {
     grep -q "^$opt" /etc/pacman.conf || sed -i "0,/^\[options\]/s//[options]\n$opt/" /etc/pacman.conf
   done
   pacman-key --init >/dev/null 2>&1 || true
-  # Factory-built packages already in the pool satisfy dependencies of new
-  # builds — once edge has a rendered factory database for this architecture.
-  if curl -sfI --max-time 20 "$pool/$arch/omarchy-factory-edge.db" >/dev/null; then
-    printf '\n[omarchy-factory-edge]\nSigLevel = Optional\nServer = %s/$arch\n' "$pool" >> /etc/pacman.conf
-  fi
+  # Dependencies resolve against what the pool's edge serves for this
+  # architecture — the OPR (omarchy, quickshell…) and earlier factory builds
+  # — on top of the image's own mirrors. A throwaway container trusts the
+  # pool over HTTPS; nothing built here is installed anywhere else.
+  for repo in omarchy-packages-edge omarchy-factory-edge; do
+    if curl -sfI --max-time 20 "$pool/$arch/$repo.db" >/dev/null; then
+      printf '\n[%s]\nSigLevel = Optional TrustAll\nServer = %s/$arch\n' "$repo" "$pool" >> /etc/pacman.conf
+    fi
+  done
   pacman -Syu --noconfirm --needed base-devel git sudo namcap >/dev/null
   useradd -m -s /bin/bash builder
   echo 'builder ALL=(ALL) NOPASSWD: /usr/bin/pacman' > /etc/sudoers.d/builder
