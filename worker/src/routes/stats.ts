@@ -80,6 +80,10 @@ export async function handleStats(env: Env): Promise<Response> {
       ORDER BY arch, e.source`,
   ).all<{ source: string; arch: string; status: string; created_at: string; upstream_total: number | null; deferred: number | null; uploaded: number | null; removed: number | null }>();
   const indexed = new Map((bySource.results as { source: string; arch: string; objects: number; bytes: number }[]).map((r) => [`${r.source}/${r.arch}`, r]));
+  // Coverage counts what edge pins, not every object of the source in the
+  // pool (superseded versions stay until retention runs).
+  const edgeHead = rings.find((r) => r.ring === "edge");
+  const pinnedEdge = new Map(((edgeHead?.sources ?? []) as { source: string; arch: string; packages: number }[]).map((s) => [`${s.source}/${s.arch}`, s.packages]));
   const stableHead = rings.find((r) => r.ring === "stable");
   const pinnedStable = new Map(((stableHead?.sources ?? []) as { source: string; arch: string; packages: number }[]).map((s) => [`${s.source}/${s.arch}`, s.packages]));
   const synced = new Map(lastSync.results.map((r) => [`${r.source}/${r.arch}`, r]));
@@ -96,10 +100,11 @@ export async function handleStats(env: Env): Promise<Response> {
       optional: expected?.optional ?? false,
       title: expected?.title ?? null,
       upstream_total: r?.upstream_total ?? null,
-      indexed: have?.objects ?? 0,
+      indexed: pinnedEdge.get(key) ?? have?.objects ?? 0,
+      objects: have?.objects ?? 0,
       bytes: have?.bytes ?? 0,
       pinned_stable: pinnedStable.get(key) ?? 0,
-      missing: r?.upstream_total == null ? null : Math.max(0, r.upstream_total - (have?.objects ?? 0)),
+      missing: r?.upstream_total == null ? null : Math.max(0, r.upstream_total - (pinnedEdge.get(key) ?? have?.objects ?? 0)),
       last_sync: r?.created_at ?? null,
       last_status: r?.status ?? null,
     };

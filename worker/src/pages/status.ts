@@ -30,7 +30,7 @@ const BODY = String.raw`
   <section>
     <h2>Sources</h2>
     <p class="sub">Last sync of every upstream repository. A source is late when its last sync is older than six hours (a long import of one source makes the others wait their turn).</p>
-    <div class="table-wrap"><table id="sources"><thead><tr><th>Source</th><th>Arch</th><th>Last sync</th><th>Result</th><th class="num">Upstream</th><th class="num">In the pool</th><th class="num">Missing</th></tr></thead><tbody></tbody></table></div>
+    <div class="table-wrap"><table id="sources"><thead><tr><th>Source</th><th>Arch</th><th>Last sync</th><th>Result</th><th class="num">Upstream</th><th class="num">In edge</th><th class="num">Missing</th></tr></thead><tbody></tbody></table></div>
   </section>
 
   <section>

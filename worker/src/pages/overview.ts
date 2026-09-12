@@ -19,8 +19,8 @@ const BODY = String.raw`
 
   <section>
     <h2>Coverage</h2>
-    <p class="sub">Every upstream repository the pool mirrors: what upstream serves, what is already in the pool, what <code>stable</code> pins. The target is all of it, on both architectures; nothing is stored twice.</p>
-    <div class="table-wrap"><table id="coverage"><thead><tr><th>Source</th><th>Arch</th><th class="num">Upstream</th><th class="num">In the pool</th><th class="num">Missing</th><th class="num">In stable</th><th>Progress</th><th class="num">Size</th><th>Last sync</th></tr></thead><tbody></tbody></table></div>
+    <p class="sub">Every upstream repository the pool mirrors: what upstream serves, what <code>edge</code> already pins, what <code>stable</code> pins. The target is all of it, on both architectures; nothing is stored twice (superseded versions stay in the pool until retention runs, so the size can exceed the upstream's).</p>
+    <div class="table-wrap"><table id="coverage"><thead><tr><th>Source</th><th>Arch</th><th class="num">Upstream</th><th class="num">In edge</th><th class="num">Missing</th><th class="num">In stable</th><th>Progress</th><th class="num">Size</th><th>Last sync</th></tr></thead><tbody></tbody></table></div>
   </section>
 
   <section id="pipeline">

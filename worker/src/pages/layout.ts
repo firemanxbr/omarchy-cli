@@ -264,6 +264,7 @@ export function page(o: PageOptions): string {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(o.title)}</title>
 <meta name="description" content="${escapeHtml(o.description)}">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='5' fill='%239ece6a'/%3E%3Crect x='9' y='9' width='14' height='14' rx='1.5' fill='%230c0e10'/%3E%3Crect x='13' y='13' width='6' height='6' fill='%239ece6a'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Geist:wght@500;600;700&display=swap">
 <style>${CSS}</style>
