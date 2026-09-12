@@ -9,6 +9,8 @@
 pub mod client;
 pub mod desc;
 pub mod sign;
+pub mod sync;
+pub mod syncdb;
 
 use std::io::Write;
 
@@ -29,6 +31,12 @@ pub enum RepoError {
     Api { status: u16, body: String },
     #[error("extraction failed: {0}")]
     Extract(#[from] pkg_extract::ExtractError),
+    #[error("{file}: sha256 mismatch (upstream {expected}, downloaded {actual})")]
+    Integrity {
+        file: String,
+        expected: String,
+        actual: String,
+    },
 }
 
 /// Which archive to render.

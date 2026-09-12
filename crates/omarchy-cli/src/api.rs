@@ -34,6 +34,8 @@ pub struct PackageSummary {
     pub size_download: u64,
     pub size_installed: u64,
     pub description: Option<String>,
+    #[serde(default)]
+    pub source: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

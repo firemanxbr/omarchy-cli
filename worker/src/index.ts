@@ -1,43 +1,47 @@
 /**
- * Omarchy edge repository: immutable package pool (R2), index with pinned
- * releases (D1), and a pacman-compatible mirror on top.
+ * Omarchy packaging staging: immutable package pool (R2), index with pinned
+ * releases (D1), generated pacman databases, and a public dashboard.
  *
- * pacman-facing (no auth):
- *   GET  /:ring/os/:arch/<repo>.db[.tar.gz][.sig]   generated database of the ring head
- *   GET  /:ring/os/:arch/<repo>.files[.tar.gz][.sig]
- *   GET  /:ring/os/:arch/<filename>[.sig]           package blob from the pool
+ * pacman never talks to this worker. Packages and the per-ring databases are
+ * plain R2 objects served from the bucket's custom domain (POOL_URL):
+ *   <arch>/<filename>            <arch>/omarchy-<source>-<ring>.db (.files, .sig)
  *
  * API (JSON; mutations need `Authorization: Bearer <PUBLISH_TOKEN>`):
- *   PUT  /api/v1/pool/:sha256          raw archive body → R2 (integrity-checked)
- *   PUT  /api/v1/pool/:sha256/sig      raw detached signature
- *   POST /api/v1/packages              manifest JSON → index rows
+ *   PUT  /api/v1/pool/:sha256?filename=            raw archive → R2 (integrity-checked)
+ *   PUT  /api/v1/pool/:sha256/sig?filename=        detached signature
+ *   POST /api/v1/pool/:sha256/multipart?filename=  large archives: create / parts / complete
+ *   POST /api/v1/packages?source=core              manifest JSON → index rows
+ *   POST /api/v1/packages/known                    which sha256s are already indexed
  *   GET  /api/v1/packages/:sha256
- *   GET  /api/v1/releases/:ring        head release + manifests (?fields=summary for a light list, ?include=files for file lists)
+ *   GET  /api/v1/releases/:ring[?fields=summary|include=files]
  *   GET  /api/v1/releases/:ring/history
- *   POST /api/v1/releases              create / promote a release
- *   PUT  /api/v1/releases/:id/artifacts/:kind?repo=&arch=   generated db upload
- *   GET  /api/v1/graph?targets=a,b&ring=stable   dependency closure within the ring
- *
- * The worker never resolves dependencies or decides what is safe; it serves
- * data. Rendering and signing databases happens in the publisher (pkg-repo).
+ *   POST /api/v1/releases                          create / promote / roll back
+ *   PUT  /api/v1/releases/:id/artifacts/:kind?repo=&arch=
+ *   GET  /api/v1/graph?targets=a,b&ring=stable
+ *   POST /api/v1/events   GET /api/v1/events       activity log
+ *   GET  /api/v1/stats                             everything the dashboard shows
+ *   GET  /api/v1/pool/unreferenced?keep=3          retention: what GC would delete
+ *   POST /api/v1/pool/gc?keep=3&limit=200          delete it (objects, then rows)
+ *   GET  /                                         the dashboard
+ *   GET  /pool/<arch>/<file>                       fallback static origin (dev)
  */
 
-import { handleMirror } from "./routes/mirror";
-import { handlePutPool, handlePutPoolSig } from "./routes/pool";
-import { handleGetPackage, handlePostPackage } from "./routes/packages";
-import {
-  handleCreateRelease,
-  handleGetRelease,
-  handleReleaseHistory,
-  handlePutArtifact,
-} from "./routes/releases";
+import { handleMultipartComplete, handleMultipartCreate, handleMultipartPart, handlePutPool, handlePutPoolSig } from "./routes/pool";
+import { handleGetPackage, handleKnownPackages, handlePostPackage } from "./routes/packages";
+import { handleCreateRelease, handleGetRelease, handleReleaseHistory, handlePutArtifact } from "./routes/releases";
 import { handleGraph } from "./routes/graph";
+import { handleGetEvents, handlePostEvent } from "./routes/events";
+import { handleStats } from "./routes/stats";
+import { handleGc, handleUnreferenced } from "./routes/gc";
+import { dashboardHtml } from "./dashboard";
+import { handleStatic } from "./routes/static";
 import { requireAuth } from "./auth";
 
 export interface Env {
   DB: D1Database;
   PACKAGES: R2Bucket;
   DEFAULT_RING: string;
+  POOL_URL: string;
   PUBLISH_TOKEN: string;
 }
 
@@ -58,12 +62,18 @@ export default {
 
     try {
       if (path.startsWith(API + "/")) {
-        return await api(method, path.slice(API.length), url, request, env);
+        const res = await api(method, path.slice(API.length), url, request, env);
+        res.headers.set("access-control-allow-origin", "*");
+        return res;
       }
-      // /:ring/os/:arch/:file
-      const m = path.match(/^\/([a-z]+)\/os\/([A-Za-z0-9_]+)\/([^/]+)$/);
-      if (m && (method === "GET" || method === "HEAD")) {
-        return await handleMirror(m[1], m[2], decodeURIComponent(m[3]), request, env);
+      if (method === "OPTIONS") return new Response(null, { status: 204, headers: cors() });
+      if (path.startsWith("/pool/") && (method === "GET" || method === "HEAD")) {
+        return await handleStatic(decodeURIComponent(path.slice("/pool/".length)), request, env);
+      }
+      if (path === "/" || path === "/index.html") {
+        return new Response(dashboardHtml(env.POOL_URL), {
+          headers: { "content-type": "text/html; charset=utf-8", "cache-control": "public, max-age=60" },
+        });
       }
       return json({ error: "not found" }, 404);
     } catch (err) {
@@ -73,19 +83,47 @@ export default {
   },
 } satisfies ExportedHandler<Env>;
 
+function cors(): HeadersInit {
+  return {
+    "access-control-allow-origin": "*",
+    "access-control-allow-methods": "GET, POST, PUT, OPTIONS",
+    "access-control-allow-headers": "authorization, content-type",
+  };
+}
+
 async function api(method: string, path: string, url: URL, request: Request, env: Env): Promise<Response> {
   let m: RegExpMatchArray | null;
 
+  if (method === "OPTIONS") return new Response(null, { status: 204, headers: cors() });
+  if (method === "GET" && path === "/stats") return handleStats(env);
   if (method === "GET" && path === "/graph") return handleGraph(url, env);
+  if (method === "GET" && path === "/events") return handleGetEvents(url, env);
+  if (method === "GET" && path === "/pool/unreferenced") return handleUnreferenced(url, env);
+  if (method === "POST" && path === "/pool/gc") return requireAuth(request, env) ?? handleGc(url, env);
+  if (method === "POST" && path === "/events") return requireAuth(request, env) ?? handlePostEvent(request, env);
 
   if ((m = path.match(/^\/pool\/([0-9a-f]{64})$/)) && method === "PUT") {
-    return requireAuth(request, env) ?? handlePutPool(m[1], request, env);
+    return requireAuth(request, env) ?? handlePutPool(m[1], url, request, env);
   }
   if ((m = path.match(/^\/pool\/([0-9a-f]{64})\/sig$/)) && method === "PUT") {
-    return requireAuth(request, env) ?? handlePutPoolSig(m[1], request, env);
+    return requireAuth(request, env) ?? handlePutPoolSig(m[1], url, request, env);
+  }
+  if ((m = path.match(/^\/pool\/([0-9a-f]{64})\/multipart$/)) && method === "POST") {
+    return requireAuth(request, env) ?? handleMultipartCreate(m[1], url, env);
+  }
+  if ((m = path.match(/^\/pool\/multipart\/([A-Za-z0-9._-]+)\/part\/(\d+)$/)) && method === "PUT") {
+    const key = url.searchParams.get("key") ?? "";
+    return requireAuth(request, env) ?? handleMultipartPart(key, m[1], Number(m[2]), request, env);
+  }
+  if ((m = path.match(/^\/pool\/multipart\/([A-Za-z0-9._-]+)\/complete$/)) && method === "POST") {
+    const key = url.searchParams.get("key") ?? "";
+    return requireAuth(request, env) ?? handleMultipartComplete(key, m[1], request, env);
   }
   if (path === "/packages" && method === "POST") {
-    return requireAuth(request, env) ?? handlePostPackage(request, env);
+    return requireAuth(request, env) ?? handlePostPackage(url, request, env);
+  }
+  if (path === "/packages/known" && method === "POST") {
+    return handleKnownPackages(request, env);
   }
   if ((m = path.match(/^\/packages\/([0-9a-f]{64})$/)) && method === "GET") {
     return handleGetPackage(m[1], env);
@@ -105,9 +143,9 @@ async function api(method: string, path: string, url: URL, request: Request, env
   return json({ error: "not found" }, 404);
 }
 
-export function json(body: unknown, status = 200): Response {
+export function json(body: unknown, status = 200, extra: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { "content-type": "application/json; charset=utf-8" },
+    headers: { "content-type": "application/json; charset=utf-8", ...extra },
   });
 }

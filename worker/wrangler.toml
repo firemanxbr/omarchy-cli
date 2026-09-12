@@ -5,7 +5,8 @@ account_id = "34f1918ac9ca522150a1830ea9b61a40"
 
 # Custom domain on firemanxbr.org (zone must exist in this account).
 routes = [
-  { pattern = "pkgs.firemanxbr.org", custom_domain = true }
+  { pattern = "pkgs.firemanxbr.org", custom_domain = true },
+  { pattern = "dashboard-omarchy.firemanxbr.org", custom_domain = true }
 ]
 
 [observability]
@@ -27,6 +28,8 @@ bucket_name = "omarchy-packages"
 
 [vars]
 DEFAULT_RING = "stable"
+# Static origin for packages and databases (the R2 bucket's custom domain).
+POOL_URL = "https://pool.firemanxbr.org"
 
 # Secrets (set with `wrangler secret put <NAME>`):
 #   PUBLISH_TOKEN  — bearer token required by the CI publisher on PUT /api/v1/packages

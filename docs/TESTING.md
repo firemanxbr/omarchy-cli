@@ -171,10 +171,24 @@ container) next to the index at the same N. Run it on Linux x86_64 for fair
 the Benchmark workflow (`.github/workflows/bench.yml`) does exactly that and
 uploads `results.json`. Results are recorded in [POC-RESULTS.md](POC-RESULTS.md).
 
+## Health check
+
+```bash
+OMARCHY_API=… OMARCHY_POOL=… OMARCHY_PUBLISH_TOKEN=… tests/health-check.sh stable
+```
+
+Reads the ring's rendered repos from `/api/v1/stats`, writes a `pacman.conf` with
+`SigLevel = Required DatabaseRequired`, runs `pacman -Sy`, lists every repo and
+downloads the first package with signature verification inside an Arch container,
+then posts a `health` event (ok / warn when nothing is rendered / error). The
+`Health` workflow runs it daily for all rings; `Promote` runs it for the target ring.
+
 ## Cloudflare (staging)
 
-The staging worker runs at `https://pkgs.firemanxbr.org` with a real D1 database and
-R2 bucket. Deploying is a manual step:
+The staging worker runs at `https://pkgs.firemanxbr.org` (index API + dashboard at
+`https://dashboard-omarchy.firemanxbr.org`) with a real D1 database and an R2 bucket
+whose custom domain `https://pool.firemanxbr.org` serves packages and databases
+statically. Deploying is a manual step:
 
 ```bash
 cd worker
@@ -186,16 +200,22 @@ Publishing needs the token stored as the worker's `PUBLISH_TOKEN` secret:
 
 ```bash
 export OMARCHY_API=https://pkgs.firemanxbr.org OMARCHY_PUBLISH_TOKEN=...
-pkg-repo publish --ring edge <archives>
+pkg-repo sync --source core --limit 200            # import from mirror.omarchy.org → edge
+pkg-repo publish --ring edge --source packages <archives>
 pkg-repo promote --from edge --to rc && pkg-repo promote --from rc --to stable
-pkg-repo render --ring stable --sign <key id>
+pkg-repo render --ring stable --sign <key id>      # one omarchy-<source>-stable db per source
+pkg-repo gc --keep 3                               # add --delete to actually free the pool
 ```
+
+The GitHub workflows (`sync`, `promote`, `health`, `gc`) run exactly these; they need
+the repository variables `OMARCHY_API`, `OMARCHY_POOL` and the secrets
+`OMARCHY_PUBLISH_TOKEN`, `OMARCHY_GPG_KEY` (armored private key), `OMARCHY_GPG_KEYID`.
 
 To validate with pacman, use the same container recipe as the local scripts with
 
 ```
-[omarchy]
-Server = https://pkgs.firemanxbr.org/stable/os/$arch
+[omarchy-core-stable]
+Server = https://pool.firemanxbr.org/$arch
 ```
 
 and the POC public key imported into `pacman-key`. This has been exercised end to end:

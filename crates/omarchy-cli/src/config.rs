@@ -7,8 +7,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
-    /// Base URL of the edge repository.
+    /// Base URL of the index API.
     pub api: String,
+    /// Static origin for packages and databases (the R2 bucket's custom domain).
+    pub pool: String,
     /// Ring this machine follows.
     pub ring: String,
     /// Repository name as configured in pacman.conf (`[omarchy]`).
@@ -23,6 +25,7 @@ impl Default for Config {
         Self {
             // The POC staging repository; production will move this to omarchy.org.
             api: "https://pkgs.firemanxbr.org".into(),
+            pool: "https://pool.firemanxbr.org".into(),
             ring: "stable".into(),
             repo: "omarchy".into(),
             arch: "x86_64".into(),

@@ -16,28 +16,39 @@ and a **thin client** that understands releases and blocks unsafe partial upgrad
 > [docs/TESTING.md](docs/TESTING.md) for how to verify it, and [TODO.md](TODO.md)
 > if you want to help.
 
-## Try the staging repository
+## The staging environment
 
-The POC runs at **https://pkgs.firemanxbr.org** with two test packages (`zlib`, `xz`
-from Arch `core`) published through `edge → rc → stable`. It is a plain pacman mirror:
+**Dashboard: https://dashboard-omarchy.firemanxbr.org** — the pool, the three rings,
+every sync/promotion/render/health check as it happens.
+
+The pipeline runs hourly on GitHub Actions: it imports Arch `core`, `extra` and
+`multilib` from the Omarchy edge mirror into one immutable pool on R2, pins them on
+`edge`, promotes `edge → rc` daily and `rc → stable` weekly, renders and signs one
+pacman database per source and ring, and checks each ring with a real pacman.
+Packages and databases are plain objects served from **https://pool.firemanxbr.org**:
 
 ```ini
-# /etc/pacman.conf
-[omarchy]
-Server = https://pkgs.firemanxbr.org/stable/os/$arch
+# /etc/pacman.conf — databases live beside the packages; only the repo name changes per ring
+[omarchy-core-stable]
+Server = https://pool.firemanxbr.org/$arch
+
+[omarchy-extra-stable]
+Server = https://pool.firemanxbr.org/$arch
 ```
 
 Databases and packages are signed with a throwaway key (`docs/omarchy-poc.pub.asc`,
 expires 2026-10-11): `pacman-key --add docs/omarchy-poc.pub.asc && pacman-key --lsign-key poc@omarchy.invalid`.
 
-The thin client works against the same index:
+The index API lives at **https://pkgs.firemanxbr.org/api/v1/** and the thin client
+uses it by default:
 
 ```bash
-export OMARCHY_API=https://pkgs.firemanxbr.org
 omarchy-cli status          # pinned release vs. what stable serves now
 omarchy-cli check xz        # ABI safety check against this machine, exit 2 if unsafe
 omarchy-cli upgrade         # pacman -U from the pool, then pin the release
 ```
+
+This is an evidence environment: throwaway signing key, no SLA, may be reset.
 
 ## Layout
 

@@ -48,7 +48,7 @@ WRANGLER_STATE="$E2E/wrangler-state"
 echo "PUBLISH_TOKEN=$OMARCHY_PUBLISH_TOKEN" > "$E2E/.dev.vars"
 npx wrangler d1 migrations apply omarchy-repo --local --persist-to "$WRANGLER_STATE" >/dev/null
 npx wrangler dev --ip 0.0.0.0 --port "$PORT" --persist-to "$WRANGLER_STATE" \
-  --env-file "$E2E/.dev.vars" > "$E2E/wrangler.log" 2>&1 &
+  --env-file "$E2E/.dev.vars" --var "POOL_URL:http://$HOST_FROM_CONTAINER:$PORT/pool" > "$E2E/wrangler.log" 2>&1 &
 WRANGLER_PID=$!
 for _ in $(seq 1 60); do
   if curl -s "$OMARCHY_API/api/v1/releases/stable" | grep -q "no release"; then break; fi
@@ -65,9 +65,9 @@ for pkg in "$E2E"/pkgs/*.pkg.tar.zst; do
 done
 
 step "Publish to edge (pool upload happens once)"
-"$PKG_REPO" publish --ring edge --note "zlib" "$E2E/pkgs/zlib-1:1.3.2-3-x86_64.pkg.tar.zst"
-"$PKG_REPO" publish --ring edge --note "xz" "$E2E/pkgs/xz-5.8.4-1-x86_64.pkg.tar.zst"
-"$PKG_REPO" publish --ring edge --note "re-publish is idempotent" "$E2E/pkgs/zlib-1:1.3.2-3-x86_64.pkg.tar.zst"
+"$PKG_REPO" publish --ring edge --source packages --note "zlib" "$E2E/pkgs/zlib-1:1.3.2-3-x86_64.pkg.tar.zst"
+"$PKG_REPO" publish --ring edge --source packages --note "xz" "$E2E/pkgs/xz-5.8.4-1-x86_64.pkg.tar.zst"
+"$PKG_REPO" publish --ring edge --source packages --note "re-publish is idempotent" "$E2E/pkgs/zlib-1:1.3.2-3-x86_64.pkg.tar.zst"
 
 step "Promote edge → rc → stable (index writes only)"
 "$PKG_REPO" promote --from edge --to rc --note "rc cut"
@@ -84,13 +84,15 @@ curl -s "$OMARCHY_API/api/v1/releases/stable?fields=summary" | grep -q '"name":"
 step "Render + sign databases for stable"
 "$PKG_REPO" render --ring stable --sign "$KEYID"
 
-step "Mirror sanity"
-for f in omarchy.db omarchy.db.sig omarchy.files "zlib-1:1.3.2-3-x86_64.pkg.tar.zst.sig"; do
-  code=$(curl -s -o /dev/null -w '%{http_code}' "$OMARCHY_API/stable/os/x86_64/$f")
+step "Pool sanity (flat layout: databases beside the packages)"
+for f in omarchy-packages-stable.db omarchy-packages-stable.db.sig omarchy-packages-stable.files "zlib-1:1.3.2-3-x86_64.pkg.tar.zst" "zlib-1:1.3.2-3-x86_64.pkg.tar.zst.sig"; do
+  code=$(curl -s -o /dev/null -w '%{http_code}' "$OMARCHY_API/pool/x86_64/$f")
   [[ "$code" == 200 ]] || { echo "unexpected $code for $f"; exit 1; }
 done
-[[ "$(curl -s -H 'Range: bytes=0-3' "$OMARCHY_API/stable/os/x86_64/zlib-1:1.3.2-3-x86_64.pkg.tar.zst" | od -An -tx1 | tr -d ' \n')" == "28b52ffd" ]] || { echo "range request broken"; exit 1; }
-echo "databases, signatures, package blobs and Range requests OK"
+[[ "$(curl -s -H 'Range: bytes=0-3' "$OMARCHY_API/pool/x86_64/zlib-1:1.3.2-3-x86_64.pkg.tar.zst" | od -An -tx1 | tr -d ' \n')" == "28b52ffd" ]] || { echo "range request broken"; exit 1; }
+curl -s "$OMARCHY_API/api/v1/stats" | grep -q '"kind":"render"' || { echo "render event missing from stats"; exit 1; }
+curl -s "$OMARCHY_API/" | grep -q "One pool, three rings" || { echo "dashboard not served"; exit 1; }
+echo "databases, signatures, package blobs, Range requests, stats and dashboard OK"
 
 step "pacman in $IMAGE against the worker mirror"
 gpg --armor --export "$KEYID" > "$E2E/omarchy-poc.pub.asc"
@@ -99,8 +101,8 @@ cat > "$E2E/pacman.conf" <<CONF
 Architecture = x86_64
 SigLevel = Required DatabaseRequired
 
-[omarchy]
-Server = http://$HOST_FROM_CONTAINER:$PORT/stable/os/\$arch
+[omarchy-packages-stable]
+Server = http://$HOST_FROM_CONTAINER:$PORT/pool/\$arch
 CONF
 cat > "$E2E/check.sh" <<'CHECK'
 set -euo pipefail
@@ -108,7 +110,7 @@ pacman-key --init >/dev/null 2>&1
 pacman-key --add /repo/omarchy-poc.pub.asc >/dev/null 2>&1
 pacman-key --lsign-key poc@omarchy.invalid >/dev/null 2>&1
 echo "--- pacman -Sy"; pacman --config /repo/pacman.conf -Sy
-echo "--- pacman -Sl omarchy"; pacman --config /repo/pacman.conf -Sl omarchy
+echo "--- pacman -Sl omarchy-packages-stable"; pacman --config /repo/pacman.conf -Sl omarchy-packages-stable
 echo "--- pacman -Sp zlib xz"; pacman --config /repo/pacman.conf -Sp zlib xz
 echo "--- pacman -Fy && -Fl xz (files database must carry file lists)"
 pacman --config /repo/pacman.conf -Fy >/dev/null

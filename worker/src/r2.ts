@@ -1,39 +1,25 @@
-/** R2 key layout and a Range-aware streaming response. */
+/**
+ * R2 key layout — the flat, pacman-native one: databases live beside the
+ * packages and are served statically from the bucket's custom domain.
+ *
+ *   <arch>/<filename>.pkg.tar.zst           package (immutable, uploaded once)
+ *   <arch>/<filename>.pkg.tar.zst.sig       detached signature
+ *   <arch>/<repo>.db | .db.sig              generated database of a ring, e.g.
+ *   <arch>/<repo>.files | .files.sig        omarchy-core-stable.db
+ *
+ * `any` packages are stored under every served architecture directory so that
+ * pacman finds them beside the database it read.
+ */
 
-export const poolKey = (sha256: string) => `pool/${sha256}.pkg.tar.zst`;
-export const poolSigKey = (sha256: string) => `pool/${sha256}.pkg.tar.zst.sig`;
-export const artifactKey = (releaseId: number, repo: string, arch: string, kind: string) =>
-  `releases/${releaseId}/${repo}-${arch}.${kind}`;
+export const ARCH_DIRS = ["x86_64"] as const;
 
-export async function streamObject(
-  bucket: R2Bucket,
-  key: string,
-  request: Request,
-  cacheControl: string,
-  filename?: string,
-): Promise<Response> {
-  const object = await bucket.get(key, { range: request.headers, onlyIf: request.headers });
-  if (object === null) return new Response("not found", { status: 404 });
-
-  const headers = new Headers();
-  object.writeHttpMetadata(headers);
-  headers.set("etag", object.httpEtag);
-  headers.set("accept-ranges", "bytes");
-  headers.set("cache-control", cacheControl);
-  headers.set("content-type", "application/octet-stream");
-  if (filename) headers.set("content-disposition", `inline; filename="${filename}"`);
-
-  const body = "body" in object ? object.body : null;
-  if (body === null) return new Response(null, { status: 304, headers });
-
-  const partial = request.headers.has("range") && object.range && "offset" in object.range && object.range.offset !== undefined;
-  if (partial && object.range && "offset" in object.range && object.range.offset !== undefined) {
-    const offset = object.range.offset;
-    const length = object.range.length ?? object.size - offset;
-    headers.set("content-range", `bytes ${offset}-${offset + length - 1}/${object.size}`);
-    headers.set("content-length", String(length));
-    return new Response(request.method === "HEAD" ? null : body, { status: 206, headers });
-  }
-  headers.set("content-length", String(object.size));
-  return new Response(request.method === "HEAD" ? null : body, { status: 200, headers });
+export function archDirsFor(arch: string): readonly string[] {
+  return arch === "any" ? ARCH_DIRS : [arch];
 }
+
+export const packageKey = (archDir: string, filename: string) => `${archDir}/${filename}`;
+export const signatureKey = (archDir: string, filename: string) => `${archDir}/${filename}.sig`;
+export const artifactKey = (archDir: string, repo: string, kind: string) => `${archDir}/${repo}.${kind}`;
+
+export const IMMUTABLE = "public, max-age=31536000, immutable";
+export const SHORT = "public, max-age=60";

@@ -1,0 +1,63 @@
+name: Sync
+
+# Imports the upstream Arch repositories from the Omarchy edge mirror into the
+# pool and pins them on `edge`, then renders the edge databases. Hourly; a
+# manual run can import everything at once.
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+    inputs:
+      sources:
+        description: "Space-separated sources to sync"
+        default: "core multilib extra"
+      limit:
+        description: "Max new packages per source (0 = all)"
+        default: "0"
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  OMARCHY_API: ${{ vars.OMARCHY_API }}
+  OMARCHY_PUBLISH_TOKEN: ${{ secrets.OMARCHY_PUBLISH_TOKEN }}
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.1
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p pkg-repo
+      - name: Import signing key
+        run: |
+          echo "${{ secrets.OMARCHY_GPG_KEY }}" | gpg --batch --import
+          echo "OMARCHY_GPG_KEYID=${{ secrets.OMARCHY_GPG_KEYID }}" >> "$GITHUB_ENV"
+      - name: Sync sources
+        run: |
+          set -euo pipefail
+          SOURCES="${{ github.event.inputs.sources || 'core multilib extra' }}"
+          LIMIT="${{ github.event.inputs.limit || '1500' }}"
+          status=0
+          for source in $SOURCES; do
+            echo "::group::sync $source"
+            target/release/pkg-repo sync --source "$source" --ring edge --limit "$LIMIT" \
+              --concurrency 6 --work-dir "$RUNNER_TEMP/sync" || status=$?
+            echo "::endgroup::"
+          done
+          exit $status
+      - name: Render edge databases
+        if: always()
+        run: target/release/pkg-repo render --ring edge --sign "$OMARCHY_GPG_KEYID"
+      - name: Report failure
+        if: failure()
+        run: |
+          target/release/pkg-repo event --kind sync --ring edge --status error \
+            --summary "sync run ${{ github.run_id }} failed — see Actions log" \
+            --payload "{\"run\": \"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}"

@@ -30,9 +30,12 @@ Promoting a release copies and re-uploads most of that data, so a bump takes
   (`edge`, `rc`, `stable`). Promotion creates a new release for the target ring that
   points at the same selection: an index write, no bytes move. Rollback is the same
   write pointing at an earlier selection; history is append-only.
-* **Generated pacman databases** — for each ring the publisher renders
-  `<repo>.db.tar.gz` and `<repo>.files.tar.gz` in `repo-add` format, signs them with
-  GPG, and stores them in R2. pacman keeps working unchanged.
+* **Generated pacman databases** — for each ring and source the publisher renders
+  `omarchy-<source>-<ring>.db` and `.files` in `repo-add` format, signs them with GPG,
+  and stores them **beside the packages** (`<arch>/omarchy-core-stable.db`). pacman
+  reads the bucket's custom domain directly — `Server = https://pool…/$arch` — and
+  the only thing that differs between rings is the repository name. No worker, no
+  redirect on the read path.
 
 ![Release promotion](diagrams/release-promotion.svg)
 
@@ -48,19 +51,34 @@ Promoting a release copies and re-uploads most of that data, so a bump takes
 
 Migrations live in `worker/migrations/`.
 
-### Edge API (Worker)
+### Index API (Worker)
 
 | Route | Purpose |
 |---|---|
-| `GET /:ring/os/:arch/<repo>.db` (and `.files`, `.sig`) | pacman mirror: the generated database for the ring's current release |
-| `GET /:ring/os/:arch/<filename>` | pacman mirror: resolves the filename in the release and streams the pool blob (Range supported) |
-| `GET /api/v1/releases/:ring` | current release and its package list |
+| `PUT /api/v1/pool/:sha256?filename=` · `…/multipart` | pool upload (R2 verifies the sha256; multipart for large archives) |
+| `POST /api/v1/packages?source=core` | index a manifest with its provenance |
+| `POST /api/v1/packages/known` | which sha256s the index already has (the sync's diff) |
+| `GET /api/v1/releases/:ring` · `/history` | current release, package list, lineage |
+| `POST /api/v1/releases` | create / promote / roll back a release |
+| `PUT /api/v1/releases/:id/artifacts/:kind?repo=` | store a rendered database beside the packages |
 | `GET /api/v1/graph?targets=a,b&ring=stable` | dependency subgraph for the client's safety check |
-| `PUT /api/v1/packages` | publish: pool upload + index rows (bearer token) |
-| `POST /api/v1/releases` | create / promote / roll back a release (bearer token) |
+| `GET /api/v1/pool/unreferenced` · `POST /api/v1/pool/gc` | retention: what the last N releases do not reference |
+| `POST /api/v1/events` · `GET /api/v1/events` · `GET /api/v1/stats` | activity log and the dashboard's data |
+| `GET /` | the dashboard |
 
-The Worker never resolves dependencies; it serves data. Decisions are made by the
-publisher (`pkg-repo`) and the client.
+pacman never talks to the worker. The worker never resolves dependencies; it
+serves data. Decisions are made by the publisher (`pkg-repo`) and the client.
+
+### Staging pipeline (GitHub Actions)
+
+| Workflow | Schedule | What it does |
+|---|---|---|
+| `sync.yml` | hourly | `pkg-repo sync` core/multilib/extra from `mirror.omarchy.org` → pool + `edge`; render edge |
+| `promote.yml` | daily edge→rc, Mondays rc→stable, or manual | index write, render, health check |
+| `health.yml` | daily | real pacman per ring: `-Sy`, list, signed download → `health` event |
+| `gc.yml` | weekly | delete pool objects the last 3 releases of every ring do not reference |
+
+Every step posts an event; https://dashboard-omarchy.firemanxbr.org renders them.
 
 ## Extraction (`crates/pkg-extract`)
 

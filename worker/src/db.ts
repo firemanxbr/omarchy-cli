@@ -31,7 +31,7 @@ export async function releaseManifests(env: Env, releaseId: number, detail: Mani
   if (detail === "summary") {
     // Enough for status / list / search: ~100 bytes per package instead of ~800.
     const rows = await env.DB.prepare(
-      `SELECT p.name, p.version, p.arch, p.filename, p.sha256, p.size_download, p.size_installed,
+      `SELECT p.name, p.version, p.arch, p.filename, p.sha256, p.size_download, p.size_installed, p.source,
               json_extract(p.manifest_json, '$.description') AS description
          FROM release_packages rp JOIN packages p ON p.id = rp.package_id
         WHERE rp.release_id = ? ORDER BY p.name, p.arch`,
@@ -41,14 +41,15 @@ export async function releaseManifests(env: Env, releaseId: number, detail: Mani
     return rows.results;
   }
   const rows = await env.DB.prepare(
-    `SELECT p.manifest_json FROM release_packages rp
+    `SELECT p.manifest_json, p.source FROM release_packages rp
        JOIN packages p ON p.id = rp.package_id
       WHERE rp.release_id = ? ORDER BY p.name, p.arch`,
   )
     .bind(releaseId)
-    .all<{ manifest_json: string }>();
+    .all<{ manifest_json: string; source: string }>();
   return rows.results.map((r) => {
-    const m = JSON.parse(r.manifest_json) as { files?: unknown };
+    const m = JSON.parse(r.manifest_json) as { files?: unknown; source?: string };
+    m.source = r.source;
     if (detail !== "files") delete m.files;
     return m;
   });

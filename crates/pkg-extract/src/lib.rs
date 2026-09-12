@@ -40,6 +40,11 @@ pub enum ExtractError {
     },
 }
 
+/// Entries larger than this are listed but not inspected: buffering a multi-GB
+/// shared object (CUDA, some games) is not worth the memory, and such objects
+/// are never the ones whose sonames decide an upgrade.
+const MAX_INSPECT_BYTES: u64 = 512 * 1024 * 1024;
+
 /// Metadata entries makepkg stores at the archive root; never part of `files`.
 const METADATA_ENTRIES: [&str; 5] = [".PKGINFO", ".BUILDINFO", ".MTREE", ".INSTALL", ".CHANGELOG"];
 
@@ -109,7 +114,7 @@ fn scan_archive(path: &Path) -> Result<ArchiveScan, ExtractError> {
         };
         scan.files.insert(path.clone());
 
-        if kind != EntryType::Regular {
+        if kind != EntryType::Regular || entry.header().size().unwrap_or(0) > MAX_INSPECT_BYTES {
             continue;
         }
 

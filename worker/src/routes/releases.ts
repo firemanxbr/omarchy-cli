@@ -1,5 +1,5 @@
 import { isRing, json, type Env, type Ring } from "../index";
-import { artifactKey } from "../r2";
+import { archDirsFor, artifactKey, SHORT } from "../r2";
 import { releaseManifests, releaseSummary, ringHead, type ManifestDetail, type ReleaseRow } from "../db";
 
 interface CreateRelease {
@@ -124,7 +124,12 @@ export async function handleReleaseHistory(ring: string, env: Env): Promise<Resp
   return json({ ring, releases: rows.results });
 }
 
-/** Stores a generated database (or its signature) for a release. */
+/**
+ * Stores a generated database (or its signature) for a release, at the live
+ * per-ring key (`<arch>/<repo>.db`) beside the packages. `repo` is the pacman
+ * repo name, e.g. `omarchy-core-stable`; pacman reads it statically from the
+ * bucket's custom domain.
+ */
 export async function handlePutArtifact(
   releaseId: number,
   kind: string,
@@ -132,20 +137,26 @@ export async function handlePutArtifact(
   request: Request,
   env: Env,
 ): Promise<Response> {
-  const repo = url.searchParams.get("repo") ?? "omarchy";
+  const repo = url.searchParams.get("repo") ?? "";
   const arch = url.searchParams.get("arch") ?? "x86_64";
+  if (!/^[a-z0-9-]+$/.test(repo)) return json({ error: "repo is required (e.g. omarchy-core-stable)" }, 400);
   if (!request.body) return json({ error: "empty body" }, 400);
   const release = await env.DB.prepare("SELECT id FROM releases WHERE id = ?").bind(releaseId).first();
   if (!release) return json({ error: "release not found" }, 404);
 
-  const key = artifactKey(releaseId, repo, arch, kind);
-  const object = await env.PACKAGES.put(key, request.body);
+  const bytes = await request.arrayBuffer();
+  const keys: string[] = [];
+  for (const dir of archDirsFor(arch)) {
+    const key = artifactKey(dir, repo, kind);
+    await env.PACKAGES.put(key, bytes, { httpMetadata: { contentType: "application/octet-stream", cacheControl: SHORT } });
+    keys.push(key);
+  }
   await env.DB.prepare(
     `INSERT INTO release_artifacts (release_id, repo, arch, kind, r2_key, size) VALUES (?, ?, ?, ?, ?, ?)
      ON CONFLICT(release_id, repo, arch, kind) DO UPDATE SET r2_key = excluded.r2_key, size = excluded.size,
        created_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`,
   )
-    .bind(releaseId, repo, arch, kind, key, object?.size ?? 0)
+    .bind(releaseId, repo, arch, kind, keys[0], bytes.byteLength)
     .run();
-  return json({ release_id: releaseId, repo, arch, kind, size: object?.size ?? 0 }, 201);
+  return json({ release_id: releaseId, repo, arch, kind, keys, size: bytes.byteLength }, 201);
 }

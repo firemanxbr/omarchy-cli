@@ -1,0 +1,33 @@
+name: GC
+
+# Retention: delete pool objects that none of the last 3 releases of any ring
+# reference. Keeps R2 storage — and the bill — bounded.
+on:
+  schedule:
+    - cron: "0 3 * * 0"
+  workflow_dispatch:
+    inputs:
+      keep:
+        description: "Releases to protect per ring"
+        default: "3"
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  OMARCHY_API: ${{ vars.OMARCHY_API }}
+  OMARCHY_PUBLISH_TOKEN: ${{ secrets.OMARCHY_PUBLISH_TOKEN }}
+
+jobs:
+  gc:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.1
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p pkg-repo
+      - run: target/release/pkg-repo gc --keep "${{ github.event.inputs.keep || '3' }}" --delete

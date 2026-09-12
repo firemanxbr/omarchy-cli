@@ -1,5 +1,5 @@
 import { json, type Env } from "../index";
-import { poolKey, poolSigKey } from "../r2";
+import { archDirsFor, packageKey, signatureKey } from "../r2";
 
 interface Rule {
   name: string;
@@ -21,10 +21,11 @@ interface Manifest {
   optional?: string[];
   conflicts?: string[];
   replaces?: string[];
-  files: string[];
+  files?: string[];
 }
 
 const OPS = [">=", "<=", "=", ">", "<"];
+export const SOURCES = ["core", "extra", "multilib", "packages"] as const;
 
 /** Parses the Arch dependency syntax the Rust side serializes rules as. */
 export function parseRule(s: string): Rule {
@@ -42,15 +43,21 @@ export function parseRule(s: string): Rule {
 }
 
 /**
- * Registers a manifest whose archive is already in the pool. Inserting the
- * package row and its graph rows happens in one batch.
+ * Registers a manifest whose archive is already in the pool. `?source=` records
+ * provenance (core / extra / multilib / packages — the last one being OPR builds). File lists are kept inside
+ * manifest_json only — the normalized package_files table is not populated
+ * for mirror-scale imports (it would be ~95% of all rows).
  */
-export async function handlePostPackage(request: Request, env: Env): Promise<Response> {
+export async function handlePostPackage(url: URL, request: Request, env: Env): Promise<Response> {
+  const source = url.searchParams.get("source") ?? "packages";
+  if (!(SOURCES as readonly string[]).includes(source)) return json({ error: `source must be one of ${SOURCES.join(", ")}` }, 400);
   const m = (await request.json()) as Manifest;
   if (!m?.sha256 || !m.name || !m.version || !m.arch || !m.filename) {
     return json({ error: "manifest is missing required fields" }, 400);
   }
-  const blob = await env.PACKAGES.head(poolKey(m.sha256));
+  const dir = archDirsFor(m.arch)[0];
+  const key = packageKey(dir, m.filename);
+  const blob = await env.PACKAGES.head(key);
   if (!blob) return json({ error: "archive not in pool; upload it first" }, 409);
   if (blob.size !== m.size_download) {
     return json({ error: `pool object is ${blob.size} bytes, manifest says ${m.size_download}` }, 422);
@@ -58,12 +65,12 @@ export async function handlePostPackage(request: Request, env: Env): Promise<Res
   const existing = await env.DB.prepare("SELECT id FROM packages WHERE sha256 = ?").bind(m.sha256).first<{ id: number }>();
   if (existing) return json({ id: existing.id, sha256: m.sha256, status: "already-indexed" });
 
-  const hasSig = (await env.PACKAGES.head(poolSigKey(m.sha256))) ? 1 : 0;
+  const hasSig = (await env.PACKAGES.head(signatureKey(dir, m.filename))) ? 1 : 0;
   const inserted = await env.DB.prepare(
-    `INSERT INTO packages (sha256, name, version, arch, filename, size_download, size_installed, has_signature, manifest_json)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+    `INSERT INTO packages (sha256, name, version, arch, filename, size_download, size_installed, has_signature, manifest_json, source, r2_key)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
   )
-    .bind(m.sha256, m.name, m.version, m.arch, m.filename, m.size_download, m.size_installed, hasSig, JSON.stringify(m))
+    .bind(m.sha256, m.name, m.version, m.arch, m.filename, m.size_download, m.size_installed, hasSig, JSON.stringify(m), source, key)
     .first<{ id: number }>();
   const id = inserted!.id;
 
@@ -90,10 +97,6 @@ export async function handlePostPackage(request: Request, env: Env): Promise<Res
       stmts.push(req.bind(id, r.name, r.constraint ? r.constraint.op + r.constraint.version : null, r.symbol_version, kind));
     }
   }
-  const file = env.DB.prepare("INSERT INTO package_files (package_id, file_path) VALUES (?, ?)");
-  for (const path of m.files ?? []) stmts.push(file.bind(id, path));
-
-  // D1 batches are limited in size; chunk to stay well inside it.
   for (let i = 0; i < stmts.length; i += 100) await env.DB.batch(stmts.slice(i, i + 100));
 
   return json({ id, sha256: m.sha256, status: "indexed" }, 201);
@@ -103,4 +106,19 @@ export async function handleGetPackage(sha256: string, env: Env): Promise<Respon
   const row = await env.DB.prepare("SELECT manifest_json FROM packages WHERE sha256 = ?").bind(sha256).first<{ manifest_json: string }>();
   if (!row) return json({ error: "not found" }, 404);
   return new Response(row.manifest_json, { headers: { "content-type": "application/json" } });
+}
+
+/** `{ "sha256": [...] }` → the subset the index already knows. */
+export async function handleKnownPackages(request: Request, env: Env): Promise<Response> {
+  const body = (await request.json()) as { sha256: string[] };
+  const list = (body.sha256 ?? []).filter((s) => /^[0-9a-f]{64}$/.test(s));
+  const known: string[] = [];
+  for (let i = 0; i < list.length; i += 500) {
+    const chunk = list.slice(i, i + 500);
+    const rows = await env.DB.prepare("SELECT sha256 FROM packages WHERE sha256 IN (SELECT value FROM json_each(?))")
+      .bind(JSON.stringify(chunk))
+      .all<{ sha256: string }>();
+    for (const r of rows.results) known.push(r.sha256);
+  }
+  return json({ known });
 }

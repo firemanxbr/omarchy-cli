@@ -1,12 +1,15 @@
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
 use pkg_manifest::{PackageManifest, RepoIndex};
 use pkg_repo::client::Api;
+use pkg_repo::sync::{self, SyncOptions};
 use pkg_repo::{build_database, sign, Flavor};
 
-/// Renders and publishes pacman databases for Omarchy releases.
+/// Publishes packages into the pool, pins releases and renders pacman databases.
 #[derive(Parser)]
 #[command(name = "pkg-repo", version, about)]
 struct Cli {
@@ -16,7 +19,7 @@ struct Cli {
 
 #[derive(Args)]
 struct Remote {
-    /// Base URL of the edge API, e.g. `https://pkgs.omarchy.org`.
+    /// Base URL of the edge API, e.g. `https://pkgs.firemanxbr.org`.
     #[arg(long, env = "OMARCHY_API")]
     api: String,
     /// Publish token (bearer).
@@ -44,11 +47,43 @@ enum Command {
         remote: Remote,
         #[arg(long, default_value = "edge")]
         ring: String,
+        /// Provenance recorded in the index: core, extra, multilib or packages (OPR).
+        #[arg(long, default_value = "packages")]
+        source: String,
         #[arg(long)]
         note: Option<String>,
         /// `.pkg.tar.zst` files; a sibling `.sig` is uploaded when present.
         #[arg(required = true)]
         archives: Vec<PathBuf>,
+    },
+    /// Imports an upstream repository (core/extra/multilib) into the pool and pins it on `ring`.
+    Sync {
+        #[command(flatten)]
+        remote: Remote,
+        #[arg(long)]
+        source: String,
+        /// Mirror base URL; `<source>/os/<arch>/` is appended.
+        #[arg(
+            long,
+            env = "OMARCHY_UPSTREAM",
+            default_value = "https://mirror.omarchy.org"
+        )]
+        upstream: String,
+        #[arg(long, default_value = "x86_64")]
+        arch: String,
+        #[arg(long, default_value = "edge")]
+        ring: String,
+        /// Import at most this many new packages per run (0 = all).
+        #[arg(long, default_value_t = 0)]
+        limit: usize,
+        #[arg(long, default_value_t = 4)]
+        concurrency: usize,
+        /// Scratch directory for downloads.
+        #[arg(long, default_value = "/tmp/pkg-repo-sync")]
+        work_dir: PathBuf,
+        /// List what would be imported and stop.
+        #[arg(long)]
+        dry_run: bool,
     },
     /// Creates a release on `--to` pinned to the current selection of `--from`.
     Promote {
@@ -81,25 +116,58 @@ enum Command {
         #[arg(long)]
         ring: String,
     },
-    /// Renders, signs and uploads the pacman databases of a ring's current release.
+    /// Renders, signs and uploads the pacman databases of a ring's current release,
+    /// one `omarchy-<source>-<ring>` repo per source.
     Render {
         #[command(flatten)]
         remote: Remote,
         #[arg(long)]
         ring: String,
-        #[arg(long, default_value = "omarchy")]
-        repo: String,
         #[arg(long, default_value = "x86_64")]
         arch: String,
         /// GPG key id; omit to upload unsigned databases.
         #[arg(long)]
         sign: Option<String>,
     },
+    /// Deletes pool objects no recent release references (retention).
+    Gc {
+        #[command(flatten)]
+        remote: Remote,
+        /// Protect packages referenced by the last N releases of every ring.
+        #[arg(long, default_value_t = 3)]
+        keep: u32,
+        /// Actually delete; without it, only report.
+        #[arg(long)]
+        delete: bool,
+    },
+    /// Records an event for the dashboard (health checks, gates, notes).
+    Event {
+        #[command(flatten)]
+        remote: Remote,
+        #[arg(long)]
+        kind: String,
+        #[arg(long)]
+        ring: Option<String>,
+        #[arg(long)]
+        source: Option<String>,
+        #[arg(long, default_value = "ok")]
+        status: String,
+        #[arg(long)]
+        summary: String,
+        #[arg(long)]
+        duration_ms: Option<u64>,
+        /// Extra details as a JSON object.
+        #[arg(long)]
+        payload: Option<String>,
+    },
 }
 
 fn main() -> Result<()> {
     tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
         .with_writer(std::io::stderr)
         .init();
     match Cli::parse().command {
@@ -112,9 +180,33 @@ fn main() -> Result<()> {
         Command::Publish {
             remote,
             ring,
+            source,
             note,
             archives,
-        } => publish(&remote, &ring, note.as_deref(), &archives),
+        } => publish(&remote, &ring, &source, note.as_deref(), &archives),
+        Command::Sync {
+            remote,
+            source,
+            upstream,
+            arch,
+            ring,
+            limit,
+            concurrency,
+            work_dir,
+            dry_run,
+        } => run_sync(
+            &remote,
+            &SyncOptions {
+                source,
+                upstream,
+                arch,
+                ring,
+                limit,
+                concurrency,
+                work_dir,
+                dry_run,
+            },
+        ),
         Command::Promote {
             remote,
             from,
@@ -131,48 +223,62 @@ fn main() -> Result<()> {
         Command::Render {
             remote,
             ring,
-            repo,
             arch,
             sign,
-        } => render(&remote, &ring, &repo, &arch, sign.as_deref()),
+        } => render(&remote, &ring, &arch, sign.as_deref()),
+        Command::Gc {
+            remote,
+            keep,
+            delete,
+        } => gc(&remote, keep, delete),
+        Command::Event {
+            remote,
+            kind,
+            ring,
+            source,
+            status,
+            summary,
+            duration_ms,
+            payload,
+        } => {
+            let api = Api::new(&remote.api, &remote.token)?;
+            let payload: Option<serde_json::Value> = payload
+                .map(|p| serde_json::from_str(&p))
+                .transpose()
+                .context("--payload must be JSON")?;
+            api.post_event(&serde_json::json!({
+                "kind": kind, "ring": ring, "source": source, "status": status,
+                "summary": summary, "duration_ms": duration_ms, "payload": payload,
+            }))?;
+            Ok(())
+        }
     }
 }
 
-fn rollback(remote: &Remote, ring: &str, to: u64, note: Option<&str>) -> Result<()> {
+fn run_sync(remote: &Remote, opts: &SyncOptions) -> Result<()> {
     let api = Api::new(&remote.api, &remote.token)?;
-    let started = std::time::Instant::now();
-    let created = api.create_release(ring, None, Some(to), &[], &[], note)?;
+    let report = sync::run(&api, opts)?;
     println!(
-        "{ring} now serves the selection of release {to} as {}#{} (id {}) — {} packages, {:?}, zero bytes copied",
-        created.release.ring,
-        created.release.seq,
-        created.release.id,
-        created.package_count,
-        started.elapsed()
+        "upstream {} · already indexed {} · uploaded {} ({}) · failed {} · removed {} · deferred {}",
+        report.upstream_total,
+        report.already_indexed,
+        report.uploaded,
+        sync::human(report.bytes_uploaded),
+        report.failed.len(),
+        report.removed,
+        report.deferred
     );
-    Ok(())
-}
-
-fn releases(remote: &Remote, ring: &str) -> Result<()> {
-    let api = Api::new(&remote.api, &remote.token)?;
-    let history = api.history(ring)?;
-    println!(
-        "{:<6} {:<5} {:<9} {:<8} {:<7} {:<26} note",
-        "id", "seq", "packages", "source", "head", "created"
-    );
-    for r in &history.releases {
-        println!(
-            "{:<6} {:<5} {:<9} {:<8} {:<7} {:<26} {}",
-            r.id,
-            r.seq,
-            r.package_count,
-            r.source_id.map_or("-".to_owned(), |s| s.to_string()),
-            if r.is_head == 1 { "*" } else { "" },
-            r.created_at,
-            r.note.as_deref().unwrap_or("")
-        );
+    if let Some((id, seq)) = report.release {
+        println!("release id {id} (#{seq})");
     }
-    Ok(())
+    for (file, err) in &report.failed {
+        eprintln!("FAILED {file}: {err}");
+    }
+    if report.failed.is_empty() {
+        Ok(())
+    } else {
+        anyhow::bail!("{} package(s) failed to import", report.failed.len())
+    }
 }
 
 fn sorted(mut packages: Vec<PackageManifest>) -> Vec<PackageManifest> {
@@ -209,9 +315,17 @@ fn build(index: &Path, repo: &str, out: &Path, key: Option<&str>) -> Result<()> 
     Ok(())
 }
 
-fn publish(remote: &Remote, ring: &str, note: Option<&str>, archives: &[PathBuf]) -> Result<()> {
+fn publish(
+    remote: &Remote,
+    ring: &str,
+    source: &str,
+    note: Option<&str>,
+    archives: &[PathBuf],
+) -> Result<()> {
     let api = Api::new(&remote.api, &remote.token)?;
+    let started = Instant::now();
     let mut added = Vec::new();
+    let mut bytes = 0u64;
     for archive in archives {
         let manifest = pkg_extract::extract_manifest(archive)
             .with_context(|| format!("inspecting {}", archive.display()))?;
@@ -226,12 +340,13 @@ fn publish(remote: &Remote, ring: &str, note: Option<&str>, archives: &[PathBuf]
                 "uploading {} {} ({} bytes)",
                 manifest.name, manifest.version, manifest.size_download
             );
-            api.upload_pool(&sha, archive)?;
+            api.upload_pool(&sha, &manifest.filename, archive)?;
             let sig = PathBuf::from(format!("{}.sig", archive.display()));
             if sig.exists() {
-                api.upload_pool_signature(&sha, &sig)?;
+                api.upload_pool_signature(&sha, &manifest.filename, &sig)?;
             }
-            api.index_manifest(&manifest)?;
+            api.index_manifest(&manifest, source)?;
+            bytes += manifest.size_download;
         }
         added.push(sha);
     }
@@ -244,13 +359,20 @@ fn publish(remote: &Remote, ring: &str, note: Option<&str>, archives: &[PathBuf]
         created.package_count,
         created.size_download
     );
+    api.post_event(&serde_json::json!({
+        "kind": "publish", "ring": ring, "source": source, "status": "ok",
+        "summary": format!("{} archive(s) published ({}) → {}#{}", archives.len(), sync::human(bytes), ring, created.release.seq),
+        "duration_ms": millis(started.elapsed()),
+        "payload": { "release_id": created.release.id, "sha256": added },
+    }))?;
     Ok(())
 }
 
 fn promote(remote: &Remote, from: &str, to: &str, note: Option<&str>) -> Result<()> {
     let api = Api::new(&remote.api, &remote.token)?;
-    let started = std::time::Instant::now();
+    let started = Instant::now();
     let created = api.create_release(to, Some(from), None, &[], &[], note)?;
+    let took = started.elapsed();
     println!(
         "promoted {from} → {}#{} (id {}, from release {:?}) — {} packages, {} bytes, {:?}, zero bytes copied",
         created.release.ring,
@@ -259,53 +381,162 @@ fn promote(remote: &Remote, from: &str, to: &str, note: Option<&str>) -> Result<
         created.release.source_id,
         created.package_count,
         created.size_download,
-        started.elapsed()
+        took
     );
+    api.post_event(&serde_json::json!({
+        "kind": "promote", "ring": to, "status": "ok",
+        "summary": format!("{from} → {to}#{}: {} packages ({}), zero bytes copied", created.release.seq, created.package_count, sync::human(created.size_download)),
+        "duration_ms": millis(took),
+        "payload": { "release_id": created.release.id, "from_release_id": created.release.source_id, "note": note },
+    }))?;
     Ok(())
 }
 
-fn render(remote: &Remote, ring: &str, repo: &str, arch: &str, key: Option<&str>) -> Result<()> {
+fn rollback(remote: &Remote, ring: &str, to: u64, note: Option<&str>) -> Result<()> {
     let api = Api::new(&remote.api, &remote.token)?;
-    let view = api.release(ring)?;
-    let packages = sorted(
-        view.packages
-            .into_iter()
-            .filter(|p| p.arch == arch || p.arch == "any")
-            .collect(),
+    let started = Instant::now();
+    let created = api.create_release(ring, None, Some(to), &[], &[], note)?;
+    let took = started.elapsed();
+    println!(
+        "{ring} now serves the selection of release {to} as {}#{} (id {}) — {} packages, {:?}, zero bytes copied",
+        created.release.ring,
+        created.release.seq,
+        created.release.id,
+        created.package_count,
+        took
     );
-    let tmp = tempfile_dir()?;
-    for flavor in [Flavor::Db, Flavor::Files] {
-        let bytes = build_database(&packages, flavor)?;
-        let kind = match flavor {
-            Flavor::Db => "db",
-            Flavor::Files => "files",
-        };
-        api.upload_artifact(view.release.id, kind, repo, arch, bytes.clone())?;
-        eprintln!(
-            "uploaded {kind} ({} packages, {} bytes)",
-            packages.len(),
-            bytes.len()
+    api.post_event(&serde_json::json!({
+        "kind": "rollback", "ring": ring, "status": "warn",
+        "summary": format!("{ring} rolled back to release {to} as #{} ({} packages)", created.release.seq, created.package_count),
+        "duration_ms": millis(took),
+        "payload": { "release_id": created.release.id, "to_release_id": to, "note": note },
+    }))?;
+    Ok(())
+}
+
+fn releases(remote: &Remote, ring: &str) -> Result<()> {
+    let api = Api::new(&remote.api, &remote.token)?;
+    let history = api.history(ring)?;
+    println!(
+        "{:<6} {:<5} {:<9} {:<8} {:<7} {:<26} note",
+        "id", "seq", "packages", "source", "head", "created"
+    );
+    for r in &history.releases {
+        println!(
+            "{:<6} {:<5} {:<9} {:<8} {:<7} {:<26} {}",
+            r.id,
+            r.seq,
+            r.package_count,
+            r.source_id.map_or("-".to_owned(), |s| s.to_string()),
+            if r.is_head == 1 { "*" } else { "" },
+            r.created_at,
+            r.note.as_deref().unwrap_or("")
         );
-        if let Some(key) = key {
-            let file = tmp.join(flavor.archive_name(repo));
-            std::fs::write(&file, &bytes)?;
-            let sig = sign::detach_sign(&file, key)?;
-            api.upload_artifact(
-                view.release.id,
-                &format!("{kind}.sig"),
-                repo,
-                arch,
-                std::fs::read(&sig)?,
-            )?;
-            eprintln!("uploaded {kind}.sig");
+    }
+    Ok(())
+}
+
+fn render(remote: &Remote, ring: &str, arch: &str, key: Option<&str>) -> Result<()> {
+    let api = Api::new(&remote.api, &remote.token)?;
+    let started = Instant::now();
+    let view = api.release(ring)?;
+
+    let mut by_source: BTreeMap<String, Vec<PackageManifest>> = BTreeMap::new();
+    for p in view.packages {
+        if p.manifest.arch == arch || p.manifest.arch == "any" {
+            by_source.entry(p.source).or_default().push(p.manifest);
         }
     }
+
+    let tmp = tempfile_dir()?;
+    let mut rendered = Vec::new();
+    for (source, packages) in by_source {
+        let packages = sorted(packages);
+        let repo = format!("omarchy-{source}-{ring}");
+        for flavor in [Flavor::Db, Flavor::Files] {
+            let bytes = build_database(&packages, flavor)?;
+            let kind = match flavor {
+                Flavor::Db => "db",
+                Flavor::Files => "files",
+            };
+            api.upload_artifact(view.release.id, kind, &repo, arch, &bytes)?;
+            if let Some(key) = key {
+                let file = tmp.join(format!("{repo}.{kind}"));
+                std::fs::write(&file, &bytes)?;
+                let sig = sign::detach_sign(&file, key)?;
+                api.upload_artifact(
+                    view.release.id,
+                    &format!("{kind}.sig"),
+                    &repo,
+                    arch,
+                    &std::fs::read(&sig)?,
+                )?;
+            }
+            eprintln!(
+                "uploaded {repo}.{kind} ({} packages, {} bytes)",
+                packages.len(),
+                bytes.len()
+            );
+        }
+        rendered.push((repo, packages.len()));
+    }
     let _ = std::fs::remove_dir_all(&tmp);
+
+    let took = started.elapsed();
     println!(
-        "rendered {ring}#{} (id {}) for [{repo}] {arch}",
-        view.release.seq, view.release.id
+        "rendered {ring}#{} (id {}) for {arch}: {}",
+        view.release.seq,
+        view.release.id,
+        rendered
+            .iter()
+            .map(|(r, n)| format!("{r} ({n})"))
+            .collect::<Vec<_>>()
+            .join(", ")
     );
+    api.post_event(&serde_json::json!({
+        "kind": "render", "ring": ring, "status": "ok",
+        "summary": format!("{ring}#{}: {} database(s) rendered{}", view.release.seq, rendered.len(), if key.is_some() { ", signed" } else { "" }),
+        "duration_ms": millis(took),
+        "payload": { "release_id": view.release.id, "repos": rendered.iter().map(|(r, n)| serde_json::json!({"repo": r, "packages": n})).collect::<Vec<_>>() },
+    }))?;
     Ok(())
+}
+
+fn gc(remote: &Remote, keep: u32, delete: bool) -> Result<()> {
+    let api = Api::new(&remote.api, &remote.token)?;
+    let started = Instant::now();
+    let report = api.unreferenced(keep)?;
+    let count = report["count"].as_u64().unwrap_or(0);
+    let bytes = report["bytes"].as_u64().unwrap_or(0);
+    println!(
+        "{count} unreferenced package(s), {} (keeping the last {keep} releases per ring)",
+        sync::human(bytes)
+    );
+    if !delete {
+        return Ok(());
+    }
+    let mut deleted = 0u64;
+    let mut freed = 0u64;
+    loop {
+        let r = api.gc(keep, 200)?;
+        deleted += r["deleted"].as_u64().unwrap_or(0);
+        freed += r["bytes"].as_u64().unwrap_or(0);
+        if r["remaining"].as_u64().unwrap_or(0) == 0 || r["deleted"].as_u64().unwrap_or(0) == 0 {
+            break;
+        }
+    }
+    println!("deleted {deleted} package(s), freed {}", sync::human(freed));
+    api.post_event(&serde_json::json!({
+        "kind": "gc", "status": "ok",
+        "summary": format!("retention: deleted {deleted} unreferenced package(s), freed {}", sync::human(freed)),
+        "duration_ms": millis(started.elapsed()),
+        "payload": { "keep": keep, "deleted": deleted, "bytes": freed },
+    }))?;
+    Ok(())
+}
+
+fn millis(d: std::time::Duration) -> u64 {
+    u64::try_from(d.as_millis()).unwrap_or(u64::MAX)
 }
 
 fn tempfile_dir() -> Result<PathBuf> {

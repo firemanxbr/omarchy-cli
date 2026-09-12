@@ -17,9 +17,12 @@ use crate::state::{self, Pinned};
 pub struct Cli {
     #[arg(long, global = true, default_value = "/etc/omarchy-cli/config.toml")]
     pub config: PathBuf,
-    /// Override the repository URL from the config.
+    /// Override the index API URL from the config.
     #[arg(long, global = true, env = "OMARCHY_API")]
     pub api: Option<String>,
+    /// Override the static pool URL from the config.
+    #[arg(long, global = true, env = "OMARCHY_POOL")]
+    pub pool: Option<String>,
     /// Override the ring from the config.
     #[arg(long, global = true)]
     pub ring: Option<String>,
@@ -75,6 +78,9 @@ pub fn run(cli: Cli) -> Result<i32> {
     let mut config = Config::load(&cli.config)?;
     if let Some(api) = cli.api {
         config.api = api;
+    }
+    if let Some(pool) = cli.pool {
+        config.pool = pool;
     }
     if let Some(ring) = cli.ring {
         config.ring = ring;
