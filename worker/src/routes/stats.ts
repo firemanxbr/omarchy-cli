@@ -134,6 +134,7 @@ export async function handleStats(env: Env): Promise<Response> {
        FROM events WHERE kind = 'metrics' AND created_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-7 days') ORDER BY id`,
   ).all();
   const latestMetrics = await env.DB.prepare("SELECT payload, created_at FROM events WHERE kind = 'metrics' ORDER BY id DESC LIMIT 1").first<{ payload: string; created_at: string }>();
+  const securityData = await env.DB.prepare("SELECT MAX(updated_at) AS updated_at, COUNT(*) AS advisories FROM advisories").first<{ updated_at: string | null; advisories: number }>();
 
   return json(
     {
@@ -149,6 +150,7 @@ export async function handleStats(env: Env): Promise<Response> {
         metrics: metricsSeries.results,
       },
       metrics: latestMetrics ? { recorded_at: latestMetrics.created_at, ...JSON.parse(latestMetrics.payload) } : null,
+      security: { updated_at: securityData?.updated_at ?? null, advisories: securityData?.advisories ?? 0 },
       releases: releases.results,
       events: events.results.map(parse),
       latest: lastByKind.results.map(parse),
