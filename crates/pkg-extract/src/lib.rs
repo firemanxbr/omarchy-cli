@@ -85,10 +85,28 @@ fn hash_file(path: &Path) -> Result<(String, u64), ExtractError> {
     Ok((hex::encode(hasher.finalize()), total))
 }
 
-/// Second pass: stream zstd → tar, collecting `.PKGINFO`, the file list and the
-/// ELF facts of every regular file that starts with the ELF magic.
+/// Opens a package archive for streaming, whatever makepkg compressed it with
+/// (`.pkg.tar.zst` on Arch, `.pkg.tar.xz` on Arch Linux ARM, plain tar).
+pub fn open_archive(path: &Path) -> std::io::Result<Box<dyn Read>> {
+    let mut file = BufReader::new(File::open(path)?);
+    let mut magic = [0u8; 6];
+    let n = read_prefix(&mut file, &mut magic)?;
+    let file = {
+        use std::io::Seek;
+        file.seek(std::io::SeekFrom::Start(0))?;
+        file
+    };
+    Ok(match &magic[..n] {
+        [0x28, 0xb5, 0x2f, 0xfd, ..] => Box::new(zstd::Decoder::new(file)?),
+        [0xfd, 0x37, 0x7a, 0x58, 0x5a, 0x00] => Box::new(xz2::read::XzDecoder::new(file)),
+        _ => Box::new(file),
+    })
+}
+
+/// Second pass: stream the archive → tar, collecting `.PKGINFO`, the file list
+/// and the ELF facts of every regular file that starts with the ELF magic.
 fn scan_archive(path: &Path) -> Result<ArchiveScan, ExtractError> {
-    let decoder = zstd::Decoder::new(BufReader::new(File::open(path)?))?;
+    let decoder = open_archive(path)?;
     let mut archive = tar::Archive::new(decoder);
     let mut scan = ArchiveScan::default();
 

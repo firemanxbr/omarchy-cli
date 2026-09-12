@@ -44,6 +44,9 @@ pub struct SyncOptions {
     pub concurrency: usize,
     pub work_dir: PathBuf,
     pub dry_run: bool,
+    /// GPG keyring file the upstream `.sig` of every package must verify
+    /// against; packages without a valid signature are not imported.
+    pub keyring: Option<PathBuf>,
 }
 
 #[derive(Debug, Default)]
@@ -220,6 +223,7 @@ fn post_sync_event(
             "bytes_uploaded": report.bytes_uploaded,
             "removed": report.removed,
             "deferred": report.deferred,
+            "verified_against": opts.keyring.as_ref().map(|k| k.file_name().map(|f| f.to_string_lossy().into_owned())),
             "failed": report.failed.iter().map(|(f, e)| serde_json::json!({"file": f, "error": e})).collect::<Vec<_>>(),
             "release_id": release_id,
         }
@@ -249,6 +253,7 @@ fn import_all(
             let work_dir = opts.work_dir.join(format!("w{worker}"));
             let source = opts.source.clone();
             let arch = opts.arch.clone();
+            let keyring = opts.keyring.clone();
             scope.spawn(move || {
                 let _ = std::fs::create_dir_all(&work_dir);
                 loop {
@@ -256,7 +261,15 @@ fn import_all(
                     let Some(pkg) = next else {
                         break;
                     };
-                    match import_one(&api, base, &source, &arch, pkg, &work_dir) {
+                    match import_one(
+                        &api,
+                        base,
+                        &source,
+                        &arch,
+                        pkg,
+                        &work_dir,
+                        keyring.as_deref(),
+                    ) {
                         Ok(()) => done
                             .lock()
                             .expect("done")
@@ -286,6 +299,7 @@ fn import_one(
     arch: &str,
     pkg: &UpstreamPackage,
     work_dir: &std::path::Path,
+    keyring: Option<&std::path::Path>,
 ) -> Result<(), RepoError> {
     let archive = work_dir.join(&pkg.filename);
     let sig = work_dir.join(format!("{}.sig", pkg.filename));
@@ -301,6 +315,20 @@ fn import_one(
         let has_sig = api
             .download(&format!("{base}/{}.sig", pkg.filename), &sig)
             .is_ok();
+        if let Some(keyring) = keyring {
+            if !has_sig {
+                return Err(RepoError::Signature {
+                    file: pkg.filename.clone(),
+                    detail: "upstream ships no .sig".into(),
+                });
+            }
+            crate::sign::verify_with_keyring(&archive, &sig, keyring).map_err(|e| {
+                RepoError::Signature {
+                    file: pkg.filename.clone(),
+                    detail: e.to_string(),
+                }
+            })?;
+        }
         let manifest = pkg_extract::extract_manifest(&archive)?;
         api.upload_pool(&pkg.sha256, &pkg.filename, arch, &archive)?;
         if has_sig {

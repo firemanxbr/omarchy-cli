@@ -25,6 +25,7 @@ hex = { workspace = true }
 # Archive handling
 tar = "0.4"
 zstd = "0.13"
+xz2 = "0.1"
 # ELF parsing
 goblin = { version = "0.10", default-features = false, features = ["elf32", "elf64", "endian_fd", "std"] }
 

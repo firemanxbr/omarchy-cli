@@ -37,6 +37,8 @@ pub enum RepoError {
         expected: String,
         actual: String,
     },
+    #[error("{file}: upstream signature rejected: {detail}")]
+    Signature { file: String, detail: String },
 }
 
 /// Which archive to render.

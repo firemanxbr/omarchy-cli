@@ -51,10 +51,10 @@ npx wrangler dev --ip 0.0.0.0 --port "$PORT" --persist-to "$WRANGLER_STATE" \
   --env-file "$E2E/.dev.vars" --var "POOL_URL:http://$HOST_FROM_CONTAINER:$PORT/pool" > "$E2E/wrangler.log" 2>&1 &
 WRANGLER_PID=$!
 for _ in $(seq 1 60); do
-  if curl -s "$OMARCHY_API/api/v1/releases/stable" | grep -q "no release"; then break; fi
+  if grep -q "no release" <<<"$(curl -s "$OMARCHY_API/api/v1/releases/stable")"; then break; fi
   sleep 1
 done
-curl -s "$OMARCHY_API/api/v1/releases/stable" | grep -q "no release" || { cat "$E2E/wrangler.log"; exit 1; }
+grep -q "no release" <<<"$(curl -s "$OMARCHY_API/api/v1/releases/stable")" || { cat "$E2E/wrangler.log"; exit 1; }
 cd "$ROOT"
 
 step "Sign fixture packages (stands in for the mirror / OPR signatures)"
@@ -76,8 +76,9 @@ step "Promote edge → rc → stable (index writes only)"
 step "Rollback: stable back to the zlib-only release, then forward again"
 FIRST_EDGE=$("$PKG_REPO" releases --ring edge | awk '$2 == 1 {print $1}')
 "$PKG_REPO" rollback --ring stable --to "$FIRST_EDGE" --note "rollback drill"
-curl -s "$OMARCHY_API/api/v1/releases/stable?fields=summary" | grep -q '"name":"zlib"' || { echo "rollback lost zlib"; exit 1; }
-curl -s "$OMARCHY_API/api/v1/releases/stable?fields=summary" | grep -q '"name":"xz"' && { echo "rollback still serves xz"; exit 1; }
+summary_body=$(curl -s "$OMARCHY_API/api/v1/releases/stable?fields=summary")
+grep -q '"name":"zlib"' <<<"$summary_body" || { echo "rollback lost zlib"; exit 1; }
+grep -q '"name":"xz"' <<<"$summary_body" && { echo "rollback still serves xz"; exit 1; }
 "$PKG_REPO" promote --from rc --to stable --note "forward again"
 "$PKG_REPO" releases --ring stable
 
@@ -90,9 +91,13 @@ for f in omarchy-packages-stable.db omarchy-packages-stable.db.sig omarchy-packa
   [[ "$code" == 200 ]] || { echo "unexpected $code for $f"; exit 1; }
 done
 [[ "$(curl -s -H 'Range: bytes=0-3' "$OMARCHY_API/pool/x86_64/zlib-1:1.3.2-3-x86_64.pkg.tar.zst" | od -An -tx1 | tr -d ' \n')" == "28b52ffd" ]] || { echo "range request broken"; exit 1; }
-curl -s "$OMARCHY_API/api/v1/stats" | grep -q '"kind":"render"' || { echo "render event missing from stats"; exit 1; }
-curl -s "$OMARCHY_API/" | grep -q "One pool, three rings" || {
-  echo "dashboard not served; response:"; curl -s -i "$OMARCHY_API/" | head -c 600; echo
+# Read bodies fully before grepping: `curl | grep -q` under pipefail fails
+# with exit 23 when grep closes the pipe early.
+stats_body=$(curl -s "$OMARCHY_API/api/v1/stats")
+grep -q '"kind":"render"' <<<"$stats_body" || { echo "render event missing from stats"; exit 1; }
+dash_body=$(curl -s "$OMARCHY_API/")
+grep -q "One pool, three rings" <<<"$dash_body" || {
+  echo "dashboard not served; response head:"; head -c 600 <<<"$dash_body"; echo
   echo "--- worker log tail ---"; tail -20 "$E2E/wrangler.log"; exit 1; }
 echo "databases, signatures, package blobs, Range requests, stats and dashboard OK"
 

@@ -12,8 +12,6 @@
 //! finished by it.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::fs::File;
-use std::io::BufReader;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -495,8 +493,7 @@ fn user_modified(dest: &Path, tracked: &TrackedFile) -> Result<bool> {
 }
 
 fn unpack(archive: &Path, dir: &Path) -> Result<()> {
-    let file = File::open(archive).map_err(fsops::io(archive))?;
-    let decoder = zstd::Decoder::new(BufReader::new(file)).map_err(fsops::io(archive))?;
+    let decoder = pkg_extract::open_archive(archive).map_err(fsops::io(archive))?;
     let mut tar = tar::Archive::new(decoder);
     tar.set_preserve_permissions(true);
     tar.set_preserve_mtime(true);

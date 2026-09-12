@@ -95,6 +95,10 @@ enum Command {
         /// List what would be imported and stop.
         #[arg(long)]
         dry_run: bool,
+        /// GPG keyring file (`archlinux.gpg`, `archlinuxarm.gpg`, `omarchy.gpg`); every
+        /// package's upstream `.sig` must verify against it or it is not imported.
+        #[arg(long)]
+        keyring: Option<PathBuf>,
     },
     /// Creates a release on `--to` pinned to the current selection of `--from`.
     Promote {
@@ -208,6 +212,7 @@ fn main() -> Result<()> {
             concurrency,
             work_dir,
             dry_run,
+            keyring,
         } => run_sync(
             &remote,
             &SyncOptions {
@@ -221,6 +226,7 @@ fn main() -> Result<()> {
                 concurrency,
                 work_dir,
                 dry_run,
+                keyring,
             },
         ),
         Command::Promote {

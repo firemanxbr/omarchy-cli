@@ -55,7 +55,7 @@ npx wrangler dev --ip 0.0.0.0 --port "$PORT" --persist-to "$STATE" \
   --env-file "$E2E/.dev.vars" --var "POOL_URL:http://$HOST_FROM_CONTAINER:$PORT/pool" > "$E2E/wrangler.log" 2>&1 &
 WRANGLER_PID=$!
 for _ in $(seq 1 60); do
-  curl -s "$OMARCHY_API/api/v1/releases/stable" | grep -q "no release" && break; sleep 1
+  if grep -q "no release" <<<"$(curl -s "$OMARCHY_API/api/v1/releases/stable")"; then break; fi; sleep 1
 done
 cd "$ROOT"
 cp "$ROOT"/crates/pkg-extract/tests/fixtures/*.pkg.tar.zst "$E2E/pkgs/"
