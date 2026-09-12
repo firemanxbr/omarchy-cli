@@ -1,0 +1,80 @@
+name: Metrics
+
+# Every 30 minutes: a snapshot of how the system is running — GitHub Actions
+# runs of the last 7 days per workflow (successes, failures, what is running
+# now, runner minutes) and the pool totals — recorded as a `metrics` event.
+# The dashboard draws its charts and the pipeline table from these.
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: metrics
+  cancel-in-progress: true
+
+permissions:
+  actions: read
+  contents: read
+
+env:
+  OMARCHY_API: ${{ vars.OMARCHY_API }}
+  OMARCHY_PUBLISH_TOKEN: ${{ secrets.OMARCHY_PUBLISH_TOKEN }}
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Collect
+        run: |
+          set -euo pipefail
+          since=$(date -u -d '7 days ago' +%FT%TZ)
+          gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs?created=%3E%3D$since&per_page=100" \
+            --jq '.workflow_runs[] | {name, status, conclusion, created_at, updated_at, run_started_at, html_url, id, event, run_attempt}' > runs.jsonl
+          curl -sf "$OMARCHY_API/api/v1/stats" > stats.json
+          jq -n --arg since "$since" --slurpfile stats stats.json --slurpfile runs <(jq -s . runs.jsonl) '
+            def secs: if . == null then 0 else (. | fromdateiso8601) end;
+            def dur: if .status == "completed" and .run_started_at != null then ((.updated_at | secs) - (.run_started_at | secs)) else 0 end;
+            def running: (.status == "in_progress" or .status == "queued" or .status == "waiting" or .status == "requested" or .status == "pending");
+            (($runs[0] // []) | map(select(.name | test(" - Update #") | not))) as $r
+            | ($stats[0]) as $s
+            | {
+                since: $since,
+                actions: {
+                  runs: ($r | length),
+                  running: ([$r[] | select(running)] | length),
+                  failures: ([$r[] | select(.conclusion == "failure")] | length),
+                  minutes: (([$r[] | dur] | add // 0) / 60 | floor),
+                  workflows: (
+                    [$r[] | .name] | unique | map(. as $n | ([$r[] | select(.name == $n)]) as $w | {
+                      name: $n,
+                      runs: ($w | length),
+                      success: ([$w[] | select(.conclusion == "success")] | length),
+                      failure: ([$w[] | select(.conclusion == "failure")] | length),
+                      cancelled: ([$w[] | select(.conclusion == "cancelled")] | length),
+                      running: ([$w[] | select(running)] | length),
+                      minutes: (([$w[] | dur] | add // 0) / 60 | floor),
+                      last: ($w | sort_by(.created_at) | last | {status, conclusion, created_at, url: .html_url, seconds: dur, event})
+                    })
+                  ),
+                  daily: (
+                    [$r[] | .created_at[0:10]] | unique | map(. as $d | ([$r[] | select(.created_at[0:10] == $d)]) as $w | {
+                      day: $d, runs: ($w | length),
+                      failures: ([$w[] | select(.conclusion == "failure")] | length),
+                      minutes: (([$w[] | dur] | add // 0) / 60 | floor)
+                    })
+                  )
+                },
+                pool: { objects: $s.pool.objects, bytes: $s.pool.bytes, referenced_bytes: $s.pool.referenced_by_any_release.bytes, reclaimable_bytes: $s.pool.reclaimable.bytes },
+                rings: [$s.rings[] | {ring, packages: .package_count, bytes}],
+                version: $s.version.version
+              }' > payload.json
+          jq -c '{runs: .actions.runs, running: .actions.running, minutes: .actions.minutes, objects: .pool.objects}' payload.json
+      - name: Record
+        run: |
+          set -euo pipefail
+          summary=$(jq -r '"\(.actions.runs) runs in 7 days, \(.actions.running) running, \(.actions.minutes) runner-minutes · pool \(.pool.objects) objects"' payload.json)
+          jq -n --arg s "$summary" --slurpfile p payload.json '{kind: "metrics", status: "ok", summary: $s, payload: $p[0]}' \
+            | curl -sf -X POST "$OMARCHY_API/api/v1/events" -H "authorization: Bearer $OMARCHY_PUBLISH_TOKEN" -H "content-type: application/json" -d @- >/dev/null
+          echo "$summary"

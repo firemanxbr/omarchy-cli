@@ -219,13 +219,19 @@ source's head is a skip. `cargo test -p pkg-repo gate` runs them.
 The staging worker runs at `https://pkgs.firemanxbr.org` (index API + dashboard at
 `https://omarchy-pool.firemanxbr.org`) with a real D1 database and an R2 bucket
 whose custom domain `https://pool.firemanxbr.org` serves packages and databases
-statically. Deploying is a manual step:
+statically. Deploying is what a merge into `main` does (`release.yml`, see
+[RUNBOOK.md](RUNBOOK.md#releasing-the-pool-itself)); by hand, for a hotfix or a
+rollback to an earlier tag:
 
 ```bash
 cd worker
 npx wrangler d1 migrations apply omarchy-repo --remote
-npx wrangler deploy
+npx wrangler deploy --var POOL_VERSION:vX.Y.Z --var POOL_COMMIT:$(git rev-parse HEAD) --var POOL_DEPLOYED_AT:$(date -u +%FT%TZ)
 ```
+
+To try dashboard or API changes against the real data without deploying,
+`npx wrangler dev --remote --port 8799` runs the local code with the remote D1
+and R2 bindings (reads only, unless you publish to it).
 
 Publishing needs the token stored as the worker's `PUBLISH_TOKEN` secret:
 
