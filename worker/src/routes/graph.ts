@@ -28,7 +28,10 @@ export async function handleGraph(url: URL, env: Env): Promise<Response> {
 
   const rows = await env.DB.prepare(
     `WITH RECURSIVE
-       sel(package_id) AS (SELECT rp.package_id FROM release_packages rp JOIN packages p ON p.id = rp.package_id
+       -- MATERIALIZED: the selection is referenced from the recursive step;
+       -- without the hint SQLite re-evaluates it on every iteration, which
+       -- took a 29k-package ring past 30 s.
+       sel(package_id) AS MATERIALIZED (SELECT rp.package_id FROM release_packages rp JOIN packages p ON p.id = rp.package_id
                             WHERE rp.release_id = ?1 AND (?4 IS NULL OR p.repo_arch = ?4)),
        closure(package_id) AS (
          SELECT p.id FROM packages p JOIN sel ON sel.package_id = p.id

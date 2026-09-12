@@ -7,7 +7,7 @@ import type { RunningVersion } from "../meta";
 
 const BODY = String.raw`
   <h1>Arch, Arch Linux ARM and Omarchy packages, tested before they reach you</h1>
-  <p class="lede">One repository for Omarchy on x86_64 and aarch64. Every upstream package is verified against its project's signing key, stored once, and served in three rings: <code>edge</code> follows upstream hourly, <code>rc</code> is what passed a real pacman and an ABI check on both architectures, <code>stable</code> is what stayed healthy for three days — and rolls back by itself if it stops being. One <code>Server =</code> line instead of a repository per project. <a href="/get-started">Get started →</a></p>
+  <p class="lede">One repository for Omarchy on x86_64 and aarch64. Every upstream package is verified against its project's signing key, stored once, and served in three rings: <code>edge</code> follows upstream hourly, <code>rc</code> is what passed a real pacman and an ABI check on both architectures, <code>stable</code> is what stayed healthy in <code>rc</code> for a day — and rolls back by itself if it stops being. One <code>Server =</code> line instead of a repository per project. <a href="/get-started">Get started →</a></p>
 
   <div class="tiles" id="tiles"></div>
 
@@ -54,7 +54,7 @@ const BODY = String.raw`
 const SCRIPT = String.raw`
 __CHARTS__
   var RING_INFO = {
-    stable: { title: "Recommended for daily use", text: "What <b>rc</b> served for three days without a failed check. Roughly four days behind Arch; health-checked on both architectures after every promotion and rolled back automatically if that fails." },
+    stable: { title: "Recommended for daily use", text: "What <b>rc</b> served for a day without a failed check. About two days behind Arch; health-checked on both architectures after every promotion and rolled back automatically if that fails." },
     rc: { title: "For testers", text: "Yesterday's <b>edge</b>, promoted only after a real pacman synced it and an ABI check found no blockers on x86_64 and aarch64. See problems before stable does." },
     edge: { title: "For CI and developers", text: "What upstream published in the last hour, signature-verified and rendered, nothing else checked yet. The same packages Arch serves, one hour later." }
   };

@@ -77,7 +77,7 @@ serves data. Decisions are made by the publisher (`pkg-repo`) and the client.
 | Workflow | Schedule | What it does |
 |---|---|---|
 | `sync.yml` | hourly | `pkg-repo sync` for every source in its table — Arch `core`/`extra`/`multilib` (x86_64, from `mirror.omarchy.org`), Arch Linux ARM `core`/`extra`/`alarm` (aarch64), chaotic-aur (x86_64, optional repo, `--defer-to` the others so Arch and the OPR own any shared name) into `edge`; the OPR's own `edge`/`rc`/`stable` channels each into the matching ring — every package's upstream signature verified against that project's keyring before it enters the pool; then render the rings that changed (a sync that changes nothing creates no release) |
-| `promote.yml` | daily: edge→rc 06:00 UTC, rc→stable 09:00 UTC; or manual | evidence-driven (below): fresh health + ABI of the source ring on both architectures → gate → index write → the OPR channel of the target ring aligned (`packages` comes from the OPR's matching channel, not from the source ring) → render → health of the target → automatic rollback if that fails |
+| `promote.yml` | daily: edge→rc 06:00 UTC, rc→stable 09:00 UTC (one-day soak); or manual | evidence-driven (below): fresh health + ABI of the source ring on both architectures → gate → index write → the OPR channel of the target ring aligned (`packages` comes from the OPR's matching channel, not from the source ring) → render → health of the target → automatic rollback if that fails |
 | `health.yml` | daily, x86_64 and aarch64 runners | real pacman per ring and architecture: `-Sy`, list, signed download → `health` event |
 | `gc.yml` | weekly | delete pool objects the last 3 releases of every ring do not reference (7-day grace for imports in flight) |
 | `security.yml` | every 3 hours | `pkg-repo security`: the Arch Security Tracker (exact matches on Arch's versions), the Debian Security Tracker (same upstream projects, only for CVEs Arch has no advisory for, `name-version` when Debian names a fixed version newer than ours, `name-only` while still open; names whose versions are an order of magnitude apart are treated as different projects), CISA KEV and EPSS, matched with the real `vercmp` against every object the rings serve and stored in the index; then the **fast-track**: a package with a confident open advisory (exact or name-version, medium or worse, or exploited in the wild) in `rc`/`stable` whose clean newer version `edge` already serves is pulled in as one release without the soak, rendered, health-checked on both architectures and rolled back if that fails |
@@ -102,7 +102,7 @@ and is undone automatically when the target ring turns out not to be:
    versions).
 2. **Gate** (`pkg-repo gate`). Per architecture: the latest health of the source
    ring is recent and not an error; no health inside the soak window failed
-   (0 days into `rc`, 3 days into `stable`) and the source ring's content has
+   (0 days into `rc`, 1 day into `stable`: edge is upstream in real time, rc a day behind, stable a day behind rc) and the source ring's content has
    been there that long (the age of its last promotion; syncs of the OPR channel
    do not reset it); a recent ABI check found no blocker.
    A ring with nothing rendered for an architecture is not evidence against it.

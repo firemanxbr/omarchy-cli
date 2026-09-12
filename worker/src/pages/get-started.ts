@@ -50,7 +50,7 @@ const BODY = String.raw`
 const SCRIPT = String.raw`
   var RINGS = ["stable", "rc", "edge"], ARCHES = ["x86_64", "aarch64"];
   var DESC = {
-    stable: "Recommended. What rc served for three days without a failed check; roughly four days behind Arch, rolled back automatically if a promotion fails.",
+    stable: "Recommended. What rc served for a day without a failed check; about two days behind Arch, rolled back automatically if a promotion fails.",
     rc: "Yesterday's edge, promoted after a real pacman and an ABI check passed on both architectures. For testers.",
     edge: "What upstream published in the last hour, signature-verified only. For CI and developers."
   };
