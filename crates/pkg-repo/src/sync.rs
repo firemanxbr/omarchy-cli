@@ -66,6 +66,9 @@ pub struct SyncReport {
     pub deferred: usize,
     /// Upstream packages left to the sources in `defer_to`.
     pub yielded: usize,
+    /// `(filename, upstream sha256)` of packages whose filename already holds a
+    /// different object in the pool; the existing object was pinned instead.
+    pub collisions: Vec<(String, String)>,
 }
 
 pub fn run(api: &Api, opts: &SyncOptions) -> Result<SyncReport, RepoError> {
@@ -95,14 +98,12 @@ pub fn run(api: &Api, opts: &SyncOptions) -> Result<SyncReport, RepoError> {
     let head = api.release_summary(&opts.ring)?;
     let upstream = yield_to_other_sources(upstream, head.as_ref(), opts, &mut report);
 
-    // 2. what the index already has
-    let shas: Vec<String> = upstream.iter().map(|p| p.sha256.clone()).collect();
-    let known: HashSet<String> = api.known(&shas, &opts.arch)?.into_iter().collect();
-    report.already_indexed = known.len();
-    let mut missing: Vec<&UpstreamPackage> = upstream
-        .iter()
-        .filter(|p| !known.contains(&p.sha256))
-        .collect();
+    // 2. what the index already has, by content and by filename
+    let Classified {
+        known,
+        reuse,
+        mut missing,
+    } = classify_upstream(api, &upstream, opts, &mut report)?;
     if opts.limit > 0 && missing.len() > opts.limit {
         report.deferred = missing.len() - opts.limit;
         missing.truncate(opts.limit);
@@ -132,11 +133,12 @@ pub fn run(api: &Api, opts: &SyncOptions) -> Result<SyncReport, RepoError> {
         .cloned()
         .chain(done.iter().map(|(s, _)| s.clone()))
         .collect();
-    let add: Vec<String> = upstream
+    let mut add: Vec<String> = upstream
         .iter()
         .filter(|p| now_known.contains(&p.sha256))
         .map(|p| p.sha256.clone())
         .collect();
+    add.extend(reuse);
     let upstream_names: BTreeSet<&str> = upstream.iter().map(|p| p.name.as_str()).collect();
     let current: Vec<&crate::client::PackageSummary> = head
         .as_ref()
@@ -183,6 +185,58 @@ pub fn run(api: &Api, opts: &SyncOptions) -> Result<SyncReport, RepoError> {
     Ok(report)
 }
 
+/// What the index already has — by content, and by filename: the pool holds
+/// one object per `<arch>/<filename>`, so an upstream rebuild of the same
+/// version with different bytes (the OPR does this per channel) cannot be
+/// stored; the object already there is pinned instead. Returns the known
+/// sha256s, the sha256s to pin for colliding filenames, and what to import.
+struct Classified<'a> {
+    /// sha256s the index already has.
+    known: HashSet<String>,
+    /// sha256s of stored objects to pin for colliding filenames.
+    reuse: Vec<String>,
+    /// What still has to be imported.
+    missing: Vec<&'a UpstreamPackage>,
+}
+
+fn classify_upstream<'a>(
+    api: &Api,
+    upstream: &'a [UpstreamPackage],
+    opts: &SyncOptions,
+    report: &mut SyncReport,
+) -> Result<Classified<'a>, RepoError> {
+    let shas: Vec<String> = upstream.iter().map(|p| p.sha256.clone()).collect();
+    let filenames: Vec<String> = upstream.iter().map(|p| p.filename.clone()).collect();
+    let (known, by_filename) = api.known_with_filenames(&shas, &filenames, &opts.arch)?;
+    let known: HashSet<String> = known.into_iter().collect();
+    report.already_indexed = known.len();
+    let mut reuse = Vec::new();
+    for p in upstream {
+        if known.contains(&p.sha256) {
+            continue;
+        }
+        if let Some(existing) = by_filename.get(&p.filename) {
+            if *existing != p.sha256 {
+                tracing::warn!(file = %p.filename, "filename already in the pool with different content; pinning the existing object");
+                report
+                    .collisions
+                    .push((p.filename.clone(), p.sha256.clone()));
+                reuse.push(existing.clone());
+            }
+        }
+    }
+    let colliding: HashSet<&str> = report.collisions.iter().map(|(f, _)| f.as_str()).collect();
+    let missing: Vec<&UpstreamPackage> = upstream
+        .iter()
+        .filter(|p| !known.contains(&p.sha256) && !colliding.contains(p.filename.as_str()))
+        .collect();
+    Ok(Classified {
+        known,
+        reuse,
+        missing,
+    })
+}
+
 /// Drops the upstream packages whose names the ring already serves from a
 /// source in `defer_to` (those win), counting them in `report.yielded`.
 fn yield_to_other_sources(
@@ -219,7 +273,7 @@ fn post_sync_event(
     base: &str,
     started: Instant,
 ) -> Result<(), RepoError> {
-    let status = if report.failed.is_empty() {
+    let status = if report.failed.is_empty() && report.collisions.is_empty() {
         "ok"
     } else {
         "warn"
@@ -230,12 +284,20 @@ fn post_sync_event(
     };
     let summary = if report.failed.is_empty() {
         format!(
-            "{} {}: {} new packages ({}), {} removed → {target}",
+            "{} {}: {} new packages ({}), {} removed{} → {target}",
             opts.source,
             opts.arch,
             report.uploaded,
             human(report.bytes_uploaded),
             report.removed,
+            if report.collisions.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    ", {} same-filename rebuilds kept as already stored",
+                    report.collisions.len()
+                )
+            },
         )
     } else {
         format!(
@@ -264,6 +326,7 @@ fn post_sync_event(
             "removed": report.removed,
             "deferred": report.deferred,
             "yielded": report.yielded,
+            "collisions": report.collisions.iter().map(|(f, sha)| serde_json::json!({"file": f, "upstream_sha256": sha})).collect::<Vec<_>>(),
             "defer_to": opts.defer_to,
             "concurrency": opts.concurrency,
             "throughput_bps": throughput(report.bytes_uploaded, started),

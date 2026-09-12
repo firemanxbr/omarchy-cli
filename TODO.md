@@ -89,6 +89,14 @@ request (see [CONTRIBUTING.md](CONTRIBUTING.md)), and keep
       `GLIBC_2.2.5` (an x86_64 symbol version); the ABI gate found them on
       2026-09-12. They cannot run on aarch64; report to ALARM.
 
+- [ ] **OPR: `opencode-1.1.51-1` in the rc channel is signed by a key that is not
+      in Omarchy's published keyring** (`omarchy-iso` `builder/omarchy.gpg`); the
+      pool rejects it. Report to the OPR maintainers.
+- [ ] **OPR rebuilds the same version with different bytes per channel** (76
+      packages on 2026-09-12, e.g. `wayfreeze-0.2.0-1`). The pool keeps the object
+      it already has for that filename and says so in the journal; ask whether
+      channel builds could be promoted as-is instead of rebuilt.
+
 ## Housekeeping
 
 - [ ] Rotate the staging key (`docs/omarchy-staging.pub.asc`, expires 2027-09-12)
