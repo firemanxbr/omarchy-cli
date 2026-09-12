@@ -73,12 +73,22 @@ serves data. Decisions are made by the publisher (`pkg-repo`) and the client.
 
 | Workflow | Schedule | What it does |
 |---|---|---|
-| `sync.yml` | hourly | `pkg-repo sync` core/multilib/extra from `mirror.omarchy.org` → pool + `edge`; render edge |
-| `promote.yml` | daily edge→rc, Mondays rc→stable, or manual | index write, render, health check |
-| `health.yml` | daily | real pacman per ring: `-Sy`, list, signed download → `health` event |
-| `gc.yml` | weekly | delete pool objects the last 3 releases of every ring do not reference |
+| `sync.yml` | hourly | `pkg-repo sync` for every source in its table — Arch `core`/`extra`/`multilib` (x86_64, from `mirror.omarchy.org`), Arch Linux ARM `core`/`extra`/`alarm` (aarch64), the OPR `omarchy` repo (both) — each package's upstream signature verified against that project's keyring before it enters the pool; then render `edge` per architecture |
+| `promote.yml` | daily edge→rc, Mondays rc→stable (needs approval), or manual | index write, render both architectures, health check |
+| `health.yml` | daily, x86_64 and aarch64 runners | real pacman per ring and architecture: `-Sy`, list, signed download → `health` event |
+| `gc.yml` | weekly | delete pool objects the last 3 releases of every ring do not reference (7-day grace for imports in flight) |
 
 Every step posts an event; https://dashboard-omarchy.firemanxbr.org renders them.
+Operations, trust model and the kill switch are in [RUNBOOK.md](RUNBOOK.md).
+
+### Architectures
+
+A package row records `repo_arch`, the architecture of the upstream repository it
+came from; it is the pool directory (`x86_64/…`, `aarch64/…`) and, with the name,
+the replacement key inside a ring. `any` packages are per-upstream builds: Arch's
+and Arch Linux ARM's `python-foo-1.0-1-any` are different objects in different
+directories. A ring holds both architectures; `render --arch` emits one database
+per source for that architecture.
 
 ## Extraction (`crates/pkg-extract`)
 

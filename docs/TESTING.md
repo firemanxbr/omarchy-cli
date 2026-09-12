@@ -177,7 +177,9 @@ uploads `results.json`. Results are recorded in [POC-RESULTS.md](POC-RESULTS.md)
 OMARCHY_API=… OMARCHY_POOL=… OMARCHY_PUBLISH_TOKEN=… tests/health-check.sh stable
 ```
 
-Reads the ring's rendered repos from `/api/v1/stats`, writes a `pacman.conf` with
+Second argument selects the architecture (`x86_64` default, `aarch64` uses the Arch
+Linux ARM image on an ARM runner). Reads the ring's rendered repos from
+`/api/v1/stats`, writes a `pacman.conf` with
 `SigLevel = Required DatabaseRequired`, runs `pacman -Sy`, lists every repo and
 downloads the first package with signature verification inside an Arch container,
 then posts a `health` event (ok / warn when nothing is rendered / error). The
@@ -207,9 +209,16 @@ pkg-repo render --ring stable --sign <key id>      # one omarchy-<source>-stable
 pkg-repo gc --keep 3                               # add --delete to actually free the pool
 ```
 
+With `--keyring <file>` the sync rejects any package whose upstream `.sig` does
+not verify against that keyring; `tests/fetch-keyrings.sh <dir>` builds
+`archlinux.gpg`, `archlinuxarm.gpg` and `omarchy.gpg`. Arch Linux ARM and the OPR
+have their own layouts: `--base-url http://os.archlinuxarm.org/aarch64/core --arch aarch64`,
+`--base-url https://pkgs.omarchy.org/edge/x86_64 --db-name omarchy --source packages`.
+
 The GitHub workflows (`sync`, `promote`, `health`, `gc`) run exactly these; they need
 the repository variables `OMARCHY_API`, `OMARCHY_POOL` and the secrets
 `OMARCHY_PUBLISH_TOKEN`, `OMARCHY_GPG_KEY` (armored private key), `OMARCHY_GPG_KEYID`.
+Promotions into `stable` wait in the `stable` GitHub environment for a reviewer.
 
 To validate with pacman, use the same container recipe as the local scripts with
 
