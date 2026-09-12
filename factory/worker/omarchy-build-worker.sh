@@ -91,6 +91,11 @@ inside() {
   # pool's own workspace Cargo.toml above factory/).
   cp -a "/build/src/factory/pkgbuilds/$group/$name" /build/pkg
   mkdir -p /build/out && chown -R builder:builder /build/pkg /build/out
+  # Source signatures verify against keys shipped beside the PKGBUILD
+  # (keys/pgp/<fingerprint>.asc, the AUR convention), never a keyserver.
+  if compgen -G "/build/pkg/keys/pgp/*.asc" >/dev/null; then
+    sudo -u builder gpg --batch --import /build/pkg/keys/pgp/*.asc 2>&1 | grep -E "imported|unchanged" || true
+  fi
   # namcap flags the obvious (missing deps, bad permissions) before the build.
   sudo -u builder namcap /build/pkg/PKGBUILD || true
   # zst whatever the image's makepkg.conf says (Arch Linux ARM defaults to xz).
