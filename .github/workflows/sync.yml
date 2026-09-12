@@ -14,6 +14,9 @@ on:
       limit:
         description: "Max new packages per source (0 = all)"
         default: "0"
+      concurrency:
+        description: "Parallel downloads/uploads"
+        default: "8"
 
 concurrency:
   group: publish
@@ -48,7 +51,7 @@ jobs:
           for source in $SOURCES; do
             echo "::group::sync $source"
             target/release/pkg-repo sync --source "$source" --ring edge --limit "$LIMIT" \
-              --concurrency 6 --work-dir "$RUNNER_TEMP/sync" || status=$?
+              --concurrency "${{ github.event.inputs.concurrency || '6' }}" --work-dir "$RUNNER_TEMP/sync" || status=$?
             echo "::endgroup::"
           done
           exit $status
