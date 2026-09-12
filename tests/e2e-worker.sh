@@ -96,7 +96,7 @@ done
 stats_body=$(curl -s "$OMARCHY_API/api/v1/stats")
 grep -q '"kind":"render"' <<<"$stats_body" || { echo "render event missing from stats"; exit 1; }
 dash_body=$(curl -s "$OMARCHY_API/")
-grep -q "One pool, three rings" <<<"$dash_body" || {
+grep -q "tested before they reach you" <<<"$dash_body" || {
   echo "dashboard not served; response head:"; head -c 600 <<<"$dash_body"; echo
   echo "--- worker log tail ---"; tail -20 "$E2E/wrangler.log"; exit 1; }
 echo "databases, signatures, package blobs, Range requests, stats and dashboard OK"

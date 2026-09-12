@@ -4,8 +4,16 @@ export const REPO_URL = "https://github.com/firemanxbr/omarchy-pool";
 export const DASHBOARD_HOST = "omarchy-pool.firemanxbr.org";
 export const LEGACY_DASHBOARD_HOST = "dashboard-omarchy.firemanxbr.org";
 
+export interface RunningVersion {
+  version: string;
+  commit: string | null;
+  deployed_at: string | null;
+  release_url: string | null;
+  commit_url: string | null;
+}
+
 /** What is running: the release tag, its commit and when it was deployed. */
-export function version(env: Env) {
+export function version(env: Env): RunningVersion {
   const v = env.POOL_VERSION || "dev";
   const commit = env.POOL_COMMIT || null;
   return {
