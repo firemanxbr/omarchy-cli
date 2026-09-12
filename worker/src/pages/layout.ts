@@ -36,7 +36,7 @@ const CSS = String.raw`
   .gh { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); text-decoration: none; font-size: 13.5px; }
   .gh:hover { color: var(--text); }
   .gh svg { width: 18px; height: 18px; fill: currentColor; }
-  .status { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; letter-spacing: .04em; text-transform: uppercase; color: var(--dim); }
+  .status { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; letter-spacing: .04em; text-transform: uppercase; color: var(--dim); text-decoration: none; }
   .status .led { width: 9px; height: 9px; border-radius: 50%; background: var(--dim); box-shadow: 0 0 0 0 rgba(158,206,106,0); }
   .status.online .led { background: var(--green); animation: pulse 2.4s ease-out infinite; }
   .status.online { color: var(--green); }
@@ -149,23 +149,46 @@ const HELPERS = String.raw`
     if (source === "x86_64") for (var j = 0; j < list.length; j++) { var f = list[j]; if (f.kind === kind && (ring == null || f.ring === ring) && !f.source) return f; }
     return null;
   }
-  // Live status: online when the API answers, the last sync is recent and no
-  // ring's latest health check failed; degraded otherwise; offline when the
-  // API does not answer. Refreshed with every load.
+  // Header pill = the service: online when the API answers and it can reach
+  // the index and the pool right now (/api/v1/status measures both), degraded
+  // when one of them fails, offline when the API itself does not answer.
+  // Whether the pipeline is keeping up is a different question (problemsOf).
   function setStatus(state, title) { var el = $("#status"); if (!el) return; el.className = "status " + state; el.querySelector("span").textContent = state; el.title = title || ""; }
-  function statusFrom(d) {
+  function serviceStatus() {
+    fetch("/api/v1/status", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (s) {
+      var why = [];
+      if (!s.index.ok) why.push("index: " + (s.index.error || "failed"));
+      if (!s.pool.ok) why.push("pool: " + (s.pool.error || "failed"));
+      setStatus(s.ok ? "online" : "degraded", s.ok ? "API, index (" + s.index.ms + " ms) and pool (" + s.pool.ms + " ms) answering" : why.join(" · "));
+    }).catch(function (e) { setStatus("offline", "API not answering: " + e); });
+  }
+  // What is wrong, if anything: no sync for two hours, a source not synced
+  // for six (a long import holds the pipeline's queue, so small sources wait),
+  // or a ring whose latest health check failed. The header pill and the
+  // status page use the same list.
+  function problemsOf(d) {
     var sync = latest(d.events || [], "sync"), why = [];
-    if (!sync || Date.now() - Date.parse(sync.created_at) > 2 * 3600e3) why.push("last sync " + (sync ? ago(sync.created_at) : "never"));
-    (d.latest || []).forEach(function (e) { if (e.kind === "health" && e.status === "error") why.push(e.ring + " " + (e.source || "x86_64") + " health failed"); });
-    setStatus(why.length ? "degraded" : "online", why.join(" · ") || "API up, syncing, every ring healthy");
+    if (!sync || Date.now() - Date.parse(sync.created_at) > 2 * 3600e3) why.push("no sync for " + (sync ? ago(sync.created_at).replace(" ago", "") : "ever"));
+    var late = (d.coverage || []).filter(function (c) { return c.last_sync && Date.now() - Date.parse(c.last_sync) > 6 * 3600e3; });
+    if (late.length) why.push(late.length + " source(s) not synced for 6 h");
+    (d.latest || []).forEach(function (e) { if (e.kind === "health" && e.status === "error") why.push(e.ring + " " + (e.source || "x86_64") + " failed its health check"); });
+    return why;
+  }
+  // Pipeline pill (where a page has one): keeping up, or what is behind.
+  function pipelineFrom(d) {
+    var el = $("#pipeline-state"); if (!el) return;
+    var why = problemsOf(d);
+    el.className = "pill " + (why.length ? "warn" : "ok");
+    el.textContent = why.length ? "pipeline behind: " + why.join(" · ") : "pipeline keeping up";
   }
   // Numbers that change between refreshes flash briefly, so the page reads as live.
   function setTile(el, html) { if (el.innerHTML !== html) { el.innerHTML = html; el.classList.remove("bump"); void el.offsetWidth; el.classList.add("bump"); } }
   function liveStats(render, everyMs) {
     function load() {
+      serviceStatus();
       fetch("/api/v1/stats", { cache: "no-store" }).then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
-        .then(function (d) { statusFrom(d); render(d); })
-        .catch(function (e) { setStatus("offline", "stats failed: " + e); });
+        .then(function (d) { pipelineFrom(d); render(d); })
+        .catch(function () {});
     }
     load();
     setInterval(load, everyMs || 20000);
@@ -187,7 +210,7 @@ export const NAV: { key: PageOptions["active"]; href: string; label: string }[] 
   { key: "overview", href: "/", label: "Overview" },
   { key: "get-started", href: "/get-started", label: "Get started" },
   { key: "pipeline", href: "/#pipeline", label: "Pipeline" },
-  { key: "how-it-works", href: "https://github.com/firemanxbr/omarchy-pool/blob/main/docs/ARCHITECTURE.md", label: "How it works" },
+  { key: "how-it-works", href: "/how-it-works", label: "How it works" },
 ];
 
 function escapeHtml(s: string): string {
@@ -221,7 +244,7 @@ export function page(o: PageOptions): string {
     ${nav}
   </nav>
   <span class="spacer"></span>
-  <span id="status" class="status" title="checking"><i class="led"></i><span>checking</span></span>
+  <a id="status" class="status" href="/status" title="checking"><i class="led"></i><span>checking</span></a>
   <a class="gh" href="https://github.com/firemanxbr/omarchy-pool" title="Open source on GitHub (MIT)">${GITHUB_ICON} Open source</a>
 </header>
 
@@ -233,7 +256,8 @@ ${o.body}
   <span>omarchy-pool</span><span class="sep">·</span>
   <a href="https://github.com/firemanxbr/omarchy-pool/blob/main/LICENSE">MIT license</a><span class="sep">·</span>
   <a class="gh" href="https://github.com/firemanxbr/omarchy-pool">${GITHUB_ICON} GitHub</a><span class="sep">·</span>
-  <a href="/api/v1/stats">API</a><span class="sep">·</span>
+  <a href="/api">API</a><span class="sep">·</span>
+  <a href="/status">Status</a><span class="sep">·</span>
   <span>running ${v.release_url ? `<a href="${escapeHtml(v.release_url)}">${tag}</a>` : tag}${v.commit && v.commit_url ? ` · <a href="${escapeHtml(v.commit_url)}">${escapeHtml(v.commit.slice(0, 7))}</a>` : ""}</span>
 </footer>
 

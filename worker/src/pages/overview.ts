@@ -24,7 +24,7 @@ const BODY = String.raw`
   </section>
 
   <section id="pipeline">
-    <h2>Pipeline</h2>
+    <h2>Pipeline <span id="pipeline-state" class="pill none" style="vertical-align:middle;margin-left:8px">checking</span></h2>
     <p class="sub">The pool is fed and promoted by GitHub Actions workflows writing to the index through its API; a Cloudflare Worker serves the index and this page, the packages are static objects on R2. A snapshot every 30 minutes records the runs, what is executing right now and the runner minutes.</p>
     <div class="tiles" id="systiles"></div>
     <div class="charts">

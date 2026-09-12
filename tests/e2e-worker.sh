@@ -99,7 +99,12 @@ dash_body=$(curl -s "$OMARCHY_API/")
 grep -q "tested before they reach you" <<<"$dash_body" || {
   echo "dashboard not served; response head:"; head -c 600 <<<"$dash_body"; echo
   echo "--- worker log tail ---"; tail -20 "$E2E/wrangler.log"; exit 1; }
-echo "databases, signatures, package blobs, Range requests, stats and dashboard OK"
+for p in /get-started /how-it-works /status /api; do
+  body=$(curl -s "$OMARCHY_API$p"); grep -q "omarchy-pool" <<<"$body" || { echo "page $p not served"; exit 1; }
+done
+status_body=$(curl -s "$OMARCHY_API/api/v1/status")
+grep -q '"state":"online"' <<<"$status_body" || { echo "service status not online: $status_body"; exit 1; }
+echo "databases, signatures, package blobs, Range requests, stats, pages and service status OK"
 
 step "pacman in $IMAGE against the worker mirror"
 gpg --armor --export "$KEYID" > "$E2E/omarchy-poc.pub.asc"

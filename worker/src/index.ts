@@ -21,6 +21,7 @@
  *   POST /api/v1/events   GET /api/v1/events       activity log
  *   GET  /api/v1/stats                             everything the dashboard shows
  *   GET  /api/v1/version                           running release, commit, deploy time
+ *   GET  /api/v1/status                            service check now: index (D1) and pool (R2)
  *   GET  /api/v1/pool/unreferenced?keep=3          retention: what GC would delete
  *   POST /api/v1/pool/gc?keep=3&limit=200          delete it (objects, then rows)
  *   GET  /                                         the dashboard
@@ -32,10 +33,13 @@ import { handleGetPackage, handleKnownPackages, handlePostPackage } from "./rout
 import { handleCreateRelease, handleGetRelease, handleReleaseHistory, handlePutArtifact } from "./routes/releases";
 import { handleGraph } from "./routes/graph";
 import { handleGetEvents, handlePostEvent } from "./routes/events";
-import { handleStats } from "./routes/stats";
+import { handleServiceStatus, handleStats } from "./routes/stats";
 import { handleGc, handleUnreferenced } from "./routes/gc";
 import { overviewHtml } from "./pages/overview";
 import { getStartedHtml } from "./pages/get-started";
+import { howItWorksHtml } from "./pages/how-it-works";
+import { statusHtml } from "./pages/status";
+import { apiDocsHtml } from "./pages/api-docs";
 import { DASHBOARD_HOST, LEGACY_DASHBOARD_HOST, version } from "./meta";
 import { handleStatic } from "./routes/static";
 import { requireAuth } from "./auth";
@@ -87,6 +91,9 @@ export default {
       }
       if (path === "/" || path === "/index.html") return html(overviewHtml(env.POOL_URL, version(env)));
       if (path === "/get-started") return html(getStartedHtml(env.POOL_URL, version(env)));
+      if (path === "/how-it-works") return html(howItWorksHtml(env.POOL_URL, version(env)));
+      if (path === "/status") return html(statusHtml(env.POOL_URL, version(env)));
+      if (path === "/api" || path === "/api/") return html(apiDocsHtml(env.POOL_URL, version(env)));
       return json({ error: "not found" }, 404);
     } catch (err) {
       console.error(err);
@@ -115,6 +122,7 @@ async function api(method: string, path: string, url: URL, request: Request, env
   if (method === "OPTIONS") return new Response(null, { status: 204, headers: cors() });
   if (method === "GET" && path === "/stats") return handleStats(env);
   if (method === "GET" && path === "/version") return json(version(env), 200, { "cache-control": "public, max-age=30" });
+  if (method === "GET" && path === "/status") return handleServiceStatus(env);
   if (method === "GET" && path === "/graph") return handleGraph(url, env);
   if (method === "GET" && path === "/events") return handleGetEvents(url, env);
   if (method === "GET" && path === "/pool/unreferenced") return handleUnreferenced(url, env);
