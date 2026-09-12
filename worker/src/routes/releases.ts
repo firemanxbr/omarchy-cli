@@ -70,24 +70,32 @@ export async function handleCreateRelease(request: Request, env: Env): Promise<R
     .first<{ id: number }>();
   const id = created!.id;
 
+  // 1. The added objects go in first, in a few statements (json_each over a
+  //    couple of thousand ids each keeps every statement well under D1's
+  //    size limit). 2. Then the base selection is copied minus names being
+  //    removed (within remove_arch) and minus (name, repo_arch) pairs the new
+  //    release already holds — a NOT EXISTS resolved through the
+  //    (name, repo_arch) index and the release_packages primary key, so a
+  //    15k-package base with a 13k-package add stays linear. The old form
+  //    re-evaluated a json_each over every added id per base row.
   const stmts: D1PreparedStatement[] = [];
-  if (base) {
-    // Copy the base selection, minus names being removed (within remove_arch when
-    // given) or replaced by an add of the same name and repo arch.
+  for (let i = 0; i < added.length; i += 2000) {
     stmts.push(
-      env.DB.prepare(
-        `INSERT INTO release_packages (release_id, package_id)
-         SELECT ?, rp.package_id FROM release_packages rp JOIN packages p ON p.id = rp.package_id
-          WHERE rp.release_id = ?
-            AND NOT (p.name IN (SELECT value FROM json_each(?)) AND (? IS NULL OR p.repo_arch = ?))
-            AND NOT EXISTS (
-              SELECT 1 FROM packages q WHERE q.id IN (SELECT value FROM json_each(?))
-                 AND q.name = p.name AND q.repo_arch = p.repo_arch)`,
-      ).bind(id, base.id, JSON.stringify(body.remove ?? []), removeArch, removeArch, JSON.stringify(added)),
+      env.DB.prepare("INSERT OR IGNORE INTO release_packages (release_id, package_id) SELECT ?, value FROM json_each(?)").bind(id, JSON.stringify(added.slice(i, i + 2000))),
     );
   }
-  for (const pkgId of added) {
-    stmts.push(env.DB.prepare("INSERT OR IGNORE INTO release_packages (release_id, package_id) VALUES (?, ?)").bind(id, pkgId));
+  if (base) {
+    stmts.push(
+      env.DB.prepare(
+        `INSERT OR IGNORE INTO release_packages (release_id, package_id)
+         SELECT ?1, rp.package_id FROM release_packages rp JOIN packages p ON p.id = rp.package_id
+          WHERE rp.release_id = ?2
+            AND NOT (p.name IN (SELECT value FROM json_each(?3)) AND (?4 IS NULL OR p.repo_arch = ?4))
+            AND NOT EXISTS (
+              SELECT 1 FROM packages q JOIN release_packages n ON n.package_id = q.id AND n.release_id = ?1
+               WHERE q.name = p.name AND q.repo_arch = p.repo_arch)`,
+      ).bind(id, base.id, JSON.stringify(body.remove ?? []), removeArch),
+    );
   }
   stmts.push(
     env.DB.prepare(
