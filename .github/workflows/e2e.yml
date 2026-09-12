@@ -2,9 +2,8 @@ name: E2E
 
 # Real pacman in an Arch container, on native x86_64 runners (no emulation).
 on:
-  push:
-    branches: [main]
   pull_request:
+  workflow_call:
   workflow_dispatch:
 
 env:
@@ -12,7 +11,7 @@ env:
 
 jobs:
   pacman-local:
-    name: pacman against a local file:// mirror
+    name: E2E pacman (local mirror)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -23,7 +22,7 @@ jobs:
       - run: tests/e2e-pacman.sh
 
   worker-local:
-    name: publish → promote → render → pacman through a local worker
+    name: E2E worker (publish, promote, render, pacman)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -41,7 +40,7 @@ jobs:
       - run: tests/e2e-worker.sh
 
   thin-client:
-    name: thin client (safe, blocked, real upgrade) through a local worker
+    name: E2E thin client (safe, blocked, upgrade)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

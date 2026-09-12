@@ -77,8 +77,10 @@ serves data. Decisions are made by the publisher (`pkg-repo`) and the client.
 | `promote.yml` | daily edge→rc, Mondays rc→stable (needs approval), or manual | index write, render both architectures, health check |
 | `health.yml` | daily, x86_64 and aarch64 runners | real pacman per ring and architecture: `-Sy`, list, signed download → `health` event |
 | `gc.yml` | weekly | delete pool objects the last 3 releases of every ring do not reference (7-day grace for imports in flight) |
+| `ci.yml`, `e2e.yml` | every pull request | fmt, clippy, tests and the worker typecheck on x86_64 and aarch64; real pacman end to end through a local worker |
+| `release.yml` | every merge into `main` | CI + E2E again on the merged commit, next version from the last tag (`v0.0.1`, `v0.0.2`, …), binaries for both architectures, GitHub release, `wrangler deploy` carrying `POOL_VERSION` — the dashboard shows what is running |
 
-Every step posts an event; https://dashboard-omarchy.firemanxbr.org renders them.
+Every step posts an event; https://omarchy-pool.firemanxbr.org renders them.
 Operations, trust model and the kill switch are in [RUNBOOK.md](RUNBOOK.md).
 
 ### Architectures

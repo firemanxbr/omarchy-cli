@@ -13,9 +13,12 @@ cargo test --workspace
 ```
 
 CI (`.github/workflows/ci.yml`) runs exactly these on x86_64 **and** arm64 runners,
-plus the worker typecheck, on every push and pull request. The three end-to-end
-scripts below also run in GitHub Actions (`.github/workflows/e2e.yml`) on native
-x86_64 runners, where the Arch container needs no emulation.
+plus the worker typecheck, on every pull request. The three end-to-end scripts
+below also run in GitHub Actions (`.github/workflows/e2e.yml`) on native x86_64
+runners, where the Arch container needs no emulation. Both are required checks on
+`main`, and `release.yml` runs them once more on the merged commit before it tags a
+version and deploys the worker — so what is running is always a commit that passed
+them twice.
 
 ## Rust crates
 
@@ -188,7 +191,7 @@ then posts a `health` event (ok / warn when nothing is rendered / error). The
 ## Cloudflare (staging)
 
 The staging worker runs at `https://pkgs.firemanxbr.org` (index API + dashboard at
-`https://dashboard-omarchy.firemanxbr.org`) with a real D1 database and an R2 bucket
+`https://omarchy-pool.firemanxbr.org`) with a real D1 database and an R2 bucket
 whose custom domain `https://pool.firemanxbr.org` serves packages and databases
 statically. Deploying is a manual step:
 

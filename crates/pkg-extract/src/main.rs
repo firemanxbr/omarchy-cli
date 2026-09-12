@@ -6,7 +6,7 @@ use pkg_manifest::{PackageManifest, RepoIndex, MANIFEST_SCHEMA_VERSION};
 
 /// Inspects Arch packages and emits ABI manifests for the Omarchy repository.
 #[derive(Parser)]
-#[command(name = "pkg-extract", version, about)]
+#[command(name = "pkg-extract", version = pkg_manifest::BUILD_VERSION, about)]
 struct Cli {
     #[command(subcommand)]
     command: Command,

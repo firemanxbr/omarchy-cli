@@ -17,3 +17,11 @@ pub mod vercmp;
 pub use dependency::{DependencyRule, VersionConstraint, VersionOp};
 pub use manifest::{PackageManifest, PkgInfoFields, RepoIndex, MANIFEST_SCHEMA_VERSION};
 pub use vercmp::{vercmp, Version};
+
+/// The release this binary belongs to: the tag the Release workflow passes as
+/// `POOL_VERSION` at build time, or `<crate version>-dev` for local builds.
+/// The crate versions stay at `0.0.0`; the git tag is the source of truth.
+pub const BUILD_VERSION: &str = match option_env!("POOL_VERSION") {
+    Some(v) => v,
+    None => concat!(env!("CARGO_PKG_VERSION"), "-dev"),
+};

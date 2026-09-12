@@ -20,6 +20,7 @@
  *   GET  /api/v1/graph?targets=a,b&ring=stable
  *   POST /api/v1/events   GET /api/v1/events       activity log
  *   GET  /api/v1/stats                             everything the dashboard shows
+ *   GET  /api/v1/version                           running release, commit, deploy time
  *   GET  /api/v1/pool/unreferenced?keep=3          retention: what GC would delete
  *   POST /api/v1/pool/gc?keep=3&limit=200          delete it (objects, then rows)
  *   GET  /                                         the dashboard
@@ -34,6 +35,7 @@ import { handleGetEvents, handlePostEvent } from "./routes/events";
 import { handleStats } from "./routes/stats";
 import { handleGc, handleUnreferenced } from "./routes/gc";
 import { dashboardHtml } from "./dashboard";
+import { DASHBOARD_HOST, LEGACY_DASHBOARD_HOST, version } from "./meta";
 import { handleStatic } from "./routes/static";
 import { requireAuth } from "./auth";
 
@@ -43,7 +45,12 @@ export interface Env {
   DEFAULT_RING: string;
   POOL_URL: string;
   PUBLISH_TOKEN: string;
+  /** Set by the Release workflow at deploy time (`wrangler deploy --var`); "dev" otherwise. */
+  POOL_VERSION?: string;
+  POOL_COMMIT?: string;
+  POOL_DEPLOYED_AT?: string;
 }
+
 
 export const RINGS = ["edge", "rc", "stable"] as const;
 export type Ring = (typeof RINGS)[number];
@@ -60,6 +67,13 @@ export default {
     const path = url.pathname;
     const { method } = request;
 
+    // The dashboard moved from dashboard-omarchy to omarchy-pool; the old name
+    // was published, so it keeps redirecting.
+    if (url.hostname === LEGACY_DASHBOARD_HOST) {
+      url.hostname = DASHBOARD_HOST;
+      return Response.redirect(url.toString(), 301);
+    }
+
     try {
       if (path.startsWith(API + "/")) {
         const res = await api(method, path.slice(API.length), url, request, env);
@@ -71,7 +85,7 @@ export default {
         return await handleStatic(decodeURIComponent(path.slice("/pool/".length)), request, env);
       }
       if (path === "/" || path === "/index.html") {
-        return new Response(dashboardHtml(env.POOL_URL), {
+        return new Response(dashboardHtml(env.POOL_URL, version(env)), {
           headers: { "content-type": "text/html; charset=utf-8", "cache-control": "public, max-age=60" },
         });
       }
@@ -96,6 +110,7 @@ async function api(method: string, path: string, url: URL, request: Request, env
 
   if (method === "OPTIONS") return new Response(null, { status: 204, headers: cors() });
   if (method === "GET" && path === "/stats") return handleStats(env);
+  if (method === "GET" && path === "/version") return json(version(env), 200, { "cache-control": "public, max-age=30" });
   if (method === "GET" && path === "/graph") return handleGraph(url, env);
   if (method === "GET" && path === "/events") return handleGetEvents(url, env);
   if (method === "GET" && path === "/pool/unreferenced") return handleUnreferenced(url, env);

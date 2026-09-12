@@ -7,11 +7,12 @@ workflows and the publisher.
 
 | | |
 |---|---|
-| Dashboard | https://dashboard-omarchy.firemanxbr.org |
+| Dashboard | https://omarchy-pool.firemanxbr.org |
 | Index API | https://pkgs.firemanxbr.org/api/v1/stats |
 | Pool (static, what pacman reads) | https://pool.firemanxbr.org/x86_64/ · `/aarch64/` |
 | Database signing key | `docs/omarchy-staging.pub.asc` · https://pool.firemanxbr.org/omarchy-staging.pub.asc (expires 2027-09-12) |
-| Workflows | Sync (hourly) · Promote (edge→rc daily, rc→stable Mondays, manual) · Health (daily, both arches) · GC (Sundays) |
+| Workflows | Sync (hourly) · Promote (edge→rc daily, rc→stable Mondays, manual) · Health (daily, both arches) · GC (Sundays) · Release (every merge into `main`) |
+| Running version | https://pkgs.firemanxbr.org/api/v1/version · the chip in the dashboard header |
 
 ## Trust model
 
@@ -55,6 +56,34 @@ pkg-repo rollback --ring stable --to <release id>  # then render
 pkg-repo render --ring stable --arch x86_64 --sign <key id>
 pkg-repo gc --keep 3                               # report; add --delete to free the pool
 ```
+
+## Releasing the pool itself
+
+`main` is protected: no direct pushes, every change is a pull request that CI and
+E2E must pass, squash-merged with the pull request title as the commit message.
+Every merge is a release — there is no separate "cut a version" step:
+
+1. `release.yml` runs CI and E2E again on the merged commit.
+2. The next version is the last tag plus one **patch** (`v0.0.1 → v0.0.2`). Label
+   the pull request `release:minor` for a significant change (`v0.1.0`) or
+   `release:major` for an incompatible one; `workflow_dispatch` with `bump=` does
+   the same by hand. Crate and `package.json` versions stay at `0.0.0` — the tag is
+   the source of truth and is compiled into the binaries as `POOL_VERSION`.
+3. Binaries (`pkg-repo`, `omarchy-cli`, `pkg-extract`) are built on x86_64 and
+   aarch64 runners and attached to a GitHub release with notes generated from the
+   merged pull requests.
+4. The worker is migrated (`wrangler d1 migrations apply`) and deployed with
+   `POOL_VERSION`, `POOL_COMMIT` and `POOL_DEPLOYED_AT`; the run verifies
+   `/api/v1/version` reports the new tag and posts a `deploy` event.
+
+The deploy step needs the `CLOUDFLARE_API_TOKEN` repository secret (Account →
+Workers Scripts: Edit, D1: Edit, Account Settings: Read; Zone → Workers Routes:
+Edit, Zone: Read, for `firemanxbr.org`). Without it the release is still
+published and the run ends with a warning instead of a deployment.
+
+Rolling the worker back is deploying an earlier release: re-run the Deploy job of
+that release's run, or `git checkout vX.Y.Z && cd worker && npx wrangler deploy
+--var POOL_VERSION:vX.Y.Z`. Migrations are forward-only; keep them additive.
 
 ## Kill switch
 

@@ -21,7 +21,7 @@ partial upgrades.
 
 ## The staging environment
 
-**Dashboard: https://dashboard-omarchy.firemanxbr.org** — the pool, the three rings,
+**Dashboard: https://omarchy-pool.firemanxbr.org** — the pool, the three rings,
 every sync/promotion/render/health check as it happens.
 
 The pipeline runs hourly on GitHub Actions: it imports Arch `core`, `extra` and
@@ -58,6 +58,16 @@ omarchy-cli upgrade         # pacman -U from the pool, then pin the release
 ```
 
 This is an evidence environment: throwaway signing key, no SLA, may be reset.
+
+## Releases
+
+Every merge into `main` is a release: [`release.yml`](.github/workflows/release.yml)
+re-runs CI and E2E, tags the next version (`v0.0.1`, `v0.0.2`, … — patch by default,
+`release:minor` / `release:major` labels on the pull request bump the rest), builds
+`pkg-repo`, `omarchy-cli` and `pkg-extract` for x86_64 and aarch64, publishes a
+[GitHub release](https://github.com/firemanxbr/omarchy-pool/releases) and deploys the
+worker. The dashboard header and `https://pkgs.firemanxbr.org/api/v1/version` show
+what is running. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Layout
 
