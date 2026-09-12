@@ -11,7 +11,7 @@ workflows and the publisher.
 | Index API | https://pkgs.firemanxbr.org/api/v1/stats |
 | Pool (static, what pacman reads) | https://pool.firemanxbr.org/x86_64/ · `/aarch64/` |
 | Database signing key | `docs/omarchy-staging.pub.asc` · https://pool.firemanxbr.org/omarchy-staging.pub.asc (expires 2027-09-12) |
-| Workflows | Sync (hourly) · Promote (edge→rc 06:00 UTC, rc→stable 09:00 UTC, evidence-gated, auto-rollback) · Health (daily, both arches) · GC (Sundays) · Release (every merge into `main`) |
+| Workflows | Sync (hourly) · Promote (edge→rc 06:00 UTC, rc→stable 09:00 UTC, evidence-gated, auto-rollback) · Health (daily, both arches) · GC (Sundays) · Metrics (every 30 min) · Release (every merge into `main`) |
 | Running version | https://pkgs.firemanxbr.org/api/v1/version · the chip in the dashboard header |
 
 ## Trust model

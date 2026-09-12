@@ -16,3 +16,18 @@ export function version(env: Env) {
     commit_url: commit ? `${REPO_URL}/commit/${commit}` : null,
   };
 }
+
+/**
+ * Every upstream repository the pipeline mirrors (the SOURCES table of
+ * sync.yml), so the dashboard can show what has not been synced yet.
+ */
+export const EXPECTED_SOURCES: { source: string; arch: string; upstream: string }[] = [
+  { source: "core", arch: "x86_64", upstream: "mirror.omarchy.org" },
+  { source: "extra", arch: "x86_64", upstream: "mirror.omarchy.org" },
+  { source: "multilib", arch: "x86_64", upstream: "mirror.omarchy.org" },
+  { source: "packages", arch: "x86_64", upstream: "pkgs.omarchy.org" },
+  { source: "core", arch: "aarch64", upstream: "os.archlinuxarm.org" },
+  { source: "extra", arch: "aarch64", upstream: "os.archlinuxarm.org" },
+  { source: "alarm", arch: "aarch64", upstream: "os.archlinuxarm.org" },
+  { source: "packages", arch: "aarch64", upstream: "pkgs.omarchy.org" },
+];

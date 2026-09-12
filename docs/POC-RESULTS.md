@@ -128,16 +128,43 @@ The index cost depends on the number of packages in the selection, not on their
 size; storage figures follow from the model (one object per sha256) rather than a
 275 GB measurement.
 
+## Running at full scale
+
+The staging environment mirrors every upstream repository, not a slice. The first
+complete import of Arch `extra` (x86_64) on 2026-09-12, one GitHub-hosted runner,
+6 parallel workers:
+
+| | |
+|---|---|
+| Packages | 14,954 of 14,959 (5 transient failures, retried on the next hourly run) |
+| Bytes | 106 GB, each downloaded from `mirror.omarchy.org`, signature-verified, extracted and uploaded to R2 through the worker |
+| Wall time | 103 min — **17.6 MB/s** sustained on one runner (OPR: 23–27 MB/s) |
+| Pool afterwards | 15,777 objects / 120 GB, one copy per sha256 |
+| Cost | R2 storage ≈ US$ 0.015/GB-month → ≈ US$ 2/month for the pool; upload operations for 16k objects are cents; the worker runs on the existing Workers Paid plan; GitHub Actions minutes are free for a public repository |
+
+What broke at that size, and what changed:
+
+* **Rendering a 15k-package ring failed** (Cloudflare error 1102, the worker
+  exceeded its resource limits) because the release view with file lists was built
+  in one invocation. The view is paged now (`?arch=&limit=&offset=`, pinned to a
+  `release_id` so a ring moving on mid-render cannot mix selections); render and
+  the thin client page through one architecture.
+* `metasploit` ships payload templates that start with the ELF magic but are not
+  loadable objects; the extractor now lists them and skips their facts instead of
+  failing the package.
+* Two uploads hit an R2 `internal error (10001)`; the worker reports storage-side
+  failures as 503 so the publisher's retry covers them, and keeps 422 for real
+  checksum mismatches.
+
+Live numbers, the coverage of every source and the pipeline's own metrics are on
+the dashboard.
+
 ## What is not covered by the POC
 
-* The Arch mirror side (core/extra) is not in the index; the client warns when a
-  dependency has to come from another repository and lets pacman resolve it.
-* Uploads go through the worker (fine for CI; multi-GB packages would use direct
-  R2 uploads).
-* Package signatures are produced by whoever builds or mirrors the package; the POC
-  uses a throwaway key for both packages and databases.
-* Retention (garbage-collecting pool objects no release references) is a query away
-  but not implemented.
+* The ABI gate checks the upgrades a ring would apply to the official base image,
+  not to every real installation; `omarchy-cli check` does that on the machine.
+* Package provenance (which PKGBUILD commit, AUR-synced or own) is not recorded in
+  the index yet; the OPR packages carry Omarchy's signature and nothing more.
 * `pkg-store` (a native, journaled install engine) exists and is tested but is not
   wired into the client — the thin client did not need it.
 
