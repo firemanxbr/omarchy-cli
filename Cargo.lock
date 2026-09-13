@@ -780,6 +780,7 @@ dependencies = [
  "anyhow",
  "clap",
  "pkg-check",
+ "pkg-hooks",
  "pkg-manifest",
  "reqwest",
  "serde",

@@ -5,6 +5,7 @@ use clap::{Parser, Subcommand};
 use pkg_check::abi::SystemAbi;
 use pkg_check::local::LocalDb;
 use pkg_check::{Action, Plan, Severity};
+use pkg_hooks::{HookOperation, Matched, TransactionPackage};
 use pkg_manifest::{vercmp, PackageManifest};
 
 use crate::api::Api;
@@ -100,6 +101,18 @@ pub fn run(cli: Cli) -> Result<i32> {
     if let Some(arch) = cli.arch {
         config.arch = arch;
     }
+    // The index serves three rings; a typo here would otherwise surface as
+    // "ring x has no release" from the API.
+    if !["edge", "rc", "stable"].contains(&config.ring.as_str()) {
+        bail!(
+            "ring must be edge, rc or stable (got '{}'; --ring, or `ring` in {})",
+            config.ring,
+            cli.config.display()
+        );
+    }
+    if !["x86_64", "aarch64"].contains(&config.arch.as_str()) {
+        bail!("arch must be x86_64 or aarch64 (got '{}')", config.arch);
+    }
     let api = Api::new(&config.api)?;
     let json = cli.json;
 
@@ -107,7 +120,8 @@ pub fn run(cli: Cli) -> Result<i32> {
         Command::Status => status(&config, &api, json),
         Command::Check { targets } => {
             let (plan, _) = plan_targets(&config, &api, &targets)?;
-            print_plan(&plan, json);
+            let hooks = hook_preview(&config, &api, &plan);
+            print_plan(&plan, &hooks, json);
             Ok(if plan.is_safe() { 0 } else { EXIT_BLOCKED })
         }
         Command::Install {
@@ -116,7 +130,8 @@ pub fn run(cli: Cli) -> Result<i32> {
             noconfirm,
         } => {
             let (plan, _) = plan_targets(&config, &api, &targets)?;
-            print_plan(&plan, json);
+            let hooks = hook_preview(&config, &api, &plan);
+            print_plan(&plan, &hooks, json);
             apply(&config, &plan, dry_run, noconfirm, None)
         }
         Command::Upgrade {
@@ -153,7 +168,8 @@ pub fn run(cli: Cli) -> Result<i32> {
                 })
                 .collect();
             let plan = pkg_check::check(&candidates, &local, &SystemAbi::new(&config.root));
-            print_plan(&plan, json);
+            let hooks = hook_preview(&config, &api, &plan);
+            print_plan(&plan, &hooks, json);
             let pin = Pinned {
                 ring: config.ring.clone(),
                 release_id: view.release.id,
@@ -453,11 +469,96 @@ fn plan_targets(config: &Config, api: &Api, targets: &[String]) -> Result<(Plan,
     ))
 }
 
-fn print_plan(plan: &Plan, json: bool) {
+/// A libalpm hook the plan would make pacman run, and why.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct HookPreview {
+    pub hook: String,
+    pub when: &'static str,
+    pub description: Option<String>,
+    /// `package` (a name matched), `path` (a file matched), `maybe` (a path
+    /// trigger against a package whose file list could not be fetched).
+    pub matched: &'static str,
+    pub because: String,
+}
+
+/// Which `.hook` files of this system the transaction triggers: the
+/// `[Trigger]` sections matched against the packages the plan installs or
+/// upgrades, by name and by the files they ship (fetched from the ring).
+/// Read-only — pacman runs them when the client hands it the packages;
+/// this says what to expect (`mkinitcpio`, `glib-compile-schemas`, …).
+fn hook_preview(config: &Config, api: &Api, plan: &Plan) -> Vec<HookPreview> {
+    let (hooks, errors) = pkg_hooks::load(&config.root);
+    for e in errors {
+        eprintln!("warning: hook skipped: {e}");
+    }
+    if hooks.is_empty() {
+        return Vec::new();
+    }
+    // File lists only when a hook has a Path trigger (most have): one request per package.
+    let needs_files = hooks.iter().any(|h| {
+        h.triggers.iter().any(|t| {
+            t.targets
+                .iter()
+                .any(|x| matches!(x, pkg_hooks::HookTarget::Path(_)))
+        })
+    });
+    let mut files: Vec<Option<Vec<String>>> = Vec::new();
+    let to_install: Vec<_> = plan.to_install().collect();
+    for p in &to_install {
+        files.push(if needs_files {
+            match api.files(&config.ring, &config.arch, &p.name) {
+                Ok(f) => Some(f),
+                Err(e) => {
+                    eprintln!("warning: files of {}: {e:#}", p.name);
+                    None
+                }
+            }
+        } else {
+            None
+        });
+    }
+    let transaction: Vec<TransactionPackage<'_>> = to_install
+        .iter()
+        .zip(&files)
+        .map(|(p, f)| TransactionPackage {
+            name: &p.name,
+            operation: match p.action {
+                Action::Install => HookOperation::Install,
+                _ => HookOperation::Upgrade,
+            },
+            files: f.as_deref(),
+        })
+        .collect();
+    hooks
+        .iter()
+        .filter_map(|h| {
+            let m = h.triggered_by(&transaction)?;
+            let (matched, because) = match m {
+                Matched::Package(n) => ("package", n),
+                Matched::Path { target, file } => ("path", format!("{file} ({target})")),
+                Matched::Undecided { target, package } => (
+                    "maybe",
+                    format!("{package} may ship {target}; file list not fetched"),
+                ),
+            };
+            Some(HookPreview {
+                hook: h.name.clone(),
+                when: h.when.as_str(),
+                description: h.description.clone(),
+                matched,
+                because,
+            })
+        })
+        .collect()
+}
+
+fn print_plan(plan: &Plan, hooks: &[HookPreview], json: bool) {
     if json {
+        let mut v = serde_json::to_value(plan).expect("plan serializes");
+        v["hooks"] = serde_json::to_value(hooks).expect("hooks serialize");
         println!(
             "{}",
-            serde_json::to_string_pretty(plan).expect("plan serializes")
+            serde_json::to_string_pretty(&v).expect("plan serializes")
         );
         return;
     }
@@ -487,6 +588,21 @@ fn print_plan(plan: &Plan, json: bool) {
             Severity::Ok => "ok",
         };
         println!("  {tag:<8} {}: {} — {}", f.package, f.requirement, f.detail);
+    }
+    if !hooks.is_empty() {
+        println!("Hooks pacman would run ({}):", hooks.len());
+        for h in hooks {
+            println!(
+                "  {:<34} {:<4} {}{}",
+                h.hook,
+                h.when,
+                h.description.as_deref().unwrap_or(""),
+                match h.matched {
+                    "maybe" => format!(" — maybe: {}", h.because),
+                    _ => format!(" — {}", h.because),
+                }
+            );
+        }
     }
     if plan.is_safe() {
         println!("Verdict: safe to install out of band.");

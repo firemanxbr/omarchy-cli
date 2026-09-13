@@ -131,6 +131,17 @@ impl Api {
         self.get(&format!("/security?ring={ring}&arch={arch}"))
     }
 
+    /// The files one package of the ring ships (for the hook preview).
+    pub fn files(&self, ring: &str, arch: &str, name: &str) -> Result<Vec<String>> {
+        #[derive(Deserialize)]
+        struct Files {
+            files: Vec<String>,
+        }
+        Ok(self
+            .get::<Files>(&format!("/package/{name}/files?ring={ring}&arch={arch}"))?
+            .files)
+    }
+
     pub fn graph(&self, ring: &str, arch: &str, targets: &[String]) -> Result<Graph> {
         self.get(&format!(
             "/graph?ring={ring}&arch={arch}&targets={}",

@@ -49,7 +49,7 @@ The thin client ships with every [release](https://github.com/firemanxbr/omarchy
 
 ```bash
 omarchy-cli status                    # what the ring would change on this machine
-omarchy-cli check <pkg>               # ABI safety check before an out-of-band install, exit 2 if unsafe
+omarchy-cli check <pkg>               # ABI safety check before an out-of-band install (exit 2 if unsafe), and the hooks pacman would run
 omarchy-cli upgrade                   # pacman -U from the pool, then pin the release
 omarchy-cli security                  # installed packages with open advisories, and where the fix is
 omarchy-cli upgrade --security-only

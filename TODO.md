@@ -9,12 +9,6 @@ request (see [CONTRIBUTING.md](CONTRIBUTING.md)), and keep
 
 ## Quick wins (an hour or so each)
 
-- [ ] **Hook preview in `omarchy-cli check`.** Parse the libalpm `.hook` files in
-      `/usr/share/libalpm/hooks` and `/etc/pacman.d/hooks` and list which ones the
-      plan would trigger (`mkinitcpio`, `glib-compile-schemas`, …). Read-only;
-      `poc/crates/pkg-hooks` already has the types.
-- [ ] **Client config file example** in `docs/` (`/etc/omarchy-cli/config.toml`)
-      and a `--ring` sanity check against the index (`edge|rc|stable` only).
 - [ ] **Coverage on the dashboard for `any` packages built twice.** Arch Linux ARM
       rebuilds and re-signs architecture-independent packages; count how many bytes
       that costs the pool (cheap, but worth knowing).
@@ -110,7 +104,7 @@ architecture a release did not touch, CVE metadata pruned by gc · releases
 stored as deltas with checkpoints every 24th · OPR provenance (Omarchy's own
 or AUR-synced, per package; the AUR count in stable on the overview) ·
 security regressions block a promotion · promotion and rollback per
-architecture.
+architecture · the client's hook preview, config example and ring check.
 
 ## Factory findings (2026-09-12)
 

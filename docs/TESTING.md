@@ -165,7 +165,10 @@ tests/e2e-client.sh
 ```
 
 * current `archlinux:base` → `check xz` is safe, `install --dry-run` prints the
-  `pacman -U` command;
+  `pacman -U` command; three `.hook` files dropped into the rootfs show the
+  hook preview: one triggered by the package's name, one by a file it ships
+  (`usr/bin/xz`, fetched from the ring), one not (a `Remove` trigger); a typo
+  in `--ring` is refused before any request;
 * `archlinux:base-20210131` (glibc 2.32) → `check xz` is **BLOCKED** on
   `libc.so.6(GLIBC_2.34)` with exit code 2 and pacman is never invoked;
 * with `cargo-zigbuild` installed (`brew install zig && cargo install cargo-zigbuild`)
