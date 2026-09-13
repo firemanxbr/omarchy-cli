@@ -248,7 +248,11 @@ The client drives pacman rather than replacing it. What it adds:
   matches;
 * mirror discovery and release notifications come from the index, not from
   `pacman -Sy` polling;
-* exposes package and release information locally (MCP, later).
+* **MCP** (`omarchy-cli mcp`): the same answers as tools for an assistant on
+  the machine — `status`, `check`, `info`, `search`, `list`, `security` —
+  over stdio (JSON-RPC, one message per line), read-only; installing and
+  upgrading stay with the person at the keyboard
+  ([`docs/omarchy-cli-mcp.md`](omarchy-cli-mcp.md)).
 
 `vercmp` is a byte-for-byte port of `alpm_pkg_vercmp` so the client and pacman
 always agree on ordering. Settings live in `/etc/omarchy-cli/config.toml`

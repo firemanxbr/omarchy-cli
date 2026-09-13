@@ -80,6 +80,10 @@ pub enum Command {
     Info { package: String },
     /// Lists installed packages that belong to the ring's release.
     List,
+    /// Serves status, check, info, search, list and security to an agent over
+    /// MCP (JSON-RPC on stdin/stdout): what an assistant needs to reason
+    /// about this machine and the ring, read-only.
+    Mcp,
 }
 
 const EXIT_BLOCKED: i32 = 2;
@@ -181,11 +185,14 @@ pub fn run(cli: Cli) -> Result<i32> {
         Command::Search { query } => search(&config, &api, &query, json),
         Command::Security => security(&config, &api, json),
         Command::Info { package } => info(&config, &api, &package, json),
-        Command::List => list(&config, &api),
+        Command::List => list(&config, &api, json),
+        Command::Mcp => crate::mcp::serve(&config, &api),
     }
 }
 
-fn search(config: &Config, api: &Api, query: &str, json: bool) -> Result<i32> {
+/// The ring's packages whose name or description matches — what `search`
+/// prints and what the MCP `search` tool returns.
+pub fn search_value(config: &Config, api: &Api, query: &str) -> Result<serde_json::Value> {
     let view = api.release_summary(&config.ring)?;
     let q = query.to_lowercase();
     let hits: Vec<&crate::api::PackageSummary> = view
@@ -199,6 +206,12 @@ fn search(config: &Config, api: &Api, query: &str, json: bool) -> Result<i32> {
                     .is_some_and(|d| d.to_lowercase().contains(&q))
         })
         .collect();
+    Ok(serde_json::to_value(hits)?)
+}
+
+fn search(config: &Config, api: &Api, query: &str, json: bool) -> Result<i32> {
+    let hits: Vec<crate::api::PackageSummary> =
+        serde_json::from_value(search_value(config, api, query)?)?;
     if json {
         println!("{}", serde_json::to_string_pretty(&hits)?);
     } else {
@@ -215,6 +228,25 @@ fn search(config: &Config, api: &Api, query: &str, json: bool) -> Result<i32> {
     Ok(0)
 }
 
+/// A package's manifest as the ring publishes it, plus the release it came from.
+pub fn info_value(config: &Config, api: &Api, package: &str) -> Result<serde_json::Value> {
+    let view = api.release(&config.ring, &config.arch)?;
+    let Some(m) = view
+        .packages
+        .iter()
+        .filter(|p| same_arch(config, p.repo_arch.as_deref()))
+        .map(|p| &p.manifest)
+        .find(|m| m.name == package)
+    else {
+        bail!("{package} is not in {}#{}", config.ring, view.release.seq);
+    };
+    let mut v = serde_json::to_value(m)?;
+    v["release"] =
+        serde_json::json!({ "ring": config.ring, "id": view.release.id, "seq": view.release.seq });
+    v["mirror"] = serde_json::Value::String(config.package_url(&m.filename));
+    Ok(v)
+}
+
 fn info(config: &Config, api: &Api, package: &str, json: bool) -> Result<i32> {
     let view = api.release(&config.ring, &config.arch)?;
     let Some(m) = view
@@ -227,7 +259,10 @@ fn info(config: &Config, api: &Api, package: &str, json: bool) -> Result<i32> {
         bail!("{package} is not in {}#{}", config.ring, view.release.seq);
     };
     if json {
-        println!("{}", serde_json::to_string_pretty(m)?);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&info_value(config, api, package)?)?
+        );
         return Ok(0);
     }
     println!("Name         : {}", m.name);
@@ -272,7 +307,39 @@ fn installed_security(
         .collect()
 }
 
+/// The installed packages with an open advisory in this ring's report, and
+/// whether an upgrade from the ring fixes each — what `security` prints and
+/// what the MCP `security` tool returns.
+pub fn security_value(config: &Config, api: &Api) -> Result<serde_json::Value> {
+    let report = api.security(&config.ring, &config.arch)?;
+    let local = LocalDb::load(&config.root)?;
+    let summary = api.release_summary(&config.ring)?;
+    let mine = installed_security(&report, &local);
+    let serves_clean = |v: &crate::api::VulnerablePackage| {
+        v.fixed_in.iter().any(|f| f.ring == config.ring)
+            || summary.packages.iter().any(|p| {
+                p.name == v.name
+                    && same_arch(config, p.repo_arch.as_deref())
+                    && vercmp(&p.version, &v.version).is_gt()
+            })
+    };
+    Ok(serde_json::json!({
+        "ring": report.ring, "arch": report.arch, "advisories_updated_at": report.updated_at,
+        "installed_vulnerable": mine.iter().map(|v| serde_json::json!({
+            "name": v.name, "installed": local.get(&v.name).map(|p| p.version.clone()), "worst": v.worst, "kev": v.kev, "epss": v.epss,
+            "advisories": v.advisories, "fixed_in": v.fixed_in, "upgrade_fixes_it": serves_clean(v),
+        })).collect::<Vec<_>>(),
+    }))
+}
+
 fn security(config: &Config, api: &Api, json: bool) -> Result<i32> {
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&security_value(config, api)?)?
+        );
+        return Ok(0);
+    }
     let report = api.security(&config.ring, &config.arch)?;
     let local = LocalDb::load(&config.root)?;
     let summary = api.release_summary(&config.ring)?;
@@ -286,19 +353,6 @@ fn security(config: &Config, api: &Api, json: bool) -> Result<i32> {
                     && vercmp(&p.version, &v.version).is_gt()
             })
     };
-    if json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&serde_json::json!({
-                "ring": report.ring, "arch": report.arch, "advisories_updated_at": report.updated_at,
-                "installed_vulnerable": mine.iter().map(|v| serde_json::json!({
-                    "name": v.name, "installed": local.get(&v.name).map(|p| p.version.clone()), "worst": v.worst, "kev": v.kev, "epss": v.epss,
-                    "advisories": v.advisories, "fixed_in": v.fixed_in, "upgrade_fixes_it": serves_clean(v),
-                })).collect::<Vec<_>>(),
-            }))?
-        );
-        return Ok(0);
-    }
     println!(
         "Ring       : {} ({})   advisories refreshed {}",
         report.ring,
@@ -358,26 +412,58 @@ fn same_arch(config: &Config, repo_arch: Option<&str>) -> bool {
     repo_arch.is_none_or(|a| a == config.arch)
 }
 
-fn list(config: &Config, api: &Api) -> Result<i32> {
+/// Installed packages the ring's release also serves, with what the ring
+/// has for each: `current`, `update` (the ring is newer) or `ahead` (the
+/// machine is newer than the release).
+pub fn list_value(config: &Config, api: &Api) -> Result<serde_json::Value> {
     let view = api.release_summary(&config.ring)?;
     let local = LocalDb::load(&config.root)?;
+    let mut rows = Vec::new();
     for m in &view.packages {
         if !same_arch(config, m.repo_arch.as_deref()) {
             continue;
         }
         if let Some(p) = local.get(&m.name) {
-            let mark = match vercmp(&m.version, &p.version) {
-                std::cmp::Ordering::Greater => format!("  [update: {}]", m.version),
-                std::cmp::Ordering::Less => "  [newer than release]".into(),
-                std::cmp::Ordering::Equal => String::new(),
+            let state = match vercmp(&m.version, &p.version) {
+                std::cmp::Ordering::Greater => "update",
+                std::cmp::Ordering::Less => "ahead",
+                std::cmp::Ordering::Equal => "current",
             };
-            println!("{} {}{mark}", m.name, p.version);
+            rows.push(serde_json::json!({ "name": m.name, "installed": p.version, "available": m.version, "state": state }));
         }
+    }
+    Ok(serde_json::json!({ "ring": config.ring, "release_id": view.release.id, "packages": rows }))
+}
+
+fn list(config: &Config, api: &Api, json: bool) -> Result<i32> {
+    let v = list_value(config, api)?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&v)?);
+        return Ok(0);
+    }
+    for r in v["packages"].as_array().into_iter().flatten() {
+        let mark = match r["state"].as_str() {
+            Some("update") => format!("  [update: {}]", r["available"].as_str().unwrap_or("")),
+            Some("ahead") => "  [newer than release]".to_owned(),
+            _ => String::new(),
+        };
+        println!(
+            "{} {}{mark}",
+            r["name"].as_str().unwrap_or(""),
+            r["installed"].as_str().unwrap_or("")
+        );
     }
     Ok(0)
 }
 
-fn status(config: &Config, api: &Api, json: bool) -> Result<i32> {
+struct StatusData {
+    view: crate::api::ReleaseSummaryView,
+    pinned: Option<Pinned>,
+    tracked: usize,
+    updates: Vec<(String, String, String)>,
+}
+
+fn status_data(config: &Config, api: &Api) -> Result<StatusData> {
     let view = api.release_summary(&config.ring)?;
     let pinned = state::load(&config.root)?;
     let local = LocalDb::load(&config.root)?;
@@ -394,20 +480,39 @@ fn status(config: &Config, api: &Api, json: bool) -> Result<i32> {
             }
         }
     }
+    Ok(StatusData {
+        view,
+        pinned,
+        tracked,
+        updates,
+    })
+}
+
+/// The ring, the pinned release, the head and the pending updates — what
+/// `status --json` prints and what the MCP `status` tool returns.
+pub fn status_value(config: &Config, api: &Api) -> Result<serde_json::Value> {
+    let d = status_data(config, api)?;
+    Ok(serde_json::json!({
+        "ring": config.ring,
+        "api": config.api,
+        "pinned": d.pinned.as_ref().map(|p| serde_json::json!({"release_id": p.release_id, "seq": p.seq, "pinned_at": p.at})),
+        "head": {"release_id": d.view.release.id, "seq": d.view.release.seq, "created_at": d.view.release.created_at, "note": d.view.release.note, "package_count": d.view.package_count},
+        "installed_from_release": d.tracked,
+        "updates": d.updates.iter().map(|(n, o, nw)| serde_json::json!({"name": n, "installed": o, "available": nw})).collect::<Vec<_>>(),
+    }))
+}
+
+fn status(config: &Config, api: &Api, json: bool) -> Result<i32> {
     if json {
-        println!(
-            "{}",
-            serde_json::json!({
-                "ring": config.ring,
-                "api": config.api,
-                "pinned": pinned.as_ref().map(|p| serde_json::json!({"release_id": p.release_id, "seq": p.seq, "pinned_at": p.at})),
-                "head": {"release_id": view.release.id, "seq": view.release.seq, "created_at": view.release.created_at, "note": view.release.note, "package_count": view.package_count},
-                "installed_from_release": tracked,
-                "updates": updates.iter().map(|(n, o, nw)| serde_json::json!({"name": n, "installed": o, "available": nw})).collect::<Vec<_>>(),
-            })
-        );
+        println!("{}", status_value(config, api)?);
         return Ok(0);
     }
+    let StatusData {
+        view,
+        pinned,
+        tracked,
+        updates,
+    } = status_data(config, api)?;
     println!("Repository : {}  [{}]", config.api, config.ring);
     match &pinned {
         Some(p) => println!(
@@ -552,13 +657,26 @@ fn hook_preview(config: &Config, api: &Api, plan: &Plan) -> Vec<HookPreview> {
         .collect()
 }
 
+/// The plan and the hooks as one document: `check --json` and the MCP `check` tool.
+pub fn plan_value(plan: &Plan, hooks: &[HookPreview]) -> serde_json::Value {
+    let mut v = serde_json::to_value(plan).expect("plan serializes");
+    v["hooks"] = serde_json::to_value(hooks).expect("hooks serialize");
+    v["safe"] = serde_json::Value::Bool(plan.is_safe());
+    v
+}
+
+/// The safety check of an out-of-band install, for the MCP `check` tool.
+pub fn check_value(config: &Config, api: &Api, targets: &[String]) -> Result<serde_json::Value> {
+    let (plan, _) = plan_targets(config, api, targets)?;
+    let hooks = hook_preview(config, api, &plan);
+    Ok(plan_value(&plan, &hooks))
+}
+
 fn print_plan(plan: &Plan, hooks: &[HookPreview], json: bool) {
     if json {
-        let mut v = serde_json::to_value(plan).expect("plan serializes");
-        v["hooks"] = serde_json::to_value(hooks).expect("hooks serialize");
         println!(
             "{}",
-            serde_json::to_string_pretty(&v).expect("plan serializes")
+            serde_json::to_string_pretty(&plan_value(plan, hooks)).expect("plan serializes")
         );
         return;
     }

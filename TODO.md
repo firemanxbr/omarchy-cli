@@ -16,8 +16,6 @@ request (see [CONTRIBUTING.md](CONTRIBUTING.md)), and keep
 - [ ] **ABI gate on real installations.** The gate checks the upgrades against the
       official base image; run it also against an exported Omarchy installation
       (the ISO's package set) so the check covers what users actually have.
-- [ ] **`omarchy-cli` MCP surface.** The `--json` outputs of `status`, `check`,
-      `info` and `list` are the shape an MCP server would expose; wrap them.
 
 ## Larger (needs a design conversation first)
 

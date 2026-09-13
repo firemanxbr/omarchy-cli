@@ -53,6 +53,7 @@ omarchy-cli check <pkg>               # ABI safety check before an out-of-band i
 omarchy-cli upgrade                   # pacman -U from the pool, then pin the release
 omarchy-cli security                  # installed packages with open advisories, and where the fix is
 omarchy-cli upgrade --security-only
+omarchy-cli mcp                       # the same answers as MCP tools for an assistant (stdio, read-only)
 ```
 
 ## How it works
@@ -76,6 +77,7 @@ them, never their own — *we do not use what you built, we learn from it*
 | [SECURITY.md](SECURITY.md) | the trust model: who holds what, per-job tokens, the key that never leaves the pool |
 | [docs/TESTING.md](docs/TESTING.md) | how every piece is verified, locally and in CI |
 | [docs/MIGRATION.md](docs/MIGRATION.md) | moving the whole thing to another Cloudflare account and GitHub organisation |
+| [docs/omarchy-cli-mcp.md](docs/omarchy-cli-mcp.md) | the thin client as an MCP server: the tools and their shapes |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | pull requests, releases, versions |
 | [TODO.md](TODO.md) | open work, and findings to report upstream |
 | [poc/](poc/) | the proof of concept this grew out of: the three questions, the evidence, the benchmarks, the parked native engine |

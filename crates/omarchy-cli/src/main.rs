@@ -1,6 +1,7 @@
 mod api;
 mod cli;
 mod config;
+mod mcp;
 mod state;
 
 use anyhow::Result;
