@@ -1,3 +1,4 @@
+import { signingEnabled } from "../signing";
 import { json, RINGS, type Env } from "../index";
 import { EXPECTED_SOURCES, version } from "../meta";
 import { ringHead } from "../db";
@@ -197,7 +198,7 @@ export async function handleServiceStatus(env: Env): Promise<Response> {
   ).catch((e: unknown) => ({ ok: false, ms: Date.now() - t1, key: null, error: String(e) }));
   const ok = index.ok && pool.ok;
   return json(
-    { ok, state: ok ? "online" : "degraded", api: { ok: true }, index, pool, checked_at: new Date().toISOString() },
+    { ok, state: ok ? "online" : "degraded", api: { ok: true }, index, pool, signing: signingEnabled(env), checked_at: new Date().toISOString() },
     ok ? 200 : 503,
     { "cache-control": "no-store" },
   );

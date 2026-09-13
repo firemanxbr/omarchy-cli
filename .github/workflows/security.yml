@@ -73,10 +73,6 @@ jobs:
           toolchain: 1.98.1
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release -p pkg-repo
-      - name: Import signing key
-        run: |
-          echo "${{ secrets.OMARCHY_GPG_KEY }}" | gpg --batch --import
-          echo "OMARCHY_GPG_KEYID=${{ secrets.OMARCHY_GPG_KEYID }}" >> "$GITHUB_ENV"
       - name: Remember the current heads (rollback targets)
         id: heads
         run: |
@@ -95,7 +91,7 @@ jobs:
         if: steps.apply.outputs.changed != ''
         run: |
           for ring in ${{ steps.apply.outputs.changed }}; do for arch in x86_64 aarch64; do
-            target/release/pkg-repo render --ring "$ring" --arch "$arch" --sign "$OMARCHY_GPG_KEYID"
+            target/release/pkg-repo render --ring "$ring" --arch "$arch"
           done; done
       - name: Health (x86_64)
         if: steps.apply.outputs.changed != ''
@@ -132,10 +128,6 @@ jobs:
           toolchain: 1.98.1
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release -p pkg-repo
-      - name: Import signing key
-        run: |
-          echo "${{ secrets.OMARCHY_GPG_KEY }}" | gpg --batch --import
-          echo "OMARCHY_GPG_KEYID=${{ secrets.OMARCHY_GPG_KEYID }}" >> "$GITHUB_ENV"
       - name: Confirm or roll back
         env:
           CHANGED: ${{ needs.fasttrack.outputs.changed }}
@@ -150,7 +142,7 @@ jobs:
             prev=$([[ "$ring" == rc ]] && echo "$PREV_RC" || echo "$PREV_STABLE")
             [[ -z "$prev" ]] && continue
             target/release/pkg-repo rollback --ring "$ring" --to "$prev" --note "automatic rollback: health failed after a security fast-track (x86_64=$X86, aarch64=$ARM)"
-            for arch in x86_64 aarch64; do target/release/pkg-repo render --ring "$ring" --arch "$arch" --sign "$OMARCHY_GPG_KEYID"; done
+            for arch in x86_64 aarch64; do target/release/pkg-repo render --ring "$ring" --arch "$arch"; done
             target/release/pkg-repo event --kind rollback --ring "$ring" --source edge --status warn \
               --summary "$ring: security fast-track failed health (x86_64=$X86, aarch64=$ARM); rolled back to $prev" --payload "{\"restored_release_id\": $prev}"
           done

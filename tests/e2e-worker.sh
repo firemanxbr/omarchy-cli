@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # End-to-end through the edge worker, entirely local:
 #   wrangler dev (local D1 + R2) → publish fixtures to edge → promote edge→rc→stable
-#   → render + sign databases → pacman in a container syncs from the worker mirror.
+#   → render databases (signed by the pool's own key) → pacman in a container
+#   syncs from the worker mirror.
 #
 # Requires: cargo, gpg, node (worker deps installed), podman or docker.
 # Usage: tests/e2e-worker.sh
@@ -45,7 +46,10 @@ step "Fresh local worker on :$PORT"
 rm -rf "$E2E" && mkdir -p "$E2E"
 cd "$ROOT/worker"
 WRANGLER_STATE="$E2E/wrangler-state"
-printf 'PUBLISH_TOKEN=%s\nFACTORY_TOKEN=e2e-factory\n' "$OMARCHY_PUBLISH_TOKEN" > "$E2E/.dev.vars"
+# The pool holds the signing key (SECURITY.md): the throwaway key goes in as
+# the Worker secret, armored on one dotenv line.
+SIGNING_KEY="$(gpg --batch --armor --export-secret-keys "$KEYID" | awk '{printf "%s\\n", $0}')"
+printf 'PUBLISH_TOKEN=%s\nFACTORY_TOKEN=e2e-factory\nSIGNING_KEY="%s"\n' "$OMARCHY_PUBLISH_TOKEN" "$SIGNING_KEY" > "$E2E/.dev.vars"
 npx wrangler d1 migrations apply omarchy-repo --local --persist-to "$WRANGLER_STATE" >/dev/null
 npx wrangler dev --ip 0.0.0.0 --port "$PORT" --persist-to "$WRANGLER_STATE" \
   --env-file "$E2E/.dev.vars" --var "POOL_URL:http://$HOST_FROM_CONTAINER:$PORT/pool" > "$E2E/wrangler.log" 2>&1 &
@@ -82,8 +86,16 @@ grep -q '"name":"xz"' <<<"$summary_body" && { echo "rollback still serves xz"; e
 "$PKG_REPO" promote --from rc --to stable --note "forward again"
 "$PKG_REPO" releases --ring stable
 
-step "Render + sign databases for stable"
-"$PKG_REPO" render --ring stable --sign "$KEYID"
+step "Render databases for stable (the pool signs them)"
+signing_key=$(curl -s "$OMARCHY_API/api/v1/signing-key")
+grep -q "\"fingerprint\":\"$KEYID\"" <<<"$signing_key" || { echo "pool does not hold the signing key: $signing_key"; exit 1; }
+"$PKG_REPO" render --ring stable
+curl -so "$E2E/stable.db" "$OMARCHY_API/pool/x86_64/omarchy-packages-stable.db"
+curl -so "$E2E/stable.db.sig" "$OMARCHY_API/pool/x86_64/omarchy-packages-stable.db.sig"
+gpg --verify "$E2E/stable.db.sig" "$E2E/stable.db" 2>/dev/null || { echo "the pool's database signature does not verify"; exit 1; }
+# A client's own signature is not taken over the pool's.
+sup=$(curl -s -X PUT "$OMARCHY_API/api/v1/releases/1/artifacts/db.sig?repo=omarchy-packages-stable&arch=x86_64" -H "Authorization: Bearer $OMARCHY_PUBLISH_TOKEN" --data-binary 'not a signature')
+grep -q '"status":"superseded"' <<<"$sup" || { echo "client signature was not superseded: $sup"; exit 1; }
 
 step "Pool sanity (flat layout: databases beside the packages)"
 for f in omarchy-packages-stable.db omarchy-packages-stable.db.sig omarchy-packages-stable.files "zlib-1:1.3.2-3-x86_64.pkg.tar.zst" "zlib-1:1.3.2-3-x86_64.pkg.tar.zst.sig"; do
@@ -119,6 +131,7 @@ pkg_sec=$(curl -s "$OMARCHY_API/api/v1/package/xz?ring=stable")
 grep -q '"via":"zlib"' <<<"$pkg_sec" || echo "note: xz is not exposed through zlib in the fixtures ($(python3 -c 'import json,sys; print(json.load(sys.stdin)["security"])' <<<"$pkg_sec"))"
 status_body=$(curl -s "$OMARCHY_API/api/v1/status")
 grep -q '"state":"online"' <<<"$status_body" || { echo "service status not online: $status_body"; exit 1; }
+grep -q '"signing":true' <<<"$status_body" || { echo "status does not report signing: $status_body"; exit 1; }
 echo "databases, signatures, package blobs, Range requests, stats, pages, security and service status OK"
 
 step "Factory: enqueue, claim with a lease, fail → requeue, complete after publish"

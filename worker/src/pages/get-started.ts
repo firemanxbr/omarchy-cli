@@ -8,7 +8,7 @@ import type { RunningVersion } from "../meta";
 
 const BODY = String.raw`
   <h1>Get started</h1>
-  <p class="lede">Three steps: trust the key that signs the databases, point pacman at a ring, upgrade. Packages keep the signatures of the project that built them (Arch, Arch Linux ARM, Omarchy) — the only new key you trust signs the databases.</p>
+  <p class="lede">Three steps: trust the key that signs the databases, point pacman at a ring, upgrade. Packages keep the signatures of the project that built them (Arch, Arch Linux ARM, Omarchy) — the only new key you trust signs the databases and what the pool builds itself.</p>
 
   <div class="steps">
     <div class="step">
@@ -21,7 +21,7 @@ const BODY = String.raw`
 
     <div class="step">
       <h3>2. Trust the database key</h3>
-      <p>Once per machine. The key only signs the pacman databases; every package still carries its upstream signature.</p>
+      <p>Once per machine. The key signs the pacman databases and the packages the pool builds itself (source <em>factory</em>); every other package still carries its upstream signature.</p>
       <pre><span class="copy" data-copy="key">copy</span><span id="key-cmd"></span></pre>
     </div>
 

@@ -424,6 +424,26 @@ impl Api {
         })
     }
 
+    /// Whether the pool signs its own objects (`/status.signing`): when it
+    /// does, publishers ask for signatures instead of uploading their own.
+    pub fn signing(&self) -> Result<bool, RepoError> {
+        let status = self.get_json("/status")?;
+        Ok(status["signing"].as_bool().unwrap_or(false))
+    }
+
+    /// Asks the pool to sign a package object it stores with its own key.
+    pub fn sign_pool(&self, sha256: &str, filename: &str, arch: &str) -> Result<(), RepoError> {
+        with_retry("sign_pool", || {
+            let resp = self
+                .http
+                .post(self.url(&format!("/pool/{sha256}/sign")))
+                .query(&[("filename", filename), ("arch", arch)])
+                .bearer_auth(&self.token)
+                .send()?;
+            Self::check(resp).map(|_| ())
+        })
+    }
+
     pub fn index_manifest(
         &self,
         manifest: &PackageManifest,

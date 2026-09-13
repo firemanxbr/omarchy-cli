@@ -119,7 +119,7 @@ Server = https://pool.firemanxbr.org/$arch
     <p class="sub">Two things, and only two.</p>
     <div class="steps">
       <div class="step"><h3>The projects' own keys — unchanged</h3><p>Packages are the exact files Arch, Arch Linux ARM and Omarchy built and signed. pacman verifies each package with the keyring you already have (<code>archlinux-keyring</code>, <code>archlinuxarm-keyring</code>, Omarchy's key). The pool cannot alter a package without breaking its signature.</p></div>
-      <div class="step"><h3>The pool's database key — one import</h3><p>The pacman databases are generated here, so they are signed here. That key signs nothing else, its public part is in the repository and at the pool root, and with <code>SigLevel = Required DatabaseRequired</code> pacman refuses a database it did not sign.</p></div>
+      <div class="step"><h3>The pool's database key — one import</h3><p>The pacman databases are generated here, so they are signed here — inside the pool's own service, by a key that never leaves it: no build worker, runner or repository holds it. That key signs the databases and the packages the factory builds, nothing else; its public part is in the repository, at the pool root and at <code>/api/v1/signing-key</code>, and with <code>SigLevel = Required DatabaseRequired</code> pacman refuses a database it did not sign.</p></div>
     </div>
   </section>
 

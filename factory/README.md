@@ -14,8 +14,8 @@ PKGBUILD reviewed and merged ──▶ pool: build_requests / build_tasks (D1)
                                      ▲            │ claim (lease 30 min)
                                      │ heartbeat  ▼
                           worker: clean Arch container, anywhere
-                          fetch PKGBUILD at commit → makepkg → sign
-                          → pkg-repo publish --source factory --ring edge
+                          fetch PKGBUILD at commit → makepkg
+                          → pkg-repo publish --source factory --ring edge (the pool signs)
                           → pkg-repo render edge → complete / fail
                                                        │
                                      lease expired? ◀──┘ back in the queue (scheduler cron)
@@ -53,8 +53,9 @@ PKGBUILD reviewed and merged ──▶ pool: build_requests / build_tasks (D1)
    request with auto-merge on. CI is the only gate — CODEOWNERS are not asked
    again for a version bump — and the merge queues the build.
 7. **A worker builds it.** Any worker of that architecture claims the task,
-   holds a lease, builds in its fresh container, signs, publishes the result
-   into `edge` as source `factory` and renders the edge databases. From there
+   holds a lease, builds in its fresh container, publishes the result
+   into `edge` as source `factory` — the pool signs it with its own key —
+   and renders the edge databases. From there
    it is a package like any other: health checks, the soak, `rc`, `stable`,
    the security layer, `omarchy-cli`.
 8. **If it fails**, the task returns to the queue with the log tail; after
@@ -115,9 +116,9 @@ log to `staging/<you>/<package>/<task>/`. The task is then **staged**: the
 Factory page lists it, the log and the PKGBUILD are public, the package is
 for maintainers. Nothing you build reaches users until a maintainer of the
 group approves it on the [Review](../../../../review) page — then a
-project worker rebuilds the same PKGBUILD, signs it and publishes it into
-`edge` as source `factory`; your build was the evidence, the project's build
-is the product. A rejection comes with a note you see on your Contribute
+project worker rebuilds the same PKGBUILD and publishes it into `edge` as
+source `factory`, signed by the pool; your build was the evidence, the
+project's build is the product. A rejection comes with a note you see on your Contribute
 page.
 
 Limits: 10 tasks queued or building and 2 GB of staging per contributor;
@@ -139,33 +140,27 @@ holds recipes kept only for this (chromium, from Arch Linux ARM).
 
 ## Run a worker
 
-Anything with `podman` or `docker`, `gpg`, `jq` and `curl` is a worker: a
-laptop, a VM, a Droplet, a GitHub-hosted runner. **Every task builds in a
-fresh Arch container** (`archlinux:base-devel` for x86_64,
-`menci/archlinuxarm:base-devel` for aarch64) that sees the PKGBUILD and the
-network and nothing else; the worker process on the host holds the tokens and
-the signing key, signs the result and publishes it. A host builds its own
-architecture natively and the other one emulated (`WORKER_ARCH`).
+Anything with `podman` or `docker` and `curl` is a project worker: a
+laptop, a VM, a Droplet. **Every task builds in a fresh Arch container**
+(`archlinux:base-devel` for x86_64, `menci/archlinuxarm:base-devel` for
+aarch64) that sees the PKGBUILD and the network and nothing else; the worker
+process on the host holds only its own token, publishes the result and the
+pool signs it — no key ever sits on a worker. A host builds its own
+architecture natively and the other one emulated (`--arch`).
 
 ```bash
-# once: the pool's publisher (Linux hosts download it from the releases automatically)
-cargo build --release -p pkg-repo        # macOS: set PKG_REPO to it
-
+# once: the pool's publisher (from the releases, or cargo build --release -p pkg-repo)
 export OMARCHY_API=https://pkgs.firemanxbr.org OMARCHY_POOL=https://pool.firemanxbr.org
-export FACTORY_TOKEN="$(cat ~/.cache/omarchy-cli-poc/factory-token)"
-export OMARCHY_PUBLISH_TOKEN="$(cat ~/.cache/omarchy-cli-poc/publish-token)"
-export GNUPGHOME=~/.cache/omarchy-cli-poc/gnupg OMARCHY_GPG_KEYID="$(cat ~/.cache/omarchy-cli-poc/gnupg/STAGING_KEYID)"
 
-# native architecture
-WORKER_LABELS='{"where":"laptop"}' factory/worker/omarchy-build-worker.sh
+# register (POST /factory/workers with your contributor token) and have a
+# maintainer trust it; then, native architecture:
+pkg-repo work --worker-token omw_… --labels '{"where":"laptop"}'
 # the other one, emulated (Apple silicon builds x86_64 through podman machine)
-WORKER_ARCH=x86_64 WORKER_LABELS='{"where":"laptop","emulated":true}' factory/worker/omarchy-build-worker.sh
+pkg-repo work --worker-token omw_… --arch x86_64 --labels '{"where":"laptop","emulated":true}'
 ```
 
-`IDLE_EXIT=300` makes a worker exit after five minutes without work (what the
-hosted runner uses); `MAX_TASKS=1` makes it one-shot; `OMARCHY_GPG_KEY` (an
-armored private key) replaces `GNUPGHOME` on hosts with no keyring. A build
-container gets `[omarchy-factory-edge]` in its `pacman.conf` once that
+`--idle-exit 300` makes a worker exit after five minutes without work (what
+the hosted runner uses); `--once` makes it one-shot. A build container gets `[omarchy-factory-edge]` in its `pacman.conf` once that
 database exists, so a package can depend on an earlier factory build.
 
 **Whose compute.** Contributors build on their own workers (or a shared

@@ -60,8 +60,6 @@ gh variable set OMARCHY_POOL -b "https://pool.example.org" -R NEWORG/omarchy-poo
 openssl rand -hex 32 > publish-token                       # keep it: the worker gets the same value (B5)
 gh secret set OMARCHY_PUBLISH_TOKEN  < publish-token   -R NEWORG/omarchy-pool
 gh secret set CLOUDFLARE_API_TOKEN   < cloudflare-token -R NEWORG/omarchy-pool   # B6
-gh secret set OMARCHY_GPG_KEY        < key.secret.asc  -R NEWORG/omarchy-pool   # D
-gh secret set OMARCHY_GPG_KEYID      -b "$KEYID"       -R NEWORG/omarchy-pool   # D
 for e in automatic pool stable; do gh api -X PUT "repos/NEWORG/omarchy-pool/environments/$e" >/dev/null; done
 ```
 
@@ -165,19 +163,22 @@ App rather than a person — save it to `github-token`, and install it (B5). The
 scheduler is idle without it and logs so; the workflow files' own schedules still
 apply.
 
-## D. A new database signing key
+## D. A new signing key
 
-Packages keep the signatures of the projects that built them; only the generated
-pacman databases are signed, by one key, and users import its public part once.
-The new owner must have its own:
+Packages imported from upstream keep the signatures of the projects that built
+them; the generated pacman databases and the packages the factory builds are
+signed by one key, inside the Worker (secret `SIGNING_KEY`), and users import
+its public part once. The new owner must have its own:
 
 ```bash
 export GNUPGHOME=$(mktemp -d)
 gpg --batch --quiet --passphrase '' --quick-generate-key "Omarchy Pool Signing <pool@example.org>" ed25519 sign 2y
 KEYID=$(gpg --list-keys --with-colons pool@example.org | awk -F: '/^fpr/{print $10; exit}')
 gpg --armor --export "$KEYID" > docs/omarchy-pool.pub.asc
-gpg --batch --armor --export-secret-keys "$KEYID" > key.secret.asc      # → OMARCHY_GPG_KEY (A3), then delete
-cd worker && npx wrangler r2 object put omarchy-packages/omarchy-pool.pub.asc --file ../docs/omarchy-pool.pub.asc --remote
+cd worker
+gpg --batch --armor --export-secret-keys "$KEYID" | npx wrangler secret put SIGNING_KEY   # the only copy
+npx wrangler r2 object put omarchy-packages/omarchy-pool.pub.asc --file ../docs/omarchy-pool.pub.asc --remote
+cd .. && rm -rf "$GNUPGHOME"
 ```
 
 Then rename the key file and the e-mail wherever they appear (`docs/omarchy-staging.pub.asc`,

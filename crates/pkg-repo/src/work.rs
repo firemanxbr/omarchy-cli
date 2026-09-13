@@ -41,7 +41,8 @@ pub struct WorkOptions {
     /// Exit after this many seconds without work (0 = never).
     pub idle_exit: u64,
     pub work_dir: PathBuf,
-    /// Key id that signs rendered databases (until the pool signs them itself).
+    /// Local key id that signs packages and databases against a pool
+    /// without its own signing key (transition; ignored when the pool signs).
     pub sign: Option<String>,
     /// A checkout of the repository (its tests/ scripts); cloned when absent.
     pub repo_dir: Option<PathBuf>,
@@ -528,10 +529,13 @@ fn build_job(opts: &WorkOptions, job: &Api, task: &Task) -> Result<Outcome> {
         .collect();
     pkgs.sort();
     anyhow::ensure!(!pkgs.is_empty(), "makepkg produced no package");
-    // Signed here until the pool signs its own objects (SECURITY.md, roadmap 2).
+    // The pool signs what it stores (SECURITY.md); a local key only covers
+    // a pool that has none.
     if let Some(key) = &opts.sign {
-        for p in &pkgs {
-            crate::sign::detach_sign(p, key)?;
+        if !job.signing()? {
+            for p in &pkgs {
+                crate::sign::detach_sign(p, key)?;
+            }
         }
     }
     ops::publish(

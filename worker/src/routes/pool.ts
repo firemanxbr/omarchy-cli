@@ -1,4 +1,5 @@
 import { json, type Env } from "../index";
+import { signingEnabled, detachedSignature } from "../signing";
 import { IMMUTABLE, isRepoArch, packageKey, signatureKey } from "../r2";
 
 const FILENAME_RE = /^[A-Za-z0-9@._+:-]+-(x86_64|aarch64|any)\.pkg\.tar\.(zst|xz)$/;
@@ -34,6 +35,26 @@ export async function handlePutPool(sha256: string, url: URL, request: Request, 
   } catch (err) {
     return r2PutError(err);
   }
+}
+
+/**
+ * POST /pool/:sha256/sign?filename=&arch= — the pool signs a package object
+ * it stores (a factory build the job just published). The object is
+ * streamed from R2 into the signature; the .sig lands beside it.
+ */
+export async function handleSignPool(sha256: string, url: URL, env: Env): Promise<Response> {
+  if (!signingEnabled(env)) return json({ error: "the pool has no signing key configured" }, 501);
+  const t = target(url);
+  if (t instanceof Response) return t;
+  const key = packageKey(t.repoArch, t.filename);
+  const obj = await env.PACKAGES.get(key);
+  if (!obj) return json({ error: "archive not in pool" }, 404);
+  const storedSha = obj.checksums.sha256 ? [...new Uint8Array(obj.checksums.sha256)].map((b) => b.toString(16).padStart(2, "0")).join("") : null;
+  if (storedSha && storedSha !== sha256) return json({ error: `the pool serves ${storedSha} under ${t.filename}; not ${sha256}` }, 409);
+  const sig = await detachedSignature(env, obj.body as ReadableStream<Uint8Array>);
+  await env.PACKAGES.put(signatureKey(t.repoArch, t.filename), sig, { httpMetadata: { cacheControl: IMMUTABLE } });
+  await env.DB.prepare("UPDATE packages SET has_signature = 1 WHERE sha256 = ? AND repo_arch = ?").bind(sha256, t.repoArch).run();
+  return json({ sha256, signed: true, size: sig.byteLength }, 201);
 }
 
 export async function handlePutPoolSig(sha256: string, url: URL, request: Request, env: Env): Promise<Response> {

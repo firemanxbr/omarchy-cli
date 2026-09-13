@@ -1,3 +1,4 @@
+import { signingEnabled, detachedSignature } from "../signing";
 import { isRing, json, type Env, type Ring } from "../index";
 import { artifactKey, isRepoArch, SHORT } from "../r2";
 import { releaseManifests, releaseSummary, ringHead, type ManifestDetail, type ReleaseRow } from "../db";
@@ -194,11 +195,30 @@ export async function handlePutArtifact(
   if (!request.body) return json({ error: "empty body" }, 400);
   const release = await env.DB.prepare("SELECT id FROM releases WHERE id = ?").bind(releaseId).first();
   if (!release) return json({ error: "release not found" }, 404);
+  // The pool signs the databases it stores; a signature a client made with
+  // its own copy of a key is not taken (an older `render --sign` is harmless,
+  // and a rotated key cannot be undone by a stale worker).
+  if (kind.endsWith(".sig") && signingEnabled(env)) {
+    await request.body.cancel();
+    return json({ release_id: releaseId, repo, arch, kind, status: "superseded", detail: "the pool signs its own databases" });
+  }
 
   const bytes = await request.arrayBuffer();
   const key = artifactKey(arch, repo, kind);
   await env.PACKAGES.put(key, bytes, { httpMetadata: { contentType: "application/octet-stream", cacheControl: SHORT } });
   const keys = [key];
+  if ((kind === "db" || kind === "files") && signingEnabled(env)) {
+    const sig = await detachedSignature(env, new Uint8Array(bytes));
+    const sigKey = artifactKey(arch, repo, `${kind}.sig`);
+    await env.PACKAGES.put(sigKey, sig, { httpMetadata: { contentType: "application/octet-stream", cacheControl: SHORT } });
+    await env.DB.prepare(
+      `INSERT INTO release_artifacts (release_id, repo, arch, kind, r2_key, size) VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(release_id, repo, arch, kind) DO UPDATE SET r2_key = excluded.r2_key, size = excluded.size, created_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`,
+    )
+      .bind(releaseId, repo, arch, `${kind}.sig`, sigKey, sig.byteLength)
+      .run();
+    keys.push(sigKey);
+  }
   await env.DB.prepare(
     `INSERT INTO release_artifacts (release_id, repo, arch, kind, r2_key, size) VALUES (?, ?, ?, ?, ?, ?)
      ON CONFLICT(release_id, repo, arch, kind) DO UPDATE SET r2_key = excluded.r2_key, size = excluded.size,

@@ -12,6 +12,7 @@ const BODY = String.raw`
     <h2>Read</h2>
     <div class="table-wrap"><table><thead><tr><th>Endpoint</th><th>What it returns</th></tr></thead><tbody>
       <tr><td><code>GET /version</code></td><td>The running release, its commit and when it was deployed.</td></tr>
+      <tr><td><code>GET /signing-key</code></td><td>The pool's public signing key (fingerprint, user id, armored) — what <code>pacman-key --add</code> imports.</td></tr>
       <tr><td><code>GET /status</code></td><td>Service check, measured now: index (D1) and pool (R2) reachable, with timings. 503 when one is not. What <em>online</em> in the header means.</td></tr>
       <tr><td><code>GET /stats</code></td><td>Everything the overview shows in one response: rings, coverage, pool totals, chart series, the latest metrics snapshot, recent journal entries. Cached 30 s.</td></tr>
       <tr><td><code>GET /releases/:ring?fields=summary&amp;arch=</code></td><td>The ring's current release and a light row per package (name, version, arch, filename, sha256, sizes, description). This is what <code>omarchy-cli status</code> reads.</td></tr>
@@ -52,9 +53,10 @@ curl -s  https://pool.firemanxbr.org/x86_64/omarchy-core-stable.db | tar -tz | h
     <p class="sub">Bearer <code>PUBLISH_TOKEN</code>. Used by <code>pkg-repo</code> from GitHub Actions; documented in the repository's <a href="https://github.com/firemanxbr/omarchy-pool/blob/main/docs/ARCHITECTURE.md">architecture notes</a>.</p>
     <div class="table-wrap"><table><thead><tr><th>Endpoint</th><th>What it does</th></tr></thead><tbody>
       <tr><td><code>PUT /pool/:sha256?filename=&amp;arch=</code> · <code>/sig</code> · <code>/multipart</code></td><td>Store a package object (integrity-checked, never overwritten) and its upstream signature.</td></tr>
+      <tr><td><code>POST /pool/:sha256/sign?filename=&amp;arch=</code></td><td>The pool signs a package it built (source <em>factory</em>) with its own key; the key never leaves the service.</td></tr>
       <tr><td><code>POST /packages?source=&amp;arch=</code> · <code>POST /packages/known</code></td><td>Index a manifest; ask which sha256s are already indexed.</td></tr>
       <tr><td><code>POST /releases</code></td><td>Create, promote or roll back a release (an index write).</td></tr>
-      <tr><td><code>PUT /releases/:id/artifacts/:kind?repo=&amp;arch=</code></td><td>Publish a rendered database or its signature beside the packages.</td></tr>
+      <tr><td><code>PUT /releases/:id/artifacts/:kind?repo=&amp;arch=</code></td><td>Publish a rendered database beside the packages; the pool signs it as it stores it.</td></tr>
       <tr><td><code>POST /events</code> · <code>POST /pool/gc</code></td><td>Record a journal entry; run retention.</td></tr>
     </tbody></table></div>
   </section>

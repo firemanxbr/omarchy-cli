@@ -23,5 +23,8 @@
   },
   "overrides": {
     "sharp": "^0.35.4"
+  },
+  "dependencies": {
+    "openpgp": "^6.3.1"
   }
 }

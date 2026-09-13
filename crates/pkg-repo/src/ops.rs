@@ -103,6 +103,9 @@ pub fn publish(
     archives: &[PathBuf],
 ) -> Result<()> {
     let started = Instant::now();
+    // The pool's own key signs what it stores when it has one; a local .sig
+    // is the transition path for publishers running against an older pool.
+    let pool_signs = api.signing()?;
     let mut added = Vec::new();
     let mut bytes = 0u64;
     for archive in archives {
@@ -137,7 +140,9 @@ pub fn publish(
             );
             api.upload_pool(&sha, &manifest.filename, arch, archive)?;
             let sig = PathBuf::from(format!("{}.sig", archive.display()));
-            if sig.exists() {
+            if pool_signs {
+                api.sign_pool(&sha, &manifest.filename, arch)?;
+            } else if sig.exists() {
                 api.upload_pool_signature(&sha, &manifest.filename, arch, &sig)?;
             }
             api.index_manifest(&manifest, source, arch)?;
@@ -245,8 +250,13 @@ pub fn releases(api: &Api, ring: &str) -> Result<()> {
 }
 
 /// Renders the ring's databases for one architecture; returns the repositories written.
+///
+/// The pool signs the databases as it stores them when it holds the key;
+/// `key` (a local `GnuPG` key id) only signs against a pool without one.
 pub fn render(api: &Api, ring: &str, arch: &str, key: Option<&str>) -> Result<Vec<String>> {
     let started = Instant::now();
+    let pool_signs = api.signing()?;
+    let key = if pool_signs { None } else { key };
     let view = api.release(ring, arch)?;
 
     let mut by_source: BTreeMap<String, Vec<PackageManifest>> = BTreeMap::new();
@@ -301,7 +311,7 @@ pub fn render(api: &Api, ring: &str, arch: &str, key: Option<&str>) -> Result<Ve
     );
     api.post_event(&serde_json::json!({
         "kind": "render", "ring": ring, "status": "ok",
-        "summary": format!("{ring}#{}: {} database(s) rendered{}", view.release.seq, rendered.len(), if key.is_some() { ", signed" } else { "" }),
+        "summary": format!("{ring}#{}: {} database(s) rendered{}", view.release.seq, rendered.len(), if pool_signs || key.is_some() { ", signed" } else { "" }),
         "duration_ms": millis(took),
         "payload": { "release_id": view.release.id, "repos": rendered.iter().map(|(r, n)| serde_json::json!({"repo": r, "packages": n})).collect::<Vec<_>>() },
     }))?;
