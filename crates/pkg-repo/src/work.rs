@@ -382,6 +382,12 @@ fn sync_job(opts: &WorkOptions, job: &Api, task: &Task) -> Result<Outcome> {
     let mut rendered = Vec::new();
     if report.release.is_some() {
         rendered = ops::render(job, &o.ring, &o.arch, opts.sign.as_deref())?;
+        let other = if o.arch == "aarch64" {
+            "x86_64"
+        } else {
+            "aarch64"
+        };
+        rendered.extend(ops::render(job, &o.ring, other, opts.sign.as_deref())?);
     }
     Ok(Outcome {
         summary: format!(
@@ -535,7 +541,15 @@ fn build_job(opts: &WorkOptions, job: &Api, task: &Task) -> Result<Outcome> {
         )),
         &pkgs,
     )?;
-    let rendered = ops::render(job, "edge", &task.arch, opts.sign.as_deref())?;
+    // A release covers both architectures: render both so the head is
+    // complete (the other architecture's databases do not change content).
+    let mut rendered = ops::render(job, "edge", &task.arch, opts.sign.as_deref())?;
+    let other = if task.arch == "aarch64" {
+        "x86_64"
+    } else {
+        "aarch64"
+    };
+    rendered.extend(ops::render(job, "edge", other, opts.sign.as_deref())?);
     let main = pkgs
         .iter()
         .find(|p| {

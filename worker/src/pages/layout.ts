@@ -279,14 +279,12 @@ export interface PageOptions {
 }
 
 export const NAV: { key: PageOptions["active"]; href: string; label: string }[] = [
-  { key: "overview", href: "/", label: "Overview" },
   { key: "packages", href: "/packages", label: "Packages" },
   { key: "security", href: "/security", label: "Security" },
   { key: "factory", href: "/factory", label: "Factory" },
   { key: "contribute", href: "/contribute", label: "Contribute" },
   { key: "review", href: "/review", label: "Review" },
   { key: "get-started", href: "/get-started", label: "Get started" },
-  { key: "pipeline", href: "/#pipeline", label: "Pipeline" },
   { key: "how-it-works", href: "/how-it-works", label: "How it works" },
 ];
 
