@@ -1,16 +1,23 @@
-# A contributor's worker: `podman compose up -d` (or docker compose).
-# Every restart is a new container from the signed image — one task each.
+# A worker: `docker compose up -d` (or podman compose). Every restart is a
+# new container from the signed image. A contributor's worker builds one
+# task per container; a maintainer's (a registration the project trusted)
+# also needs the runtime's socket — see the commented lines and /docs/workers.
 services:
   worker:
-    image: ghcr.io/firemanxbr/omarchy-packaging:latest
+    image: ghcr.io/firemanxbr/omarchy-worker:latest
     restart: unless-stopped
     environment:
-      WORKER_ID: ${WORKER_ID:?from POST /api/v1/factory/workers}
-      OMARCHY_WORKER_TOKEN: ${OMARCHY_WORKER_TOKEN:?the worker token, shown once}
+      OMARCHY_WORKER_TOKEN: ${OMARCHY_WORKER_TOKEN:?the worker token from the Contributors page, shown once}
       WORKER_LABELS: '{"where":"${WHERE:-my-machine}"}'
       # 1 = also build other contributors' packages (donated compute); default: yours only.
       WORKER_SHARED: ${WORKER_SHARED:-0}
-      # Optional: your own agent drafts and corrects PKGBUILDs (your tokens, your cost).
+      # Optional: your own agent drafts and corrects PKGBUILDs (your key, your cost).
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       # Optional: raises GitHub API limits when drafting.
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      # Project workers only: a directory with the SAME path on the host and in the container.
+      # OMARCHY_WORK_DIR: ${HOME}/omarchy-worker
+    # Project workers only: the runtime's socket, and that directory.
+    # volumes:
+    #   - /var/run/docker.sock:/var/run/docker.sock
+    #   - ${HOME}/omarchy-worker:${HOME}/omarchy-worker

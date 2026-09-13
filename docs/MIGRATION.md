@@ -232,7 +232,7 @@ from the scheduler. Point a test machine at `stable` with *Get started* and run
 ## F2. The factory
 
 `factory/` (worker script, image, PKGBUILDs, the governance file), the
-`factory-update.yml` and `factory-image.yml` workflows and the
+`factory-update.yml` workflow, the `worker-image` jobs of `release.yml` and the
 package-request issue form are a **tenant** of this repository, not part of
 the pool: they should move to their own repository once a home exists (the
 contract is in [factory/README.md](../factory/README.md), *The contract*).
@@ -242,7 +242,7 @@ Until then, moving the pool moves them too:
   and `npx wrangler r2 bucket lifecycle add omarchy-factory-staging --name
   expire-30d --prefix staging/ --expire-days 30` (binding `STAGING` in
   `wrangler.toml`). The worker image lives at
-  `ghcr.io/<owner>/omarchy-packaging` (`factory-image.yml`, `IMAGE` env);
+  `ghcr.io/<owner>/omarchy-worker` (the `worker-image` jobs of `release.yml`);
   the compose file and the README name it.
 - Sign in with GitHub: a GitHub OAuth App on the new organisation
   (callback `https://<dashboard>/auth/github/callback`): client id in

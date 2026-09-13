@@ -144,9 +144,10 @@ jobs:
           gh release create "$VERSION" "${args[@]}" dist/* docs/omarchy-staging.pub.asc
 
   worker-image:
-    name: Pool worker image (${{ matrix.arch }})
-    # The project worker in a container, built from the binaries this
-    # release just published and tagged with its version; signed keyless.
+    name: Worker image (${{ matrix.arch }})
+    # The one image every worker runs — a contributor's or a maintainer's,
+    # the registration decides — built from the binaries this release just
+    # published and tagged with its version; signed keyless.
     needs: [version, publish]
     permissions:
       contents: read
@@ -157,13 +158,13 @@ jobs:
         include:
           - arch: x86_64
             runner: ubuntu-latest
-            base: docker.io/library/archlinux:base
+            base: docker.io/library/archlinux:base-devel
           - arch: aarch64
             runner: ubuntu-24.04-arm
-            base: docker.io/menci/archlinuxarm:base
+            base: docker.io/menci/archlinuxarm:base-devel
     runs-on: ${{ matrix.runner }}
     env:
-      IMAGE: ghcr.io/${{ github.repository_owner }}/omarchy-pool-worker
+      IMAGE: ghcr.io/${{ github.repository_owner }}/omarchy-worker
       VERSION: ${{ needs.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
@@ -174,14 +175,14 @@ jobs:
         run: |
           set -euo pipefail
           tag="$IMAGE:${{ matrix.arch }}"
-          docker build -f factory/image/Containerfile.pool-worker --build-arg BASE="${{ matrix.base }}" --build-arg ARCH="${{ matrix.arch }}" --build-arg POOL_RELEASE="$VERSION" \
+          docker build -f factory/image/Containerfile --build-arg BASE="${{ matrix.base }}" --build-arg ARCH="${{ matrix.arch }}" --build-arg POOL_RELEASE="$VERSION" \
             -t "$tag" -t "$tag-$VERSION" .
           docker push "$tag"; docker push "$tag-$VERSION"
           digest="$(docker inspect --format='{{index .RepoDigests 0}}' "$tag" | cut -d@ -f2)"
           cosign sign --yes "$IMAGE@$digest"
 
   worker-image-manifest:
-    name: Pool worker image (both architectures)
+    name: Worker image (both architectures)
     needs: [version, worker-image]
     permissions:
       contents: read
@@ -189,7 +190,7 @@ jobs:
       id-token: write
     runs-on: ubuntu-latest
     env:
-      IMAGE: ghcr.io/${{ github.repository_owner }}/omarchy-pool-worker
+      IMAGE: ghcr.io/${{ github.repository_owner }}/omarchy-worker
       VERSION: ${{ needs.version.outputs.version }}
     steps:
       - uses: sigstore/cosign-installer@v3

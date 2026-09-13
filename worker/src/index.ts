@@ -332,6 +332,11 @@ async function api(method: string, path: string, url: URL, request: Request, env
   }
   if (method === "GET" && path === "/factory/review") return handleReviewList(env);
   if (method === "GET" && path === "/factory/approvals") return handleApprovals(env);
+  // A worker asks what its registration is (the image decides its mode from this).
+  if (method === "GET" && path === "/factory/workers/self") {
+    const w = await workerOf(request, env);
+    return w ? json({ id: w.id, arch: w.arch, trust: w.trust, owner: w.owner, mode: w.mode }, 200, { "cache-control": "no-store" }) : json({ error: "a worker token is required" }, 401);
+  }
   if (method === "GET" && path === "/factory/me") {
     const c = await contributorOf(request, env);
     return c ? handleMe(c, env) : json({ error: "a contributor token is required (POST /factory/register)" }, 401);

@@ -52,7 +52,11 @@ page and at `GET /api/v1/factory/groups`.
 - Approves or rejects the staged builds of their groups, with the evidence
   (PKGBUILD, log, PKGINFO) in front of them. An approval queues the
   project's own rebuild; users only ever get what the project built and
-  signed.
+  signed. **Never their own package**: a maintainer who brought a package
+  is its contributor, and another maintainer of the group approves it
+  (conflict of interest, refused by the pool). While a group has a single
+  maintainer there is nobody else — that maintainer may approve their own,
+  and the approval says so.
 - Reviews pull requests touching `factory/pkgbuilds/<group>/` (a new recipe
   of the project's own, a version bump).
 - Trusts workers as project workers (`POST /factory/workers/:id/trust`).
@@ -90,6 +94,14 @@ bypassed review. The exception ends the moment a second maintainer exists.
 
 ## Workers, compute and agents
 
+- **One image, one command, for everyone**: `ghcr.io/firemanxbr/omarchy-worker`.
+  There is no technical difference between a contributor's container and a
+  maintainer's; the registration behind the token decides. Community trust
+  (every registration starts here) builds the owner's packages inside the
+  container and never sees a package in review; project trust (a
+  maintainer's decision on the registration) runs the pool's jobs and the
+  rebuild of approved packages in fresh sibling containers. A maintainer
+  who also contributes registers a second, untrusted worker.
 - A registered worker builds **its owner's packages**. Donating it to
   anyone's is decided where it runs — `WORKER_SHARED=1` on the container,
   `--shared` on `pkg-repo work` — never at registration, so nobody's laptop
