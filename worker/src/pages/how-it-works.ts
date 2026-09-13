@@ -7,7 +7,7 @@ import type { RunningVersion } from "../meta";
 
 /** Flow diagram in the page's own palette (inline SVG, scales with the column). */
 const DIAGRAM = String.raw`
-<svg viewBox="0 0 1320 470" xmlns="http://www.w3.org/2000/svg" font-family="JetBrains Mono, ui-monospace, monospace" font-size="12">
+<svg viewBox="0 0 1320 560" xmlns="http://www.w3.org/2000/svg" font-family="JetBrains Mono, ui-monospace, monospace" font-size="12">
   <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#8b93b8"/></marker></defs>
   <style>
     .box{fill:#1f2230;stroke:#2a2e3f;stroke-width:1.2}.src{fill:#13141c;stroke:#2a2e3f}.green{stroke:#9ece6a}.blue{stroke:#7aa2f7}.amber{stroke:#e0af68}
@@ -15,18 +15,23 @@ const DIAGRAM = String.raw`
     .ln{fill:none;stroke:#8b93b8;stroke-width:1.4;marker-end:url(#a)}
   </style>
   <!-- sources -->
-  <rect class="box src" x="20" y="30" width="300" height="66" rx="3"/><text class="t" x="34" y="52">Arch Linux · x86_64</text><text class="s" x="34" y="72">core · extra · multilib</text><text class="d" x="34" y="88">mirror.omarchy.org · Arch keyring</text>
-  <rect class="box src" x="20" y="110" width="300" height="66" rx="3"/><text class="t" x="34" y="132">Arch Linux ARM · aarch64</text><text class="s" x="34" y="152">core · extra · alarm</text><text class="d" x="34" y="168">os.archlinuxarm.org · ALARM keyring</text>
+  <rect class="box src" x="20" y="30" width="300" height="66" rx="3"/><text class="t" x="34" y="52">Arch Linux · x86_64</text><text class="s" x="34" y="72">core · extra · multilib</text><text class="d" x="34" y="88">mirror.omarchy.org · archlinux-keyring</text>
+  <rect class="box src" x="20" y="110" width="300" height="66" rx="3"/><text class="t" x="34" y="132">Arch Linux ARM · aarch64</text><text class="s" x="34" y="152">core · extra · alarm</text><text class="d" x="34" y="168">os.archlinuxarm.org · archlinuxarm-keyring</text>
   <rect class="box src" x="20" y="190" width="300" height="66" rx="3"/><text class="t" x="34" y="212">Omarchy (OPR) · both</text><text class="s" x="34" y="232">edge / rc / stable channels</text><text class="d" x="34" y="248">pkgs.omarchy.org · Omarchy key</text>
   <rect class="box src" x="20" y="270" width="300" height="66" rx="3"/><text class="t" x="34" y="292">chaotic-aur · x86_64 <tspan class="d">optional</tspan></text><text class="s" x="34" y="312">prebuilt AUR, unclaimed names only</text><text class="d" x="34" y="328">builds.garudalinux.org · chaotic key</text>
-  <text class="d" x="20" y="366">upstream repositories, read every hour</text>
-  <path class="ln" d="M320 63 L350 63 L350 140 L378 140"/><path class="ln" d="M320 143 L350 143 L350 140 L378 140"/><path class="ln" d="M320 223 L350 223 L350 140 L378 140"/><path class="ln" d="M320 303 L350 303 L350 140 L378 140"/>
+  <rect class="box src blue" x="20" y="350" width="300" height="66" rx="3"/><text class="t" x="34" y="372">Factory · both</text><text class="s" x="34" y="392">contributors build, maintainers approve</text><text class="d" x="34" y="408">staging → edge as source factory</text>
+  <text class="d" x="20" y="446">upstream, read every hour · the factory, on approval</text>
+  <path class="ln" d="M320 63 L350 63 L350 140 L378 140"/><path class="ln" d="M320 143 L350 143 L350 140 L378 140"/><path class="ln" d="M320 223 L350 223 L350 140 L378 140"/><path class="ln" d="M320 303 L350 303 L350 140 L378 140"/><path class="ln" d="M320 383 L350 383 L350 140 L378 140"/>
   <!-- verify -->
-  <rect class="box amber" x="380" y="98" width="230" height="84" rx="3"/><text class="t" x="394" y="124">Verify</text><text class="s" x="394" y="146">sha256 from the upstream db</text><text class="s" x="394" y="164">signature by the project's key</text>
-  <path class="ln" d="M610 140 L658 140"/>
+  <rect class="box amber" x="380" y="98" width="250" height="84" rx="3"/><text class="t" x="394" y="124">Verify</text><text class="s" x="394" y="146">sha256 from the upstream db</text><text class="s" x="394" y="164">signature by the project's key</text>
+  <path class="ln" d="M630 140 L658 140"/>
   <!-- pool + index -->
-  <rect class="box green" x="660" y="34" width="330" height="96" rx="3"/><text class="t" x="674" y="58">Pool · R2</text><text class="s" x="674" y="80">one object per sha256, immutable</text><text class="s" x="674" y="98">the package and its upstream .sig</text><text class="d" x="674" y="118">pool.firemanxbr.org/&lt;arch&gt;/</text>
-  <rect class="box blue" x="660" y="150" width="330" height="104" rx="3"/><text class="t" x="674" y="174">Index · D1</text><text class="s" x="674" y="196">manifests, dependencies, provides,</text><text class="s" x="674" y="214">loaded sonames, file lists</text><text class="d" x="674" y="240">pkgs.firemanxbr.org/api/v1</text>
+  <rect class="box green" x="660" y="34" width="330" height="96" rx="3"/><text class="t" x="674" y="58">Pool · R2</text><text class="s" x="674" y="80">one object per sha256, immutable</text><text class="s" x="674" y="98">the package and its upstream .sig</text><text class="d" x="674" y="118">pool/&lt;arch&gt;/&lt;filename&gt; · never rewritten</text>
+  <rect class="box blue" x="660" y="150" width="330" height="104" rx="3"/><text class="t" x="674" y="174">Index · D1</text><text class="s" x="674" y="196">manifests, dependencies, provides,</text><text class="s" x="674" y="214">loaded sonames, file lists</text><text class="d" x="674" y="240">releases: append-only pinned selections</text>
+  <!-- security -->
+  <path class="ln" d="M825 254 L825 268"/>
+  <rect class="box amber" x="660" y="270" width="330" height="84" rx="3"/><text class="t" x="674" y="294">Security · every 3 h</text><text class="s" x="674" y="314">Arch + Debian trackers, CISA KEV, EPSS</text><text class="s" x="674" y="332">advisories follow the dependency graph</text><text class="d" x="674" y="348">clean newer version in edge → fast-track</text>
+  <path class="ln" d="M990 312 L1028 312 L1028 229 L1038 229"/>
   <!-- rings -->
   <path class="ln" d="M990 202 L1015 202 L1015 189 L1038 189"/>
   <rect class="box" x="1040" y="40" width="260" height="58" rx="3"/><text class="t" x="1054" y="62">edge</text><text class="s" x="1054" y="84">follows upstream, hourly</text>
@@ -34,14 +39,15 @@ const DIAGRAM = String.raw`
   <rect class="box green" x="1040" y="200" width="260" height="58" rx="3"/><text class="t" x="1054" y="222">stable <tspan class="g" font-size="11">recommended</tspan></text><text class="s" x="1054" y="244">one-day soak · auto rollback</text>
   <path class="ln" d="M1170 98 L1170 118"/><path class="ln" d="M1170 178 L1170 198"/>
   <text class="d" x="1040" y="284">a ring = a pinned selection;</text><text class="d" x="1040" y="298">promotion = index write, no bytes copied</text>
+  <text class="d" x="1040" y="330">edge → rc → stable: 48 hours,</text><text class="d" x="1040" y="344">evidence-gated, rolled back on failure</text>
   <!-- render -->
-  <rect class="box" x="660" y="300" width="330" height="70" rx="3"/><text class="t" x="674" y="324">Render + sign</text><text class="s" x="674" y="344">omarchy-&lt;source&gt;-&lt;ring&gt;.db + .files</text><text class="s" x="674" y="360">per arch, beside the packages</text>
-  <path class="ln" d="M1040 229 L1015 229 L1015 335 L992 335"/>
-  <text class="d" x="660" y="396">GitHub Actions runs every step; each run is linked from the journal</text>
+  <rect class="box" x="660" y="380" width="330" height="70" rx="3"/><text class="t" x="674" y="404">Render + sign</text><text class="s" x="674" y="424">omarchy-&lt;source&gt;-&lt;ring&gt;.db + .files</text><text class="s" x="674" y="440">per arch, beside the packages</text>
+  <path class="ln" d="M1040 229 L1015 229 L1015 415 L992 415"/>
+  <text class="d" x="660" y="476">the pool's own scheduler decides when; GitHub Actions and workers anywhere do the work</text>
   <!-- user -->
-  <path class="ln" d="M660 335 L640 335 L640 421 L632 421"/>
-  <rect class="box green" x="330" y="388" width="300" height="66" rx="3"/><text class="t" x="344" y="410">Your machine · pacman</text><text class="s" x="344" y="430">[omarchy-core-stable] → pool/$arch</text><text class="d" x="344" y="446">plain HTTP, static files, any pacman</text>
-  <text class="d" x="20" y="412">one Server = line,</text><text class="d" x="20" y="427">both architectures,</text><text class="d" x="20" y="442">the ring you choose</text>
+  <path class="ln" d="M660 415 L640 415 L640 503 L632 503"/>
+  <rect class="box green" x="330" y="470" width="300" height="66" rx="3"/><text class="t" x="344" y="492">Your machine · pacman</text><text class="s" x="344" y="512">[omarchy-core-stable] → pool/$arch</text><text class="d" x="344" y="528">plain HTTP · static files · signed dbs</text>
+  <text class="d" x="20" y="494">one Server = line,</text><text class="d" x="20" y="509">both architectures,</text><text class="d" x="20" y="524">the ring you choose</text>
 </svg>`;
 
 const BODY = String.raw`
@@ -75,6 +81,11 @@ const BODY = String.raw`
   <section>
     <h2>Security, with the graph</h2>
     <p class="sub">Every three hours the objects the rings serve are matched against the Arch Security Tracker (exact, Arch's own versions), the Debian Security Tracker (same upstream projects, for what Arch has not triaged yet — with a confidence level, never as a certainty), CISA KEV and EPSS. Because the index knows what every binary loads, an advisory on a library also marks what <em>uses</em> it: the <a href="/security">Security page</a> shows the ring, the package page shows the chain, the graph marks the nodes.</p>
+  </section>
+
+  <section>
+    <h2>The factory: packages nobody ships yet</h2>
+    <p class="sub">Three personas, three costs. <b>Users</b> only see the pool: signed databases, health checks, 48 hours from <code>edge</code> to <code>stable</code>, rollback. <b>Contributors</b> have something to package: they register it (a GitHub login and the project's URL — nobody to ask, nothing spent by the project), run the signed <code>omarchy-packaging</code> container wherever they like, with their own agent keys, and the build lands in <em>their</em> staging workspace with the PKGBUILD and the log. <b>Maintainers</b>, by area, approve staged builds with the evidence in front of them; an approved package enters <code>edge</code> as source <code>factory</code>, rebuilt on project infrastructure, and takes the same 48-hour path as everything else. New upstream releases of an approved package are bumped automatically. Every stage is on the <a href="/factory">Factory</a> page.</p>
   </section>
 
   <section>
