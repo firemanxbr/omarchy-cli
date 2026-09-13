@@ -52,9 +52,9 @@ DEFAULT_RING = "stable"
 # Task kinds the scheduler creates as pulled jobs (pkg-repo work) instead of
 # GitHub workflows: sync, promote, render, health, security, metrics, gc.
 JOB_KINDS = "gc,health,sync,promote,security,metrics,enqueue"
-# "Sign in with GitHub": the OAuth App "omarchy-pool" (owned by firemanxbr;
-# the secret is a Worker secret, GITHUB_OAUTH_CLIENT_SECRET). Empty = the
-# token form only.
+# "Sign in with GitHub": the OAuth App "omarchy-pool" (registered under the
+# account that runs the staging deployment; the secret is a Worker secret,
+# GITHUB_OAUTH_CLIENT_SECRET). Empty = the token form only.
 GITHUB_OAUTH_CLIENT_ID = "Ov23li8tzO3kMFQUFqnQ"
 # Static origin for packages and databases (the R2 bucket's custom domain).
 POOL_URL = "https://pool.firemanxbr.org"

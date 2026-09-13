@@ -158,9 +158,8 @@ pkg-repo work --worker-token omw_… --labels '{"where":"droplet-1"}'
 
 The worker is registered like any other (`POST /factory/workers`) and a
 maintainer promotes it: `POST /factory/workers/<id>/trust {"trust":"project"}`
-with a maintainer's contributor token; an admin names maintainers with
-`PATCH /factory/contributors/<login> {"role":"maintainer","areas":[…]}`
-Every task
+with a maintainer's contributor token; maintainers are named by
+`factory/MAINTAINERS.toml` (docs/GOVERNANCE.md), nowhere else. Every task
 runs with a per-job token the pool issues at claim time (SECURITY.md);
 the worker's own token only claims. Kinds not listed in `JOB_KINDS` would
 run as GitHub workflows, dispatched by the same scheduler; today `sync`,
@@ -189,7 +188,9 @@ in with GitHub — approves or rejects:
   note in its detail, the staged objects expire with the rest.
 
 **Sign in with GitHub** (the header's *Sign in*) is the GitHub OAuth App
-`omarchy-pool` (firemanxbr's *Settings → Developer settings → OAuth Apps*;
+`omarchy-pool` (registered under the GitHub account that runs the staging
+deployment, *Settings → Developer settings → OAuth Apps*; it moves with the
+project, MIGRATION part C;
 callback `https://omarchy-pool.firemanxbr.org/auth/github/callback`,
 homepage the dashboard, no device flow, expiring user tokens on — the
 token is used once, to read the login). Its client id is
@@ -215,15 +216,20 @@ agree). See [GOVERNANCE.md](GOVERNANCE.md). `GET /api/v1/factory/groups` and
 What no upstream ships is built from `factory/pkgbuilds` by workers that pull
 tasks from the pool ([factory/README.md](../factory/README.md)). Day to day:
 
-- **Add a package**: file a *Package request* issue with the project URL —
-  the factory drafts the PKGBUILD, builds it as a dry run on both
-  architectures and opens the pull request; the group's CODEOWNERS review it;
-  merging queues the builds. Set the `ANTHROPIC_API_KEY` secret for
-  Claude-drafted PKGBUILDs (without it a template handles Rust, Go, CMake,
-  Meson, autotools and release binaries). A hand-written pull request with
-  `factory/pkgbuilds/<group>/<name>/PKGBUILD` works the same way.
-- **Rebuild**: *Actions → Factory enqueue → Run workflow* with `group/name`
-  (`override` builds even a name upstream ships).
+- **Add a package**: sign in and register it on the Contributors page, run
+  your worker, and a maintainer of the group reviews the staged build
+  (docs/GOVERNANCE.md). A *Package request* issue does the same for someone
+  without a worker: the brain reads open issues every ten minutes and queues
+  a community build with a drafted PKGBUILD (`draft:<url>@latest`) for the
+  issue's author; a *shared* worker whose owner runs an agent takes it, and
+  the request shows on the Factory page until then. The project's own
+  recipes live in `factory/pkgbuilds/<group>/`: a pull request the group's
+  maintainers review; the merge queues the build (the hourly `enqueue` job,
+  or `pkg-repo job enqueue` right away).
+- **Rebuild**: `curl -X POST $API/factory/enqueue` with a maintainer's token
+  (`{"name","group","pkgbuild_ref":"<commit>","version","arches"}`;
+  `override` builds even a name upstream ships), or approve a staged build
+  again on the Review page.
 - **A failed task**: the Factory page shows the error and the log tail
   (`GET /api/v1/factory/tasks/:id` has the full tail). Fix the PKGBUILD in a
   pull request; merging queues it again.
@@ -232,13 +238,23 @@ tasks from the pool ([factory/README.md](../factory/README.md)). Day to day:
   Mac (`pkg-repo work`, one process per architecture). No GitHub runner
   builds packages; a queued build waits for a project worker. Workers
   hold no key: the pool signs what they publish.
-- **New upstream versions**: `factory-update.yml` (daily, 05:45 UTC from the
-  scheduler) checks each PKGBUILD's GitHub upstream, bumps `pkgver`
-  (`pkgrel=1`), refreshes checksums with `updpkgsums` and opens one pull
-  request per package with auto-merge on — CI is the gate, the merge queues
-  the build. It relies on two repository settings: *Actions may create pull
-  requests* (`can_approve_pull_request_reviews`) and *allow auto-merge*.
-  Packages without a GitHub `url=` (vi) are skipped and bumped by hand.
+- **New upstream versions** — two paths, one rule (evidence before review):
+  - a package a contributor registered: once a day (05:45 UTC) the brain
+    asks GitHub for each approved package's latest release and queues a
+    community build from the approved PKGBUILD with `pkgver` moved to the
+    tag (`bump:<task>@<tag>`, `updpkgsums` in the worker). The owner's
+    worker has **14 days**; then any `--shared` worker may build it. A
+    maintainer reviews the staged build like the first one. **30 days**
+    without a build and the package is *unmaintained* (Factory page badge,
+    `bump` journal line): no more bumps until its owner builds again, or a
+    maintainer removes the registration (`DELETE /factory/packages/<name>`)
+    so someone else can take it;
+  - a recipe in `factory/pkgbuilds/<group>/`: `factory-update.yml` (daily,
+    05:45 UTC from the scheduler) bumps `pkgver`, refreshes checksums and
+    opens one pull request per package for a maintainer of the group to
+    review — never auto-merged; the merge queues the build. It relies on the
+    repository setting *Actions may create pull requests*. Packages without
+    a GitHub `url=` (vi) are bumped by hand.
 - **Contributors' builds** land in the `omarchy-factory-staging` bucket
   (`staging/<login>/<package>/<task>/`, lifecycle rule: 30 days), listed on
   the Factory page with their PKGBUILD and log; the packages themselves are

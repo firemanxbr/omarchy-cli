@@ -11,8 +11,11 @@
 # maintainer approves (CODEOWNERS + branch protection; never auto-merged).
 # The pool reads main every ten minutes and applies it.
 #
+# Nobody is above this file: no owner, no administrator. The project
+# belongs to its maintainers and contributors.
+#
 # Bootstrap: while there is a single maintainer, that maintainer merges
-# the first promotion with an admin bypass, which GitHub records as such.
+# the first promotion alone; GitHub records the bypassed review.
 
 [groups.omarchy]
 description = "What Omarchy ships or depends on: the desktop, its tools and their dependencies"

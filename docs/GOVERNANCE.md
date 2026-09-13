@@ -6,8 +6,10 @@ Two roles, one file, decisions by pull request.
   runs workers on their own machines, follows their builds. Nothing to ask,
   nothing spent by the project.
 - The logins listed under a group in [`factory/MAINTAINERS.toml`](../factory/MAINTAINERS.toml)
-  are the **maintainers** of that group. There is no admin and no API that
-  grants a role: the pool reads the file on `main` every ten minutes and
+  are the **maintainers** of that group. Nobody is above that — no owner,
+  no administrator, no API that grants a role: the project belongs to its
+  maintainers and contributors, and the pool reads the file on `main` every
+  ten minutes and
   applies it (`worker/src/governance.ts`); every change is a `role` line in
   the journal.
 
@@ -58,9 +60,8 @@ that pull request to regenerate `CODEOWNERS`; CI fails when the two
 disagree.
 
 **Bootstrap.** While the project has a single maintainer there is nobody
-else to approve: that maintainer merges with an administrator bypass, which
-GitHub records as such. The exception ends the moment a second maintainer
-exists.
+else to approve: that maintainer merges alone, and GitHub records the
+bypassed review. The exception ends the moment a second maintainer exists.
 
 ## Workers, compute and agents
 
@@ -77,6 +78,19 @@ exists.
 - **Package requests** (a GitHub issue) become a task for a *shared*
   community worker whose owner runs an agent. No such worker, no draft: the
   request waits, visibly, on the Factory page.
+
+## Bumps and packages nobody builds
+
+A new upstream release of an approved package is built the way the first
+version was — on the owner's worker, as evidence a maintainer reviews. Once
+a day the pool queues that build (`bump:<task>@<tag>`: the approved
+PKGBUILD with `pkgver` moved to the tag). The owner's worker has **14
+days**; after that any `--shared` worker may build it. **30 days** without
+a build and the package is *unmaintained*: no more bumps until its owner
+builds again, or a maintainer of the group removes the registration so
+someone else can take the name. The project's own recipes
+(`factory/pkgbuilds/<group>/`) are bumped by pull request, reviewed by the
+group's maintainers, never auto-merged.
 
 ## The record
 

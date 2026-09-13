@@ -40,6 +40,7 @@ log() { printf '[%s] %s\n' "$(date -u +%H:%M:%S)" "$*" >&2; }
 #   <commit>                   factory/pkgbuilds/<group>/<name> in omarchy-pool at that commit
 #   <url>@<tag>:<path>         the contributor's own repository at a tag (path is the PKGBUILD or its directory)
 #   draft:<url>@<tag|latest>   drafted here by factory/bin/draft-pkgbuild (the contributor's agent key, if any)
+#   bump:<task>@<tag>          the PKGBUILD approved in <task>, pkgver moved to <tag>, checksums refreshed
 #   staging:<task>             the PKGBUILD a contributor's build staged, approved by a maintainer (the project rebuild)
 prepare_container() {
   # pacman's download sandbox (seccomp + landlock) has no place in an
@@ -85,6 +86,17 @@ fetch_pkgbuild() { # name group ref → /build/pkg holds the PKGBUILD directory
     echo "==> PKGBUILD from staged task $from (approved)"
     mkdir -p /build/pkg
     curl -sSf "${OMARCHY_API:-https://pkgs.firemanxbr.org}/api/v1/factory/tasks/$from/artifacts/PKGBUILD" -o /build/pkg/PKGBUILD
+  elif [[ "$ref" == bump:* ]]; then
+    # A new upstream release of an approved package: the PKGBUILD a
+    # maintainer approved, with pkgver moved to the tag and pkgrel reset;
+    # the checksums are refreshed before the build (updpkgsums).
+    local spec from tag ver
+    spec="${ref#bump:}"; from="${spec%@*}"; tag="${spec#*@}"; ver="${tag#v}"; ver="${ver#V}"
+    echo "==> PKGBUILD from approved task $from, bumped to $tag"
+    mkdir -p /build/pkg
+    curl -sSf "${OMARCHY_API:-https://pkgs.firemanxbr.org}/api/v1/factory/tasks/$from/artifacts/PKGBUILD" -o /build/pkg/PKGBUILD
+    sed -i -e "s/^pkgver=.*/pkgver=${ver//\//\\/}/" -e "s/^pkgrel=.*/pkgrel=1/" /build/pkg/PKGBUILD
+    chown -R builder:builder /build/pkg && (cd /build/pkg && sudo -u builder updpkgsums) || echo "updpkgsums failed; the build will tell"
   elif [[ "$ref" == draft:* ]]; then
     local spec url
     spec="${ref#draft:}"; url="${spec%@*}"

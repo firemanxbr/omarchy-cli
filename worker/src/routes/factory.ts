@@ -275,8 +275,13 @@ export async function handleClaim(request: Request, env: Env, actor: Actor): Pro
   if (trust === "project") {
     scope += ` AND (kind != 'build' OR trust = 'project')`;
   } else {
+    // The owner's worker takes the owner's tasks; a donated worker takes
+    // anyone's once shared_after has passed (at once when it is unset).
     scope += ` AND trust = 'community'`;
-    if (!shared) {
+    if (shared) {
+      scope += ` AND (owner = ? OR shared_after IS NULL OR shared_after <= ?)`;
+      binds.push(actor.w.owner ?? "-", now());
+    } else {
       scope += ` AND owner = ?`;
       binds.push(actor.w.owner ?? "-");
     }
@@ -363,9 +368,9 @@ export async function handleComplete(id: number, request: Request, env: Env, act
     const missing = [b.filename, "PKGBUILD", "build.log"].filter((f) => !have.includes(f));
     if (missing.length) return json({ error: `upload ${missing.join(", ")} to staging first (PUT /factory/tasks/${id}/artifacts/<filename>)`, have }, 409);
     await env.DB.prepare(
-      "UPDATE build_tasks SET status = 'staged', finished_at = ?, result_sha256 = ?, result_filename = ?, result_version = ?, duration_ms = ?, log_tail = ?, staged_prefix = ?, lease_owner = NULL, lease_expires_at = NULL WHERE id = ?",
+      "UPDATE build_tasks SET status = 'staged', finished_at = ?, result_sha256 = ?, result_filename = ?, result_version = ?, version = COALESCE(version, ?), duration_ms = ?, log_tail = ?, staged_prefix = ?, lease_owner = NULL, lease_expires_at = NULL WHERE id = ?",
     )
-      .bind(now(), b.sha256, b.filename, b.version ?? null, b.duration_ms ?? null, (b.log_tail ?? "").slice(-4000), prefix, id)
+      .bind(now(), b.sha256, b.filename, b.version ?? null, b.version ?? null, b.duration_ms ?? null, (b.log_tail ?? "").slice(-4000), prefix, id)
       .run();
     await env.DB.prepare("UPDATE build_workers SET last_seen = ?, current_task = NULL, builds_done = builds_done + 1 WHERE id = ?").bind(now(), who).run();
     await env.DB.prepare("UPDATE factory_packages SET status = 'staged', detail = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE name = ?")

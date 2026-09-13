@@ -15,5 +15,5 @@ ALTER TABLE build_workers ADD COLUMN trusted_by TEXT;
 ALTER TABLE build_workers ADD COLUMN trusted_at TEXT;
 
 -- People: a contributor may also be a maintainer of areas (groups).
-ALTER TABLE contributors ADD COLUMN role TEXT NOT NULL DEFAULT 'contributor';  -- contributor | maintainer | admin
+ALTER TABLE contributors ADD COLUMN role TEXT NOT NULL DEFAULT 'contributor';  -- contributor | maintainer
 ALTER TABLE contributors ADD COLUMN areas TEXT;                                 -- JSON groups a maintainer reviews
