@@ -222,6 +222,26 @@ generated from it by `factory/bin/check-governance --write`; CI checks they
 agree). See [GOVERNANCE.md](GOVERNANCE.md). `GET /api/v1/factory/groups` and
 `/factory/approvals` are the public record.
 
+## Adding a repository
+
+The pool mirrors a fixed table of upstream repositories; a new one from the
+same project (an `omarchy-t2` beside `omarchy`, say) is a new **source**:
+
+1. `worker/src/scheduler.ts`, `SYNC_SOURCES`: one entry per architecture and
+   ring it serves — `source`, `arch`, `ring`, `base_url` (the upstream
+   directory with the `.db`), `db_name` (the upstream database's name),
+   `keyring` (which of `tests/fetch-keyrings.sh`'s keyrings verifies it).
+2. `worker/src/routes/packages.ts`, `SOURCES`: the name, so the index accepts
+   manifests with that provenance.
+3. A keyring, if the packages are signed by a key none of the existing
+   keyrings holds: `tests/fetch-keyrings.sh`.
+
+The rest follows the source name: the rendered repository is
+`omarchy-<source>-<ring>` (`render`), the health check reads the rendered
+databases from the release's artifacts, the coverage table and the pipeline
+status list every source they see. The next sync imports it; the next
+promotion carries it.
+
 ## When what the pool serves does not verify
 
 The pool holds one object per `<arch>/<filename>` and never overwrites it;

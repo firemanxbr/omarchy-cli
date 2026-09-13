@@ -30,30 +30,25 @@ request (see [CONTRIBUTING.md](CONTRIBUTING.md)), and keep
       crash-safe transactions) is implemented and tested but not wired into the
       client. Wiring it means also writing pacman's local database
       (`/var/lib/pacman/local/<pkg>/{desc,files,mtree}`) and running `.hook` /
-      `.INSTALL` scriptlets, or pacman and yay stop seeing what it installs. Only
-      worth it if the thin client proves insufficient.
+      `.INSTALL` scriptlets, or pacman and yay stop seeing what it installs.
+      Decision (2026-09-13): not now — the thin client covers status, the ABI
+      check, the hook preview, security and the MCP surface, and pacman does
+      the installing; the parked crate stays compiled and tested for the day
+      that changes.
 - [ ] **Multi-repo per ring.** `release_artifacts` is keyed by `(repo, arch)` already;
-      allow more than one `[repo]` section per source and ring end to end through
-      `render` and the mirror route (e.g. `omarchy-t2`).
+      a second repository from the same upstream (an `omarchy-t2`, say) is a new
+      source — the recipe is in the RUNBOOK (*Adding a repository*), two lines
+      and a keyring. Nothing upstream publishes one yet (checked 2026-09-13:
+      `pkgs.omarchy.org` serves `omarchy.db` only), so nothing to wire until
+      it does.
 
 ## Upstream findings worth reporting
 
-- [ ] **Arch Linux ARM ships x86_64 binaries in aarch64-labelled packages**:
-      `gtpin`, `intel-oneapi-*`, `openai-codex-desktop` in `extra` need
-      `GLIBC_2.2.5` (an x86_64 symbol version); the ABI gate found them on
-      2026-09-12. They cannot run on aarch64; report to ALARM.
-
-- [ ] **OPR: `opencode-1.1.51-1` in the rc channel is signed by a key that is not
-      in Omarchy's published keyring** (`omarchy-iso` `builder/omarchy.gpg`); the
-      pool rejects it. Report to the OPR maintainers.
-- [ ] **OPR rebuilds the same version with different bytes per channel** (76
-      packages on 2026-09-12, e.g. `wayfreeze-0.2.0-1`). The pool keeps the object
-      it already has for that filename and says so in the journal; ask whether
-      channel builds could be promoted as-is instead of rebuilt.
-
-- [ ] **Health summary shows an empty package count** in the journal ("( packages
-      across N repos)") when pacman's progress output hides the TOTAL line; the
-      parse was relaxed, verify on the next runs.
+Written up, with the suggested text for each, in
+[docs/upstream/README.md](docs/upstream/README.md): Arch Linux ARM's x86_64
+binaries in aarch64 packages, the OPR's `opencode` signed outside the
+published keyring, the OPR's per-channel rebuilds of the same version. Filing
+them is a maintainer's act; the health-summary parse is verified fixed.
 
 ## Housekeeping
 
