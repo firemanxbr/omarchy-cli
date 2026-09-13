@@ -36,16 +36,16 @@ const SEARCH_SCRIPT = String.raw`
   }
   function run() {
     var term = $("#q").value.trim(), my = ++seq;
-    if (term.length < 2) { $("#hint").textContent = "Type at least two characters."; $("#results tbody").innerHTML = ""; return; }
+    if (term.length < 2) { $("#hint").textContent = "Type at least two characters."; pager("#results", [], function () { return ""; }, { empty: "type at least two characters" }); return; }
     $("#hint").textContent = "Searching " + ring + " · " + arch + "…";
     skeletonRows("#results", 5, 5);
     busy(fetch("/api/v1/search?q=" + encodeURIComponent(term) + "&ring=" + ring + "&arch=" + arch + "&limit=100")).then(function (r) { return r.json(); }).then(function (d) {
       if (my !== seq) return;
       var rows = d.packages || [];
       $("#hint").textContent = rows.length ? rows.length + (rows.length === 100 ? "+" : "") + " package(s) in " + ring + " · " + arch : "Nothing in " + ring + " · " + arch + " matches “" + term + "”.";
-      $("#results tbody").innerHTML = rows.map(function (p) {
+      pager("#results", rows, function (p) {
         return '<tr><td><a href="/package/' + encodeURIComponent(p.name) + '?ring=' + ring + '&arch=' + arch + '"><b>' + esc(p.name) + '</b></a></td><td class="mono">' + esc(p.version) + '</td><td><span class="src">' + esc(p.source) + '</span></td><td class="muted">' + esc(p.description || "") + '</td><td class="num">' + bytes(p.size_download) + '</td></tr>';
-      }).join("");
+      }, { empty: "nothing matches", n: 25, text: function (p) { return p.name + " " + (p.description || "") + " " + p.source; } });
     }).catch(function (e) { $("#hint").textContent = "search failed: " + e; endSkeleton(); });
   }
   $("#q").value = q.get("q") || "";

@@ -231,8 +231,16 @@ export async function handleRegisterWorker(c: Contributor, request: Request, env
 }
 
 export async function handleRevokeWorker(c: Contributor, id: string, env: Env): Promise<Response> {
-  const res = await env.DB.prepare("UPDATE build_workers SET revoked_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? AND owner = ? AND revoked_at IS NULL").bind(id, c.login).run();
-  return res.meta.changes ? json({ revoked: id }) : json({ error: "not yours or already revoked" }, 404);
+  // Its owner, or a maintainer (any worker): a revoked worker cannot claim again.
+  const res = isMaintainer(c)
+    ? await env.DB.prepare("UPDATE build_workers SET revoked_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? AND revoked_at IS NULL").bind(id).run()
+    : await env.DB.prepare("UPDATE build_workers SET revoked_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? AND owner = ? AND revoked_at IS NULL").bind(id, c.login).run();
+  if (res.meta.changes) {
+    await env.DB.prepare("INSERT INTO events (kind, ring, source, status, summary, payload) VALUES ('trust', NULL, 'factory', 'warn', ?, ?)")
+      .bind(`worker ${id} revoked by ${c.login}`, JSON.stringify({ worker: id, by: c.login }))
+      .run();
+  }
+  return res.meta.changes ? json({ revoked: id }) : json({ error: "not yours (or not a maintainer), or already revoked" }, 404);
 }
 
 export async function handleListPackages(env: Env): Promise<Response> {

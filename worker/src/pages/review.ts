@@ -45,34 +45,36 @@ const SCRIPT = String.raw`
   function load() {
     skeletonRows("#staged", 8, 3); skeletonRows("#trust", 6, 2); skeletonRows("#people", 4, 1); skeletonRows("#decisions", 7, 2);
     busy(fetch(API + "/review")).then(function (r) { return r.json(); }).then(function (d) {
-      $("#staged tbody").innerHTML = (d.staged || []).map(function (t) {
+      pager("#staged", (d.staged || []), function (t) {
         var det = t.detected || {};
         return '<tr><td>' + t.id + '</td><td><b>' + esc(t.name) + '</b> <span class="src">' + esc(t.group) + '</span>' + (t.version ? ' <span class="mono muted">' + esc(t.version) + '</span>' : '') + '</td><td>' + esc(t.arch) + '</td>' +
           '<td>' + (t.url ? '<a href="' + esc(t.url) + '">' + esc(t.url.replace(/^https?:\/\/(www\.)?github\.com\//, "")) + '</a>' : '—') + '</td><td>' + esc([det.build_system, det.license, det.latest_tag].filter(Boolean).join(" · ")) + '</td>' +
           '<td>' + esc(t.owner || "") + ' <span class="muted">' + (t.duration_ms ? Math.round(t.duration_ms / 1000) + " s" : "") + '</span></td>' +
           '<td><a class="run" href="' + t.evidence.pkgbuild + '">PKGBUILD</a> <a class="run" href="' + t.evidence.log + '">log</a> <a class="run" href="' + t.evidence.pkginfo + '">PKGINFO</a> <span class="mono muted">' + esc((t.result_sha256 || "").slice(0, 12)) + '</span></td>' +
           '<td>' + (token ? '<button type="button" data-approve="' + t.id + '">Approve</button> <button type="button" data-reject="' + t.id + '">Reject</button>' : '<span class="muted">sign in</span>') + '</td></tr>';
-      }).join("") || '<tr><td colspan="8" class="muted">nothing waiting for review</td></tr>';
-      document.querySelectorAll("[data-approve]").forEach(function (b) { b.onclick = function () { decide(b.getAttribute("data-approve"), "approve"); }; });
-      document.querySelectorAll("[data-reject]").forEach(function (b) { b.onclick = function () { decide(b.getAttribute("data-reject"), "reject"); }; });
+      }, { empty: 'nothing waiting for review' });
       endSkeleton();
     }).catch(function () { endSkeleton(); });
     busy(fetch(API + "/trust")).then(function (r) { return r.json(); }).then(function (d) {
-      $("#trust tbody").innerHTML = (d.workers || []).map(function (w) {
+      pager("#trust", (d.workers || []), function (w) {
         return '<tr><td class="mono">' + esc(w.id) + (w.revoked_at ? ' <span class="pill none">revoked</span>' : '') + '</td><td>' + esc(w.owner || "project") + '</td><td>' + esc(w.arch) + '</td><td>' + esc(w.trust) + '</td><td>' + esc(w.trusted_by || "—") + '</td><td>' + ago(w.last_seen) + '</td></tr>';
-      }).join("") || '<tr><td colspan="6" class="muted">no trusted worker yet</td></tr>';
-      $("#people tbody").innerHTML = (d.maintainers || []).map(function (p) {
+      }, { empty: 'no trusted worker yet' });
+      pager("#people", (d.maintainers || []), function (p) {
         return '<tr><td><b>' + esc(p.login) + '</b>' + (p.name ? ' <span class="muted">' + esc(p.name) + '</span>' : '') + '</td><td>' + esc(p.role) + '</td><td>' + esc((p.areas || []).join(", ") || "all") + '</td><td>' + ago(p.last_seen) + '</td></tr>';
-      }).join("") || '<tr><td colspan="4" class="muted">no maintainer named yet</td></tr>';
+      }, { empty: 'no maintainer named yet' });
       endSkeleton();
     }).catch(function () { endSkeleton(); });
     busy(fetch(API + "/approvals")).then(function (r) { return r.json(); }).then(function (d) {
-      $("#decisions tbody").innerHTML = (d.approvals || []).map(function (a) {
+      pager("#decisions", (d.approvals || []), function (a) {
         return '<tr><td>' + ago(a.created_at) + '</td><td><b>' + esc(a.name) + '</b>' + (a.version ? ' <span class="mono muted">' + esc(a.version) + '</span>' : '') + '</td><td>' + esc(a.arch) + '</td><td>' + esc(a.decision) + '</td><td>' + esc(a.by) + '</td><td>' + esc(a.note || "") + '</td><td>' + (a.rebuild_task ? '#' + a.rebuild_task + ' ' + esc(a.rebuild_status || "") + (a.rebuild_result ? ' <span class="mono">' + esc(a.rebuild_result) + '</span>' : '') : '—') + '</td></tr>';
-      }).join("") || '<tr><td colspan="7" class="muted">no decision yet</td></tr>';
+      }, { empty: 'no decision yet' });
       endSkeleton();
     }).catch(function () { endSkeleton(); });
   }
+  document.addEventListener("click", function (ev) {
+    var b = ev.target.closest ? ev.target.closest("button[data-approve],button[data-reject]") : null; if (!b) return;
+    decide(b.getAttribute("data-approve") || b.getAttribute("data-reject"), b.hasAttribute("data-approve") ? "approve" : "reject");
+  });
   load();
   liveStats(function () {}, 120000);
 `;

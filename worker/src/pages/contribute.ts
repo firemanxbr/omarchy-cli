@@ -101,27 +101,24 @@ const SCRIPT = String.raw`
     skeletonRows("#my-packages", 7, 2); skeletonRows("#my-workers", 7, 1); skeletonRows("#my-tasks", 8, 2);
     call("GET", "/me").then(function (d) {
       if (d.__status === 401) { $("#signin-state").textContent = "Your contributor token is no longer valid; sign in again."; $("#signin-form").hidden = false; $("#signed").hidden = true; endSkeleton(); return; }
-      $("#my-packages tbody").innerHTML = (d.packages || []).map(function (p) {
+      pager("#my-packages", (d.packages || []), function (p) {
         var det = {}; try { det = JSON.parse(p.detected || "{}"); } catch (e) {}
         return '<tr><td><b>' + esc(p.name) + '</b> <span class="src">' + esc(p.group) + '</span></td><td><a href="' + esc(p.url) + '">' + esc(p.url.replace(/^https?:\/\/(www\.)?github\.com\//, "")) + '</a></td><td>' + esc(JSON.parse(p.arches || "[]").join(", ")) + '</td>' +
           '<td>' + esc([det.build_system, det.license, det.latest_tag].filter(Boolean).join(" · ")) + '</td><td>' + statusPill(p.status) + '</td><td>' + esc(p.detail || "") + '</td>' +
           '<td style="white-space:nowrap"><button type="button" data-build="' + esc(p.name) + '">Build</button> <button type="button" data-remove="' + esc(p.name) + '" title="remove the registration">✕</button></td></tr>';
-      }).join("") || '<tr><td colspan="7" class="muted">no package registered yet</td></tr>';
-      $("#my-workers tbody").innerHTML = (d.workers || []).map(function (w) {
+      }, { empty: 'no package registered yet' });
+      pager("#my-workers", (d.workers || []), function (w) {
         var alive = w.last_seen && (Date.now() - Date.parse(w.last_seen)) < 600000;
         return '<tr><td class="mono">' + esc(w.id) + (w.revoked_at ? ' <span class="pill none">revoked</span>' : alive ? ' <span class="pill ok">alive</span>' : '') + '</td><td>' + esc(w.arch) + '</td><td>' + esc(w.mode) + (w.packages && w.packages.length ? ' <span class="muted">' + esc(w.packages.join(", ")) + '</span>' : '') + '</td><td>' + ago(w.last_seen) + '</td>' +
           '<td>' + (w.current_task ? '#' + w.current_task : '<span class="muted">idle</span>') + '</td><td>' + num(w.builds_done) + ' / ' + num(w.builds_failed) + '</td><td>' + (w.revoked_at ? '' : '<button type="button" data-revoke="' + esc(w.id) + '">Revoke</button>') + '</td></tr>';
-      }).join("") || '<tr><td colspan="7" class="muted">no worker yet — register one above</td></tr>';
-      $("#my-tasks tbody").innerHTML = (d.tasks || []).map(function (t) {
+      }, { empty: 'no worker yet — register one above' });
+      pager("#my-tasks", (d.tasks || []), function (t) {
         var ev = t.status === "staged" ? '<a class="run" href="' + API + '/tasks/' + t.id + '/artifacts/build.log">log</a> <a class="run" href="' + API + '/tasks/' + t.id + '/artifacts/PKGBUILD">PKGBUILD</a>' : (t.status === "failed" ? '<a class="run" href="' + API + '/tasks/' + t.id + '/artifacts/build.log">log</a>' : '');
         return '<tr><td>' + t.id + '</td><td><b>' + esc(t.name) + '</b>' + (t.version ? ' <span class="mono muted">' + esc(t.version) + '</span>' : '') + '</td><td>' + esc(t.arch) + '</td><td>' + statusPill(t.status) + (t.attempts > 1 ? ' <span class="muted">attempt ' + t.attempts + '</span>' : '') + '</td><td class="mono">' + esc(t.lease_owner || "") + '</td><td>' + took(t.duration_ms) + '</td><td>' + ev + '</td><td class="muted">' + esc((t.error || "").slice(0, 100)) + '</td></tr>';
-      }).join("") || '<tr><td colspan="8" class="muted">nothing built yet</td></tr>';
+      }, { empty: 'nothing built yet' });
       var st = d.staging || {};
       $("#quota").textContent = "Staging: " + (st.bytes / 1048576).toFixed(1) + " MB of " + (st.quota_bytes / 1073741824).toFixed(0) + " GB used · objects expire after 30 days · a task waits until a worker of its architecture (yours, or a shared one) picks it up.";
       endSkeleton();
-      document.querySelectorAll("[data-build]").forEach(function (b) { b.onclick = function () { b.disabled = true; call("POST", "/packages/" + encodeURIComponent(b.getAttribute("data-build")) + "/build", {}).then(function (r) { $("#pkg-state").textContent = r.error || ("queued " + (r.tasks || []).length + " build(s): " + (r.arches || []).join(", ") + " — start your worker if it is not running"); refresh(); }); }; });
-      document.querySelectorAll("[data-remove]").forEach(function (b) { b.onclick = function () { if (!confirm("Remove the registration of " + b.getAttribute("data-remove") + "?")) return; call("DELETE", "/packages/" + encodeURIComponent(b.getAttribute("data-remove"))).then(function (r) { $("#pkg-state").textContent = r.error || ("removed " + r.deleted); refresh(); }); }; });
-      document.querySelectorAll("[data-revoke]").forEach(function (b) { b.onclick = function () { call("DELETE", "/workers/" + encodeURIComponent(b.getAttribute("data-revoke"))).then(refresh); }; });
     }).catch(function (e) { $("#signin-state").textContent = "could not load your data: " + e; endSkeleton(); });
   }
   $("#pkg-form").onsubmit = function () {
@@ -156,13 +153,20 @@ const SCRIPT = String.raw`
     }).catch(function (e) { $("#w-btn").disabled = false; $("#pkg-state").textContent = "failed: " + e; });
     return false;
   };
+  // Buttons inside paged tables: one delegated handler survives re-renders.
+  document.addEventListener("click", function (ev) {
+    var b = ev.target.closest ? ev.target.closest("button[data-build],button[data-remove],button[data-revoke]") : null; if (!b) return;
+    if (b.hasAttribute("data-build")) { b.disabled = true; call("POST", "/packages/" + encodeURIComponent(b.getAttribute("data-build")) + "/build", {}).then(function (r) { $("#pkg-state").textContent = r.error || ("queued " + (r.tasks || []).length + " build(s): " + (r.arches || []).join(", ") + " — start your worker if it is not running"); refresh(); }); }
+    else if (b.hasAttribute("data-remove")) { if (!confirm("Remove the registration of " + b.getAttribute("data-remove") + "?")) return; call("DELETE", "/packages/" + encodeURIComponent(b.getAttribute("data-remove"))).then(function (r) { $("#pkg-state").textContent = r.error || ("removed " + r.deleted); refresh(); }); }
+    else if (b.hasAttribute("data-revoke")) { call("DELETE", "/workers/" + encodeURIComponent(b.getAttribute("data-revoke"))).then(refresh); }
+  });
   if (token && login) showSigned();
   liveStats(function () {}, 120000);
 `;
 
 export function contributeHtml(poolUrl: string, version: RunningVersion): string {
   return page({
-    title: "Contribute · omarchy-pool",
+    title: "Contributors · omarchy-pool",
     description: "Register a package, run your own worker, follow your builds to a maintainer's approval.",
     active: "contribute",
     body: BODY,

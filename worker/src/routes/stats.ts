@@ -128,6 +128,18 @@ export async function handleStats(env: Env): Promise<Response> {
     `SELECT id, created_at, ring, COALESCE(source, 'x86_64') AS arch, status FROM events
       WHERE kind = 'health' AND created_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-14 days') ORDER BY id`,
   ).all();
+  // The pool's own jobs (pulled by workers) and the factory's builds, per
+  // day: what replaces GitHub Actions on the pipeline card.
+  const jobsDaily = await env.DB.prepare(
+    `SELECT substr(COALESCE(finished_at, created_at), 1, 10) AS day, kind, status, COUNT(*) AS n, COALESCE(SUM(duration_ms), 0) AS ms
+       FROM build_tasks WHERE kind != 'build' AND created_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-7 days')
+      GROUP BY day, kind, status ORDER BY day`,
+  ).all();
+  const buildsDaily = await env.DB.prepare(
+    `SELECT substr(COALESCE(finished_at, created_at), 1, 10) AS day, trust, status, COUNT(*) AS n
+       FROM build_tasks WHERE kind = 'build' AND created_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-14 days')
+      GROUP BY day, trust, status ORDER BY day`,
+  ).all();
   const metricsSeries = await env.DB.prepare(
     `SELECT created_at, json_extract(payload, '$.pool.objects') AS objects, json_extract(payload, '$.pool.bytes') AS bytes,
             json_extract(payload, '$.actions.running') AS running, json_extract(payload, '$.actions.runs') AS runs
@@ -148,6 +160,8 @@ export async function handleStats(env: Env): Promise<Response> {
         sync_runs: syncRuns.results,
         health: healthSeries.results,
         metrics: metricsSeries.results,
+        jobs_daily: jobsDaily.results,
+        builds_daily: buildsDaily.results,
       },
       metrics: latestMetrics ? { recorded_at: latestMetrics.created_at, ...JSON.parse(latestMetrics.payload) } : null,
       security: { updated_at: securityData?.updated_at ?? null, advisories: securityData?.advisories ?? 0 },

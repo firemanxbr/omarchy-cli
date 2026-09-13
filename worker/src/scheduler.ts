@@ -1,5 +1,5 @@
 import type { Env } from "./index";
-import { requeueExpiredLeases } from "./routes/factory";
+import { requeueExpiredLeases, pruneWorkers } from "./routes/factory";
 
 /**
  * The pool's own scheduler. GitHub's cron is best-effort — on 2026-09-12 it
@@ -176,6 +176,8 @@ export async function runScheduler(env: Env, now = new Date()): Promise<string[]
   try {
     const n = await requeueExpiredLeases(env);
     if (n) log.push(`factory: ${n} expired lease(s) back in the queue`);
+    const gone = await pruneWorkers(env);
+    if (gone) log.push(`factory: ${gone} stale hosted worker(s) forgotten`);
   } catch (e) {
     log.push(`factory requeue: ${String(e)}`);
   }

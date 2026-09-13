@@ -34,6 +34,8 @@ const BODY = String.raw`
       <div class="chart"><h3>GitHub Actions <span>7 days</span></h3><div class="sub">runs per workflow: succeeded, failed, running now</div><div id="c-actions"></div></div>
       <div class="chart"><h3>Sync throughput <span>last runs</span></h3><div class="sub">MB/s per sync run, one runner each</div><div id="c-sync"></div></div>
       <div class="chart"><h3>Runner minutes <span>per day</span></h3><div class="sub">GitHub-hosted runner time consumed</div><div id="c-minutes"></div></div>
+      <div class="chart"><h3>Pool jobs <span>7 days</span></h3><div class="sub">sync, promote, health, gc pulled by workers: done, failed, waiting</div><div id="c-jobs"></div></div>
+      <div class="chart"><h3>Factory builds <span>14 days</span></h3><div class="sub">per day: contributors' builds staged, the project's published, failed</div><div id="c-builds"></div></div>
     </div>
     <div class="table-wrap"><table id="workflows"><thead><tr><th>Workflow</th><th>Last run</th><th class="num">Took</th><th class="num">Runs 7d</th><th class="num">Failed</th><th class="num">Running</th><th class="num">Minutes 7d</th></tr></thead><tbody></tbody></table></div>
   </section>
@@ -98,14 +100,14 @@ __CHARTS__
       '</div>';
     }).join("");
 
-    $("#events tbody").innerHTML = d.events.map(function (e) {
+    pager("#events", d.events, function (e) {
       var run = e.payload && e.payload.ci && e.payload.ci.run_url;
       return '<tr><td><span class="dot ' + e.status + '"></span>' + e.status + '</td><td><span class="kind">' + esc(e.kind) + '</span></td><td>' + esc(e.ring || "") + '</td><td>' + esc(e.source || "") + '</td><td>' + (run ? '<a class="run" href="' + esc(run) + '" title="open the run">' + esc(e.summary) + '</a>' : esc(e.summary)) + '</td><td class="num">' + dur(e.duration_ms) + '</td><td class="when" title="' + esc(e.created_at) + '">' + ago(e.created_at) + '</td></tr>';
-    }).join("") || '<tr><td colspan="7" class="muted">nothing yet</td></tr>';
+    }, { empty: 'nothing yet' });
 
-    $("#releases tbody").innerHTML = d.releases.map(function (r) {
+    pager("#releases", d.releases, function (r) {
       return '<tr><td>' + r.id + (r.is_head ? ' <span class="pill ok">head</span>' : '') + '</td><td>' + r.ring + '</td><td>#' + r.seq + '</td><td class="num">' + num(r.package_count) + '</td><td>' + (r.parent_id || '—') + '</td><td>' + (r.source_id || '—') + '</td><td>' + esc(r.note || '') + '</td><td class="when" title="' + esc(r.created_at) + '">' + ago(r.created_at) + '</td></tr>';
-    }).join("") || '<tr><td colspan="8" class="muted">no releases yet</td></tr>';
+    }, { empty: 'no releases yet' });
 
     renderCoverage(d);
     renderSystem(d);
@@ -236,23 +238,30 @@ const CHARTS = String.raw`  // ---- tiny SVG charts (no library; the page has no
     $("#c-sync").innerHTML = bars(runs.map(function (r) { var mbs = Number(r.bytes) / 1048576 / (Number(r.duration_ms) / 1000); return { label: r.source.slice(0, 5) + (r.arch === "aarch64" ? "/arm" : ""), value: Math.round(mbs * 10) / 10, color: r.status === "ok" ? C.green : C.amber, title: r.source + " " + r.arch + " " + ago(r.created_at) + ": " + num(r.uploaded) + " packages, " + bytes(r.bytes) + " in " + dur(r.duration_ms) + " → " + (Math.round(mbs * 10) / 10) + " MB/s" + (r.concurrency ? " with " + r.concurrency + " workers" : "") }; }), function (v) { return v + " MB/s"; });
 
     var daily = a && a.daily ? a.daily : [], byD = {}; daily.forEach(function (r) { byD[r.day] = r; });
+    var jd = S.jobs_daily || [], byKind = {};
+    jd.forEach(function (r) { var k = byKind[r.kind] = byKind[r.kind] || { done: 0, failed: 0, waiting: 0, ms: 0 }; if (r.status === "done") k.done += Number(r.n); else if (r.status === "failed" || r.status === "cancelled") k.failed += Number(r.n); else k.waiting += Number(r.n); k.ms += Number(r.ms || 0); });
+    $("#c-jobs").innerHTML = hbars(Object.keys(byKind).sort(function (a, b) { return (byKind[b].done + byKind[b].failed) - (byKind[a].done + byKind[a].failed); }).map(function (k) { var v = byKind[k]; return { label: k, note: num(v.done + v.failed + v.waiting) + " · " + Math.round(v.ms / 60000) + " min", parts: [{ v: v.done, color: C.green, name: "done" }, { v: v.failed, color: C.red, name: "failed" }, { v: v.waiting, color: C.blue, name: "waiting" }] }; })) +
+      '<div class="legend"><span><i style="background:' + C.green + '"></i>done</span><span><i style="background:' + C.red + '"></i>failed</span><span><i style="background:' + C.blue + '"></i>queued / running</span></div>';
+    var bd = S.builds_daily || [], byDay = {};
+    bd.forEach(function (r) { var d = byDay[r.day] = byDay[r.day] || { staged: 0, published: 0, failed: 0 }; if (r.status === "staged") d.staged += Number(r.n); else if (r.status === "done") d.published += Number(r.n); else if (r.status === "failed") d.failed += Number(r.n); });
+    $("#c-builds").innerHTML = bars(lastDays(14).map(function (dd) { var d = byDay[dd] || { staged: 0, published: 0, failed: 0 }; var t = d.staged + d.published + d.failed; return { label: dd.slice(5), value: t, color: d.failed > d.published + d.staged ? C.red : C.green, title: dd + ": " + d.staged + " staged, " + d.published + " published, " + d.failed + " failed" }; }), function (v) { return v + " build(s)"; });
     $("#c-minutes").innerHTML = bars(lastDays(7).map(function (dd) { var r = byD[dd]; return { label: dd.slice(5), value: r ? Number(r.minutes) : 0, color: C.blue, title: dd + ": " + (r ? r.minutes + " min in " + r.runs + " runs, " + r.failures + " failed" : "no runs") }; }), function (v) { return v + " min"; });
 
-    $("#workflows tbody").innerHTML = wfs.map(function (w) {
+    pager("#workflows", wfs, function (w) {
       var l = w.last || {}, st = l.conclusion || l.status || "—", cls = st === "success" ? "ok" : st === "failure" ? "error" : (st === "in_progress" || st === "queued") ? "warn" : "";
       return '<tr><td>' + esc(w.name) + '</td><td><span class="dot ' + cls + '"></span>' + (l.url ? '<a class="run" href="' + esc(l.url) + '">' + esc(st) + '</a>' : esc(st)) + (l.created_at ? ' <span class="when">' + ago(l.created_at) + '</span>' : '') + '</td><td class="num">' + (l.seconds ? dur(l.seconds * 1000) : "") + '</td><td class="num">' + num(w.runs) + '</td><td class="num">' + (w.failure ? '<span style="color:var(--red)">' + num(w.failure) + '</span>' : '0') + '</td><td class="num">' + (w.running ? '<span style="color:var(--blue)">' + num(w.running) + '</span>' : '0') + '</td><td class="num">' + num(w.minutes) + '</td></tr>';
-    }).join("") || '<tr><td colspan="7" class="muted">no metrics snapshot yet — the Metrics workflow records one every 30 minutes</td></tr>';
+    }, { empty: 'no metrics snapshot yet — the Metrics workflow records one every 30 minutes', n: 25 });
   }
 
   function renderCoverage(d) {
     var cov = (d.coverage || []).slice().sort(function (a, b) { return a.arch === b.arch ? (a.source < b.source ? -1 : 1) : (a.arch === "x86_64" ? -1 : 1); });
     var tot = cov.reduce(function (t, c) { t.up += c.upstream_total || 0; t.have += c.indexed; t.miss += c.missing || 0; t.bytes += c.bytes; t.pending += c.upstream_total == null ? 1 : 0; return t; }, { up: 0, have: 0, miss: 0, bytes: 0, pending: 0 });
     function pctOf(have, up) { if (!up) return 0; var p = 100 * have / up; return p >= 100 ? 100 : Math.floor(p); }
-    $("#coverage tbody").innerHTML = cov.map(function (c) {
+    pager("#coverage", cov, function (c) {
       var pending = c.upstream_total == null, pct = pctOf(c.indexed, c.upstream_total);
       return '<tr><td title="' + esc(c.upstream || "") + '">' + esc(c.source) + '</td><td>' + esc(c.arch) + '</td><td class="num">' + (pending ? '—' : num(c.upstream_total)) + '</td><td class="num">' + num(c.indexed) + '</td><td class="num">' + (pending ? '—' : c.missing ? '<span style="color:var(--amber)">' + num(c.missing) + '</span>' : '0') + '</td><td class="num">' + num(c.pinned_stable) + '</td>' +
         '<td>' + (pending ? '<span class="pill none">not synced yet</span>' : '<span class="bar"><i class="' + (pct < 100 ? 'partial' : '') + '" style="width:' + pct + '%"></i></span><span class="pct">' + pct + '%</span>') + '</td><td class="num">' + bytes(c.bytes) + '</td><td class="when" title="' + esc(c.last_sync || "") + '">' + (pending ? '—' : ago(c.last_sync) + (c.last_status !== "ok" ? ' <span class="pill ' + c.last_status + '">' + c.last_status + '</span>' : '')) + '</td></tr>';
-    }).join("") + (cov.length ? '<tr><th>total</th><th></th><th class="num">' + num(tot.up) + (tot.pending ? '+' : '') + '</th><th class="num">' + num(tot.have) + '</th><th class="num">' + num(tot.miss) + '</th><th></th><th>' + pctOf(tot.have, tot.up) + '% of the synced sources' + (tot.pending ? ' · ' + tot.pending + ' not synced yet' : '') + '</th><th class="num">' + bytes(tot.bytes) + '</th><th></th></tr>' : '<tr><td colspan="9" class="muted">no sync recorded yet</td></tr>');
+    }, { n: 25 });
   }
 
 `;
