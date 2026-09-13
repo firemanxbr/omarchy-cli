@@ -305,11 +305,16 @@ What keeps the bill near US$ 10:
 - a release's summary is computed once and stored (`releases.package_count`,
   `bytes`, `sources`); the pool-wide aggregates that need the join are
   computed by the metrics snapshot every 30 minutes, not per request;
-- `release_packages` has no secondary index and GC prunes the membership
-  of releases outside retention, so it holds what the last 3 releases per
-  ring pin, not every release ever;
+- a release is a **delta** (migration 0017): what a ring serves lives in
+  `ring_packages`, a release writes only what it added and removed, and the
+  full membership is written out only for a checkpoint — the first release
+  of a ring, then every 24th, and any older release read by id. A sync that
+  moves a hundred packages writes a hundred rows, not thirty thousand; GC
+  drops the checkpoints and deltas nothing inside retention starts from;
 - the sync runs **every three hours, one task per architecture, one release
-  per ring** — not one release per source per hour.
+  per ring** — not one release per source per hour. With releases this
+  cheap the interval could go back to hourly (`scheduler.ts` RULES); what
+  an hourly sync still costs is the rows it reads to diff against upstream.
 
 **Watching it.** Once a day (06:30 UTC) the brain estimates the month's
 bill from Cloudflare's own analytics — what was used so far, priced, plus

@@ -9,12 +9,6 @@ request (see [CONTRIBUTING.md](CONTRIBUTING.md)), and keep
 
 ## Quick wins (an hour or so each)
 
-- [ ] **A cheaper release model.** A release copies the ring's whole selection
-      (~32k rows, twice with the index) and D1 bills every row written; with
-      the 3-hour sync that is inside the quota, but a delta model (adds and
-      removals against the parent, with a full checkpoint every N releases)
-      would make releases free to create and let the sync go back to hourly.
-
 - [ ] **Hook preview in `omarchy-cli check`.** Parse the libalpm `.hook` files in
       `/usr/share/libalpm/hooks` and `/etc/pacman.d/hooks` and list which ones the
       plan would trigger (`mkinitcpio`, `glib-compile-schemas`, …). Read-only;
@@ -123,7 +117,8 @@ of a staged build, attached to its evidence) · the track record per group
 on profiles · any agent provider on a worker · Worker tests inside workerd
 (releases, the factory) · release diff (API, page, `pkg-repo diff`),
 `releases --json --all`, the rollback button, databases kept for an
-architecture a release did not touch, CVE metadata pruned by gc.
+architecture a release did not touch, CVE metadata pruned by gc · releases
+stored as deltas with checkpoints every 24th.
 
 ## Factory findings (2026-09-12)
 

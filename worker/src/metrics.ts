@@ -23,18 +23,22 @@ export async function snapshotMetrics(env: Env, now = new Date()): Promise<strin
   // What the three heads pin (distinct objects): the one place this join runs.
   const heads = await env.DB.prepare(
     `SELECT COUNT(*) AS objects, COALESCE(SUM(size_download), 0) AS bytes FROM packages
-      WHERE id IN (SELECT rp.package_id FROM ring_heads h JOIN release_packages rp ON rp.release_id = h.release_id)`,
+      WHERE id IN (SELECT package_id FROM ring_packages)`,
   ).first<{ objects: number; bytes: number }>();
+  // What retention would drop: nothing a ring serves, nothing the last
+  // three releases of a ring added or removed (a rollback target), nothing
+  // a kept checkpoint lists (routes/gc.ts has the same rule).
   const reclaimable = await env.DB.prepare(
     `SELECT COUNT(*) AS objects, COALESCE(SUM(size_download), 0) AS bytes FROM packages
-      WHERE id NOT IN (SELECT rp.package_id FROM release_packages rp
-                        WHERE rp.release_id IN (SELECT id FROM releases r WHERE r.id IN (
+      WHERE id NOT IN (SELECT package_id FROM ring_packages)
+        AND id NOT IN (SELECT package_id FROM release_deltas WHERE release_id IN (SELECT id FROM releases r WHERE r.id IN (
                           SELECT id FROM releases r2 WHERE r2.ring = r.ring ORDER BY seq DESC LIMIT 3)))
+        AND id NOT IN (SELECT package_id FROM release_packages)
         AND created_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-7 days')`,
   ).first<{ objects: number; bytes: number }>();
   const rings = await env.DB.prepare(
     `SELECT h.ring, COUNT(*) AS packages, COALESCE(SUM(p.size_download), 0) AS bytes
-       FROM ring_heads h JOIN release_packages rp ON rp.release_id = h.release_id JOIN packages p ON p.id = rp.package_id
+       FROM ring_packages rp JOIN packages p ON p.id = rp.package_id JOIN ring_heads h ON h.ring = rp.ring
       GROUP BY h.ring ORDER BY h.ring`,
   ).all<{ ring: string; packages: number; bytes: number }>();
 

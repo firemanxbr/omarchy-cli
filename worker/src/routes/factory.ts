@@ -90,8 +90,8 @@ function parseArches(v: unknown): string[] {
  */
 export async function providedBy(env: Env, name: string): Promise<{ source: string; arch: string; version: string }[]> {
   const rows = await env.DB.prepare(
-    `SELECT p.source, p.repo_arch AS arch, p.version FROM release_packages rp JOIN packages p ON p.id = rp.package_id
-      WHERE rp.release_id = (SELECT release_id FROM ring_heads WHERE ring = 'edge') AND p.name = ?`,
+    `SELECT p.source, p.repo_arch AS arch, p.version FROM ring_packages rp JOIN packages p ON p.id = rp.package_id
+      WHERE rp.ring = 'edge' AND p.name = ?`,
   )
     .bind(name)
     .all<{ source: string; arch: string; version: string }>();
