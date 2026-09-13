@@ -1,14 +1,15 @@
 name: Factory update
 
-# Once a package is approved, new upstream releases need no human: this
-# checks every PKGBUILD's GitHub upstream, bumps pkgver (pkgrel back to 1),
-# refreshes the checksums in an Arch container and opens one pull request
-# per package with auto-merge on. CI is the only gate a bump passes; the
-# merge queues the build (factory-enqueue.yml, or its hourly reconcile).
-# Runs daily from the pool's scheduler.
+# The project's own PKGBUILDs (factory/pkgbuilds/<group>/) follow their
+# upstreams by pull request: this checks each one's GitHub releases, bumps
+# pkgver (pkgrel back to 1), refreshes the checksums in an Arch container
+# and opens one pull request per package. A maintainer of the group reviews
+# it (CODEOWNERS; main requires that review) — nothing is auto-merged — and
+# the merge queues the build (the hourly `enqueue` job). Runs daily from
+# the pool's scheduler. Packages contributors registered are bumped
+# differently: on their own workers, as evidence (docs/GOVERNANCE.md).
 #
-# Needs two repository settings: Actions may create pull requests, and
-# auto-merge is allowed (RUNBOOK, The factory).
+# Needs the repository setting: Actions may create pull requests.
 
 on:
   workflow_dispatch:
@@ -60,11 +61,10 @@ jobs:
             git add "$dir" && git commit -q -m "factory: $name $current → $latest" -m "Automatic bump of an approved package after an upstream release." || { echo "$pkg: nothing changed"; continue; }
             git push -q -f origin "$branch"
             url="$(gh pr create --base main --head "$branch" --title "factory: $name $current → $latest" \
-              --body "Upstream released **$latest** (this PKGBUILD had $current). pkgver bumped, pkgrel reset, checksums refreshed with updpkgsums. Opened by the Factory update workflow; auto-merge is on — CI is the gate, the merge queues the build.")"
+              --body "Upstream released **$latest** (this PKGBUILD had $current). pkgver bumped, pkgrel reset, checksums refreshed with updpkgsums. Opened by the Factory update workflow for a maintainer of the group to review; the merge queues the build.")"
             echo "$pkg: $url"
             # A pull request opened with the workflow token does not start
             # pull_request workflows by itself; run the required checks on the branch.
             gh workflow run ci.yml --ref "$branch" || true
             gh workflow run e2e.yml --ref "$branch" || true
-            gh pr merge --auto --squash "$url" || echo "::warning::auto-merge not enabled; merge $url by hand"
           done < /tmp/updates

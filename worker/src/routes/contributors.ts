@@ -198,9 +198,17 @@ export async function handleRegisterPackage(c: Contributor, request: Request, en
   return json({ package: row, skipped: upstream, next: `POST /api/v1/factory/packages/${name}/build queues it; a worker of yours (or a shared one) builds it into your staging workspace.` }, existing ? 200 : 201);
 }
 
+/** The owner frees the name (unless approved); a maintainer of its group frees any, an unmaintained one included. */
 export async function handleDeletePackage(c: Contributor, name: string, env: Env): Promise<Response> {
-  const res = await env.DB.prepare("DELETE FROM factory_packages WHERE name = ? AND owner = ? AND status NOT IN ('approved')").bind(name, c.login).run();
-  return res.meta.changes ? json({ deleted: name }) : json({ error: "not yours, not registered, or already approved (ask a maintainer)" }, 404);
+  const pkg = await env.DB.prepare("SELECT owner, \"group\", status FROM factory_packages WHERE name = ?").bind(name).first<{ owner: string; group: string; status: string }>();
+  if (!pkg) return json({ error: "not registered" }, 404);
+  const mine = pkg.owner === c.login && pkg.status !== "approved";
+  if (!mine && !maintains(c, pkg.group)) return json({ error: "not yours, or already approved (a maintainer of the group can remove it)" }, 403);
+  await env.DB.batch([
+    env.DB.prepare("UPDATE build_tasks SET status = 'cancelled', error = ? WHERE name = ? AND trust = 'community' AND status = 'queued'").bind(`registration removed by ${c.login}`, name),
+    env.DB.prepare("DELETE FROM factory_packages WHERE name = ?").bind(name),
+  ]);
+  return json({ deleted: name, by: c.login });
 }
 
 /** Queue community builds of a registered package: results go to staging, never to the pool. */
@@ -221,7 +229,7 @@ export async function handleBuildPackage(c: Contributor, name: string, request: 
     const dup = await env.DB.prepare("SELECT id FROM build_tasks WHERE name = ? AND arch = ? AND pkgbuild_ref = ? AND status IN ('queued', 'leased') LIMIT 1").bind(name, arch, ref).first<{ id: number }>();
     if (dup) { ids.push(dup.id); continue; }
     const row = await env.DB.prepare(
-      `INSERT INTO build_tasks (name, "group", arch, version, pkgbuild_ref, reason, priority, publish, trust, owner) VALUES (?, ?, ?, ?, ?, ?, 100, 0, 'community', ?) RETURNING id`,
+      `INSERT INTO build_tasks (name, "group", arch, version, pkgbuild_ref, reason, priority, publish, trust, owner, shared_after) VALUES (?, ?, ?, ?, ?, ?, 100, 0, 'community', ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+14 days')) RETURNING id`,
     )
       .bind(name, pkg.group, arch, version, ref, b.reason ?? "contributor", c.login)
       .first<{ id: number }>();

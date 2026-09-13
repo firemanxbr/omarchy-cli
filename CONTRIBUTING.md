@@ -4,7 +4,7 @@ Everything in the repository — code, documentation, commit messages — is in 
 
 ## Workflow
 
-1. Branch from `main`; `main` itself is protected (no direct pushes, even for admins).
+1. Branch from `main`; `main` itself is protected (no direct pushes, for anyone).
 2. Open a pull request. CI (fmt, clippy, tests, worker typecheck, on x86_64 and
    aarch64) and E2E (real pacman through a local worker) must pass. Keep
    [docs/TESTING.md](docs/TESTING.md) in step with what you change.

@@ -12,7 +12,7 @@ const FILE = `${REPO_URL}/blob/main/factory/MAINTAINERS.toml`;
 
 const BODY = String.raw`
   <h1>Governance</h1>
-  <p class="lede">Two roles, one file, decisions by pull request. Anyone who signs in with GitHub is a <b>contributor</b>. The people listed in <a href="${FILE}"><code>factory/MAINTAINERS.toml</code></a> are the <b>maintainers</b> of the groups that list them. There is no admin, no button that grants a role: the pool reads the file on <code>main</code> every ten minutes and applies it.</p>
+  <p class="lede">Two roles, one file, decisions by pull request. Anyone who signs in with GitHub is a <b>contributor</b>. The people listed in <a href="${FILE}"><code>factory/MAINTAINERS.toml</code></a> are the <b>maintainers</b> of the groups that list them. Nobody is above that — no owner, no administrator, no button that grants a role: the project belongs to its maintainers and contributors, and the pool reads the file on <code>main</code> every ten minutes and applies it.</p>
 
   <section>
     <h2>Groups and their maintainers</h2>
@@ -35,7 +35,7 @@ const BODY = String.raw`
       <div class="step"><h3>1. Contribute first</h3><p>Every maintainer was a contributor: packages registered, builds staged, reviews taken part in. Sign in, and the record of what you did is public on the <a href="/factory">Factory</a> page.</p></div>
       <div class="step"><h3>2. A maintainer proposes you</h3><p>A maintainer of the group opens a pull request adding your login to that group in <code>factory/MAINTAINERS.toml</code>. The pull request says why; it is a decision people make, not a database write.</p></div>
       <div class="step"><h3>3. Another maintainer approves</h3><p>The file is owned by all maintainers (<code>CODEOWNERS</code>) and <code>main</code> requires a code-owner review: at least one <em>other</em> maintainer approves, nothing is auto-merged. The merge is the promotion; within ten minutes the pool applies it and your next sign-in shows the role.</p></div>
-      <div class="step"><h3>Groups, departures, the first maintainer</h3><p>Adding or retiring a group, or a maintainer stepping down, is the same pull request with the same review. While the project has a single maintainer there is nobody else to approve: that maintainer merges with an administrator bypass, which GitHub records as such — the bootstrap exception, gone the moment a second maintainer exists.</p></div>
+      <div class="step"><h3>Groups, departures, the first maintainer</h3><p>Adding or retiring a group, or a maintainer stepping down, is the same pull request with the same review. While the project has a single maintainer there is nobody else to approve: that maintainer merges alone and GitHub records the bypassed review — the bootstrap exception, gone the moment a second maintainer exists.</p></div>
     </div>
   </section>
 

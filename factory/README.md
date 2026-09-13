@@ -23,35 +23,47 @@ PKGBUILD reviewed and merged ──▶ pool: build_requests / build_tasks (D1)
 
 ## A package's life
 
-1. **Someone asks for it** — a [package request issue](../../../issues/new?template=package-request.yml)
-   with the project's URL (or `POST /api/v1/factory/requests`, or *Actions →
-   Factory request*). `factory-request.yml` takes it from there.
+1. **Someone brings it.** A contributor signs in, registers the package
+   (the project's URL; a `PKGBUILD` in that repository if there is one) and
+   runs their own worker: the signed `omarchy-packaging` image, on their
+   machine, with their agent key if they want the PKGBUILD drafted and
+   corrected for them. Someone without a worker files a
+   [package request issue](../../../issues/new?template=package-request.yml)
+   instead: the brain reads open issues every ten minutes and queues the
+   same build for a *shared* community worker whose owner runs an agent.
 2. **Does someone ship it already?** The pool is asked first. If Arch, Arch
    Linux ARM or the OPR ship the name for an architecture it enters the pool's
-   cycle as it is: the issue gets the answer and closes, the factory refuses to
-   build that architecture (`override:true` exists for the deliberate case).
-   It only builds what is missing.
-3. **The PKGBUILD is drafted, not written.** `factory/bin/draft-pkgbuild`
-   reads the repository (metadata, latest release, build files, README) and
-   asks Claude for the PKGBUILD following `factory/prompts/pkgbuild.md`;
-   without `ANTHROPIC_API_KEY` a template covers Rust, Go, CMake, Meson,
-   autotools and prebuilt release binaries. `updpkgsums` fills the checksums
-   and `namcap` lints, in an Arch container.
-4. **It is built before anyone reviews it.** The draft goes to a branch and a
-   draft pull request; the factory queues **dry-run builds** on both
-   architectures (nothing published). A failure feeds the log back to the
-   drafter for a corrected PKGBUILD — three attempts. When the builds pass the
-   pull request is marked ready and the build times are posted on it.
-5. **First time: a human approves.** CODEOWNERS of the group
-   (`factory/pkgbuilds/<group>/`) review the pull request — that review *is*
-   the approval. Merging queues the real builds (`factory-enqueue.yml`, and
-   its hourly reconcile from the pool's scheduler); the request is marked
-   approved.
-6. **After that: automatic.** `factory-update.yml` runs daily: for every
-   PKGBUILD with a GitHub `url=` it asks upstream for the latest release,
-   bumps `pkgver` (`pkgrel=1`), refreshes the checksums and opens a pull
-   request with auto-merge on. CI is the only gate — CODEOWNERS are not asked
-   again for a version bump — and the merge queues the build.
+   cycle as it is; the factory refuses to build that architecture
+   (`override:true` exists for the deliberate case). It only builds what is
+   missing.
+3. **The PKGBUILD is drafted, not written**, when none is given:
+   `factory/bin/draft-pkgbuild` in the worker reads the repository (metadata,
+   latest release, build files, README) and asks Claude for the PKGBUILD
+   following `factory/prompts/pkgbuild.md` — the worker owner's
+   `ANTHROPIC_API_KEY`, never the pool's; without one a template covers Rust,
+   Go, CMake, Meson, autotools and prebuilt release binaries. `updpkgsums`
+   fills the checksums and `namcap` lints, in the container.
+4. **It is built before anyone reviews it.** The worker builds it in its
+   fresh container; a failure feeds the log back to the drafter for a
+   corrected PKGBUILD — three attempts. The package, the PKGBUILD and the log
+   land in the contributor's staging workspace as **evidence**; nothing is
+   published.
+5. **A maintainer approves.** On the Review page, a maintainer of the group
+   (`factory/MAINTAINERS.toml`) approves or rejects with the evidence in
+   front of them. Approval queues a **project build** of the same PKGBUILD
+   on a worker the project trusts; what users get is the project's build,
+   signed by the pool. The project's own recipes take the other door: a pull
+   request adding `factory/pkgbuilds/<group>/<name>/PKGBUILD`, reviewed by
+   the group's maintainers, queued by the hourly `enqueue` job on merge.
+6. **After that: bumps are evidence too.** Once a day the brain asks GitHub
+   for each approved package's latest release and queues a community build
+   from the approved PKGBUILD with `pkgver` moved to the tag
+   (`bump:<task>@<tag>`) — for the owner's worker first, for any `--shared`
+   worker after 14 days — and a maintainer reviews it like the first time.
+   30 days without a build and the package is *unmaintained* until someone
+   takes it (docs/GOVERNANCE.md). Recipes in `factory/pkgbuilds/` are bumped
+   by `factory-update.yml`: one pull request per package, reviewed, never
+   auto-merged.
 7. **A worker builds it.** Any worker of that architecture claims the task,
    holds a lease, builds in its fresh container, publishes the result
    into `edge` as source `factory` — the pool signs it with its own key —

@@ -1,6 +1,6 @@
 -- Governance from the repository: factory/MAINTAINERS.toml names the groups
 -- and their maintainers; the pool reads main and applies it. Roles are
--- contributor or maintainer, nothing else — the admin role is gone.
+-- contributor or maintainer, nothing else; nobody is above the file.
 
 CREATE TABLE factory_groups (
     name        TEXT PRIMARY KEY,                    -- factory/pkgbuilds/<name>/, the package's "group"

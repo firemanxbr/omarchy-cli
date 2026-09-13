@@ -3,6 +3,7 @@ import { requeueExpiredLeases, pruneWorkers } from "./routes/factory";
 import { snapshotMetrics } from "./metrics";
 import { syncGovernance } from "./governance";
 import { syncRequests } from "./requests";
+import { checkUpdates } from "./updates";
 
 /**
  * The pool's own scheduler. GitHub's cron is best-effort — on 2026-09-12 it
@@ -196,6 +197,15 @@ export async function runScheduler(env: Env, now = new Date()): Promise<string[]
     if (!r.endsWith("nothing new")) log.push(r);
   } catch (e) {
     log.push(`requests: ${String(e)}`);
+  }
+  // Bumps: once a day, after 05:45 UTC, the approved packages' upstreams.
+  if (now.getUTCHours() * 60 + now.getUTCMinutes() >= 5 * 60 + 45) {
+    try {
+      const u = await checkUpdates(env, now);
+      if (u !== "updates: checked today") log.push(u);
+    } catch (e) {
+      log.push(`updates: ${String(e)}`);
+    }
   }
   // The metrics snapshot is the brain's own bookkeeping: no worker needed.
   if (jobMode(env, "metrics")) {
