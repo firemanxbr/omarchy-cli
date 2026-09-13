@@ -7,9 +7,10 @@ name: Sync
 # straight into the matching ring — the pool's rc and stable serve what
 # Omarchy promoted, not the OPR edge. Hourly; a manual run can import
 # everything at once.
+# Scheduled runs moved to the pool: the Cloudflare cron creates this as a
+# pulled job for a project worker (pkg-repo work). This workflow stays for
+# manual runs and as documentation of the steps.
 on:
-  schedule:
-    - cron: "17 * * * *"
   workflow_dispatch:
     inputs:
       sources:

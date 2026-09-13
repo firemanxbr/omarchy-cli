@@ -2,9 +2,10 @@ name: GC
 
 # Retention: delete pool objects that none of the last 3 releases of any ring
 # reference. Keeps R2 storage — and the bill — bounded.
+# Scheduled runs moved to the pool: the Cloudflare cron creates this as a
+# pulled job for a project worker (pkg-repo work). This workflow stays for
+# manual runs and as documentation of the steps.
 on:
-  schedule:
-    - cron: "0 3 * * 0"
   workflow_dispatch:
     inputs:
       keep:

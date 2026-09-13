@@ -2,9 +2,10 @@ name: Health
 
 # A real pacman, in a container, syncs every ring from the pool and downloads a
 # package with signature verification. The result lands on the dashboard.
+# Scheduled runs moved to the pool: the Cloudflare cron creates this as a
+# pulled job for a project worker (pkg-repo work). This workflow stays for
+# manual runs and as documentation of the steps.
 on:
-  schedule:
-    - cron: "30 8 * * *"
   workflow_dispatch:
 
 env:
