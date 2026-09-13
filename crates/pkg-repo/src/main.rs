@@ -7,6 +7,7 @@ use pkg_repo::client::Api;
 use pkg_repo::gate::{self, GateOptions};
 use pkg_repo::security::{self, FastTrackOptions, SecurityOptions};
 use pkg_repo::sync::SyncOptions;
+use pkg_repo::verify;
 use pkg_repo::{build_database, ops, sign, work, Flavor};
 
 fn api(remote: &Remote) -> Result<Api> {
@@ -198,6 +199,35 @@ enum Command {
         /// Machine-readable: the API's rows as JSON, one object per ring.
         #[arg(long)]
         json: bool,
+    },
+    /// Verifies that every OPR object a ring serves is the bytes the index
+    /// names, signed by Omarchy — and repairs what is not (--repair).
+    Verify {
+        #[command(flatten)]
+        remote: Remote,
+        #[arg(
+            long,
+            env = "OMARCHY_POOL",
+            default_value = "https://pool.firemanxbr.org"
+        )]
+        pool: String,
+        #[arg(long = "ring", default_values_t = ["edge".to_owned(), "rc".to_owned(), "stable".to_owned()])]
+        rings: Vec<String>,
+        #[arg(long = "arch", default_values_t = ["x86_64".to_owned(), "aarch64".to_owned()])]
+        arches: Vec<String>,
+        /// Omarchy's keyring (tests/fetch-keyrings.sh: omarchy.gpg).
+        #[arg(long)]
+        keyring: PathBuf,
+        #[arg(
+            long,
+            env = "OMARCHY_WORK_DIR",
+            default_value = "/var/tmp/omarchy-pool-worker"
+        )]
+        work_dir: PathBuf,
+        /// Fix what is wrong: the right signature from the channel that serves
+        /// the bytes, the ring re-pinned to what the pool stores (then render).
+        #[arg(long)]
+        repair: bool,
     },
     /// What changed between two releases of a ring: added, removed, upgraded.
     Diff {
@@ -482,6 +512,36 @@ fn main() -> Result<()> {
             arch,
             json,
         } => ops::diff(&api(&remote)?, &ring, from, to, arch.as_deref(), json),
+        Command::Verify {
+            remote,
+            pool,
+            rings,
+            arches,
+            keyring,
+            work_dir,
+            repair,
+        } => {
+            let api = api(&remote)?;
+            let report = verify::run(
+                &api,
+                &verify::VerifyOptions {
+                    pool,
+                    rings,
+                    arches,
+                    keyring,
+                    work_dir,
+                    repair,
+                },
+            )?;
+            for d in &report.details {
+                println!("  {d}");
+            }
+            println!("{}", report.summary());
+            if !report.clean() {
+                std::process::exit(2);
+            }
+            Ok(())
+        }
         Command::Head { remote, ring } => match ops::head(&api(&remote)?, &ring)? {
             Some(id) => {
                 println!("{id}");

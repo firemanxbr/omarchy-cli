@@ -68,8 +68,17 @@ export async function handleQueueJob(c: Contributor, request: Request, env: Env)
     case "enqueue":
       job = { kind: b.kind, params: {}, arch: ARCHES.includes(b.arch ?? "") ? (b.arch as string) : "x86_64" };
       break;
+    case "verify": {
+      // Every ring and architecture by default; repair=no only reports.
+      const params: Record<string, string> = {};
+      if (s("ring")) { if (!RINGS.includes(s("ring"))) return json({ error: "ring must be edge, rc or stable" }, 400); params.ring = s("ring"); }
+      if (s("arch")) { if (!ARCHES.includes(s("arch"))) return json({ error: "arch must be x86_64 or aarch64" }, 400); params.arch = s("arch"); }
+      if (s("repair") === "no") params.repair = "no";
+      job = { kind: "verify", params, arch: "x86_64" };
+      break;
+    }
     default:
-      return json({ error: "kind must be one of sync, promote, rollback, render, health, security, enqueue, gc" }, 400);
+      return json({ error: "kind must be one of sync, promote, rollback, render, health, security, enqueue, gc, verify" }, 400);
   }
   const id = await createJob(env, job, `queued by ${c.login}`);
   await env.DB.prepare("INSERT INTO events (kind, ring, source, status, summary, payload) VALUES ('dispatch', ?, ?, 'ok', ?, ?)")

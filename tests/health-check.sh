@@ -80,11 +80,17 @@ pacman --config /repo/pacman.conf -Sy
 total=0
 for repo in $(grep -oE '^\[[a-z0-9-]+\]' /repo/pacman.conf | tr -d '[]' | grep -v options); do
   n=$(pacman --config /repo/pacman.conf -Sl "$repo" | wc -l); echo "$repo: $n packages"; total=$((total + n))
-  # One package per repository, downloaded and verified against its upstream signature.
-  first=$(pacman --config /repo/pacman.conf -Sl "$repo" | awk '{print $2; exit}')
-  [[ -n "$first" ]] || { echo "$repo serves no package"; exit 1; }
-  pacman --config /repo/pacman.conf -Sw --noconfirm "$repo/$first" >/dev/null
-  echo "downloaded+verified $repo/$first"
+  # A sample per repository — the first, the last and a few at random —
+  # downloaded and verified against its upstream signature. The OPR gets a
+  # bigger sample: it rebuilds the same version per channel, which is where
+  # a wrong signature beside an object showed up (2026-09-13).
+  k=3; [[ "$repo" == *-packages-* ]] && k=8
+  sample=$( { pacman --config /repo/pacman.conf -Sl "$repo" | awk '{print $2}' | head -1; pacman --config /repo/pacman.conf -Sl "$repo" | awk '{print $2}' | tail -1; pacman --config /repo/pacman.conf -Sl "$repo" | awk '{print $2}' | shuf -n "$k"; } | sort -u)
+  [[ -n "$sample" ]] || { echo "$repo serves no package"; exit 1; }
+  for name in $sample; do
+    pacman --config /repo/pacman.conf -Sw --noconfirm "$repo/$name" >/dev/null || { echo "download or signature check of $repo/$name FAILED"; exit 1; }
+  done
+  echo "downloaded+verified $(wc -w <<<"$sample" | tr -d ' ') of $repo: $(tr '\n' ' ' <<<"$sample")"
 done
 echo "TOTAL=$total"
 CHECK

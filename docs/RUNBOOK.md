@@ -56,6 +56,7 @@ pkg-repo job render --param ring=stable --param arch=x86_64
 pkg-repo job health --param ring=stable --param arch=aarch64
 pkg-repo job security
 pkg-repo job enqueue                                                   # the PKGBUILDs on main → the queue, now
+pkg-repo job verify                                                    # every served OPR object verified and repaired (--param ring= --param arch= --param repair=no to only report)
 pkg-repo job gc --param keep=3
 ```
 
@@ -220,6 +221,27 @@ is a pull request another maintainer approves (`.github/CODEOWNERS` is
 generated from it by `factory/bin/check-governance --write`; CI checks they
 agree). See [GOVERNANCE.md](GOVERNANCE.md). `GET /api/v1/factory/groups` and
 `/factory/approvals` are the public record.
+
+## When what the pool serves does not verify
+
+The pool holds one object per `<arch>/<filename>` and never overwrites it;
+the OPR rebuilds the same version per channel with different bytes. Before
+the pool refused a signature for bytes it does not serve (2026-09-12), two
+things went wrong and pacman then refused the package as *corrupted*: a
+later channel's `.sig` beside an earlier channel's object (69 of stable's 229
+OPR objects on 2026-09-13), and a second index row for the same filename
+pinned by a ring while the object stayed the first build's (5 more). The
+`verify` job (weekly, Saturday 03:00 UTC; `pkg-repo job verify` by hand)
+downloads every OPR object a ring serves, checks the bytes against the
+index and the signature against Omarchy's key, and repairs: the right
+`.sig` from the upstream channel that still serves those bytes; the ring
+re-pinned to the object the pool holds (indexed from the bytes when the
+index never saw them), then rendered. What no channel serves any more is
+listed in the `verify` event for a replacement. The health check downloads
+a sample per repository (eight from the OPR) so a wrong signature is
+evidence the day it appears; the sync pins the stored object whenever a
+filename collides, known sha or not; GC never deletes an object another
+index row still names.
 
 ## The factory
 

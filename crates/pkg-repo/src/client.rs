@@ -572,6 +572,24 @@ impl Api {
         })
     }
 
+    /// The summary of one architecture only (`?arch=`).
+    pub fn release_summary_arch(
+        &self,
+        ring: &str,
+        arch: &str,
+    ) -> Result<Option<ReleaseSummaryView>, RepoError> {
+        with_retry("release_summary_arch", || {
+            let resp = self
+                .http
+                .get(self.url(&format!("/releases/{ring}?fields=summary&arch={arch}")))
+                .send()?;
+            if resp.status() == StatusCode::NOT_FOUND {
+                return Ok(None);
+            }
+            Ok(Some(Self::check(resp)?.json()?))
+        })
+    }
+
     pub fn upload_artifact(
         &self,
         release_id: u64,

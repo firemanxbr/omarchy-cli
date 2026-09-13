@@ -144,9 +144,12 @@ pub fn run(api: &Api, opts: &SyncOptions) -> Result<SyncReport, RepoError> {
         .cloned()
         .chain(done.iter().map(|(s, _)| s.clone()))
         .collect();
+    // A colliding filename pins the stored object (`reuse`), never the
+    // upstream sha the pool does not hold — even when the index knows it.
+    let colliding: HashSet<&str> = report.collisions.iter().map(|(f, _)| f.as_str()).collect();
     let mut add: Vec<String> = upstream
         .iter()
-        .filter(|p| now_known.contains(&p.sha256))
+        .filter(|p| now_known.contains(&p.sha256) && !colliding.contains(p.filename.as_str()))
         .map(|p| p.sha256.clone())
         .collect();
     add.extend(reuse);
@@ -230,9 +233,9 @@ fn classify_upstream<'a>(
     report.already_indexed = known.len();
     let mut reuse = Vec::new();
     for p in upstream {
-        if known.contains(&p.sha256) {
-            continue;
-        }
+        // The object stored under this filename decides, known sha or not:
+        // an index row for bytes the pool does not hold (a rebuild indexed
+        // behind an earlier build, before 2026-09-12) must not be pinned.
         if let Some(existing) = by_filename.get(&p.filename) {
             if *existing != p.sha256 {
                 tracing::warn!(file = %p.filename, "filename already in the pool with different content; pinning the existing object");

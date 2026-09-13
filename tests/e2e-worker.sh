@@ -138,6 +138,18 @@ gpg --verify "$E2E/stable.db.sig" "$E2E/stable.db" 2>/dev/null || { echo "the po
 # A client's own signature is not taken over the pool's.
 sup=$(curl -s -X PUT "$OMARCHY_API/api/v1/releases/1/artifacts/db.sig?repo=omarchy-packages-stable&arch=x86_64" -H "Authorization: Bearer $OMARCHY_TOKEN" --data-binary 'not a signature')
 grep -q '"status":"superseded"' <<<"$sup" || { echo "client signature was not superseded: $sup"; exit 1; }
+# Does what the pool serves verify? The fixtures were published with the
+# pool's own key: clean. A signature of other bytes planted beside zlib is
+# found; without an upstream channel serving those bytes it is reported for
+# a replacement, not silently kept.
+gpg --armor --export "$KEYID" > "$E2E/verify-key.asc"
+vout=$("$PKG_REPO" verify --ring stable --arch x86_64 --keyring "$E2E/verify-key.asc" --work-dir "$E2E/verify-work" --pool "$OMARCHY_API/pool" 2>&1) || { echo "verify failed: $vout"; exit 1; }
+grep -q "0 bad signature(s)" <<<"$vout" || { echo "verify must find the pool clean: $vout"; exit 1; }
+zlib_sha=$(python3 -c 'import json,sys; d=json.load(sys.stdin); print([p["sha256"] for p in d["packages"] if p["name"]=="zlib"][0])' <<<"$(curl -s "$OMARCHY_API/api/v1/releases/stable?fields=summary&arch=x86_64")")
+curl -s -o /dev/null -X PUT "$OMARCHY_API/api/v1/pool/$zlib_sha/sig?filename=zlib-1:1.3.2-3-x86_64.pkg.tar.zst&arch=x86_64" -H "Authorization: Bearer $OMARCHY_TOKEN" --data-binary "@$E2E/pkgs/xz-5.8.4-1-x86_64.pkg.tar.zst.sig"
+vout=$("$PKG_REPO" verify --ring stable --arch x86_64 --keyring "$E2E/verify-key.asc" --work-dir "$E2E/verify-work" --pool "$OMARCHY_API/pool" --repair 2>&1 || true)
+grep -q "1 bad signature(s)" <<<"$vout" && grep -q "needs replacing" <<<"$vout" || { echo "verify must find the planted signature: $vout"; exit 1; }
+curl -s -o /dev/null -X PUT "$OMARCHY_API/api/v1/pool/$zlib_sha/sig?filename=zlib-1:1.3.2-3-x86_64.pkg.tar.zst&arch=x86_64" -H "Authorization: Bearer $OMARCHY_TOKEN" --data-binary "@$E2E/pkgs/zlib-1:1.3.2-3-x86_64.pkg.tar.zst.sig"
 # A release that only touches aarch64 keeps x86_64's rendered databases: the
 # artifact rows carry over and the response says not to render it again.
 # wrangler dev's proxy drops a request now and then on CI runners ("Network

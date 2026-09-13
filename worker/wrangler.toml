@@ -51,7 +51,7 @@ bucket_name = "omarchy-factory-staging"
 DEFAULT_RING = "stable"
 # Task kinds the scheduler creates as pulled jobs (pkg-repo work) instead of
 # GitHub workflows: sync, promote, render, health, security, metrics, gc.
-JOB_KINDS = "gc,health,sync,promote,security,metrics,enqueue"
+JOB_KINDS = "gc,health,sync,promote,security,metrics,enqueue,verify"
 # The daily cost estimate (src/cost.ts) reads this account's analytics with
 # the CLOUDFLARE_ANALYTICS_TOKEN secret.
 CLOUDFLARE_ACCOUNT_ID = "34f1918ac9ca522150a1830ea9b61a40"

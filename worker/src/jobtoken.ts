@@ -108,6 +108,10 @@ export function scopesFor(kind: string, id: number, trust: string, params: Recor
     case "enqueue":
       s.push("factory:write");
       break;
+    case "verify":
+      // Every ring: a wrong signature replaced, a ring re-pinned to what the pool stores, rendered.
+      s.push("pool:write", "release:edge", "release:rc", "release:stable", "artifacts:*:edge", "artifacts:*:rc", "artifacts:*:stable");
+      break;
     case "audit":
       // The report goes next to the evidence it is about: the staged task's prefix.
       if (typeof params.task === "number" || typeof params.task === "string") s.push(`staging:${params.task}`);

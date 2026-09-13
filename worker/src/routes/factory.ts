@@ -254,9 +254,9 @@ async function touchWorker(env: Env, w: { worker: string; arch: string; hostname
     .run();
 }
 
-const ALL_KINDS = ["build", "sync", "promote", "rollback", "render", "health", "security", "metrics", "gc", "enqueue", "audit"];
+const ALL_KINDS = ["build", "sync", "promote", "rollback", "render", "health", "security", "metrics", "gc", "enqueue", "audit", "verify"];
 /** Jobs any architecture can run: they read the index or the staging area, not packages of one arch. */
-const ANY_ARCH_KINDS = "'metrics', 'gc', 'security', 'promote', 'audit'";
+const ANY_ARCH_KINDS = "'metrics', 'gc', 'security', 'promote', 'audit', 'verify'";
 
 export async function handleClaim(request: Request, env: Env, actor: Actor): Promise<Response> {
   const b = (await request.json()) as { arch?: string; hostname?: string; labels?: unknown; version?: string; kinds?: unknown; shared?: unknown; agent?: unknown };

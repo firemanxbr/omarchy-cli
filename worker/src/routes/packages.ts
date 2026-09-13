@@ -153,16 +153,19 @@ export async function handleKnownPackages(request: Request, env: Env): Promise<R
       .all<{ sha256: string }>();
     for (const r of rows.results) known.push(r.sha256);
   }
+  // The pool holds one object per <arch>/<filename> and never overwrites
+  // it, so of two rows behind one filename (an upstream rebuild of the same
+  // version) the first indexed is the one whose bytes are stored.
   const byFilename: Record<string, string> = {};
   const names = (body.filenames ?? []).filter((f) => typeof f === "string" && f.length < 300);
   for (let i = 0; i < names.length; i += 500) {
     const chunk = names.slice(i, i + 500);
     const rows = await env.DB.prepare(
-      "SELECT filename, sha256 FROM packages WHERE repo_arch = ? AND filename IN (SELECT value FROM json_each(?))",
+      "SELECT filename, sha256 FROM packages WHERE repo_arch = ? AND filename IN (SELECT value FROM json_each(?)) ORDER BY id",
     )
       .bind(repoArch, JSON.stringify(chunk))
       .all<{ filename: string; sha256: string }>();
-    for (const r of rows.results) byFilename[r.filename] = r.sha256;
+    for (const r of rows.results) if (!(r.filename in byFilename)) byFilename[r.filename] = r.sha256;
   }
   return json({ known, by_filename: byFilename });
 }

@@ -63,6 +63,7 @@ pub fn agent_label() -> Option<String> {
 pub fn default_kinds() -> Vec<String> {
     let mut kinds: Vec<String> = [
         "build", "sync", "render", "promote", "health", "security", "enqueue", "rollback", "gc",
+        "verify",
     ]
     .iter()
     .map(|k| (*k).to_owned())
@@ -248,6 +249,7 @@ fn task_label(t: &Task) -> String {
             s(p, "name"),
             p.get("task").map(ToString::to_string).unwrap_or_default()
         ),
+        "verify" => "verify: do the served OPR objects verify?".to_owned(),
         "render" | "health" => format!("{} {}/{}", t.kind, s(p, "ring"), s(p, "arch")),
         _ => format!("{} {}", t.kind, t.name),
     }
@@ -366,6 +368,7 @@ fn execute(opts: &WorkOptions, task: &Task, token: &Arc<Mutex<String>>) -> Resul
         }
         "build" => build_job(opts, &job, task),
         "audit" => audit_job(opts, &job, task),
+        "verify" => verify_job(opts, &job, task),
         other => Err(anyhow!("this worker does not run '{other}' jobs")),
     }
 }
@@ -674,6 +677,60 @@ fn rollback_job(opts: &WorkOptions, job: &Api, task: &Task) -> Result<Outcome> {
             rendered.join(", ")
         ),
         result: serde_json::json!({ "ring": ring, "to": to, "release_id": created, "rendered": rendered }),
+    })
+}
+
+/// Does what the pool serves verify? Every OPR object of every ring and
+/// architecture, downloaded and checked against Omarchy's keyring; what is
+/// wrong is repaired (`verify.rs`) and the rings re-pinned are rendered.
+fn verify_job(opts: &WorkOptions, job: &Api, task: &Task) -> Result<Outcome> {
+    let keys = keyrings(opts)?;
+    let ring = s(&task.params, "ring");
+    let arch = s(&task.params, "arch");
+    let report = crate::verify::run(
+        job,
+        &crate::verify::VerifyOptions {
+            pool: opts.pool.clone(),
+            rings: if ring.is_empty() {
+                vec!["edge".into(), "rc".into(), "stable".into()]
+            } else {
+                vec![ring]
+            },
+            arches: if arch.is_empty() {
+                vec!["x86_64".into(), "aarch64".into()]
+            } else {
+                vec![arch]
+            },
+            keyring: keys.join("omarchy.gpg"),
+            work_dir: opts.work_dir.clone(),
+            repair: s(&task.params, "repair") != "no",
+        },
+    )?;
+    let mut rendered = Vec::new();
+    for (ring, arch) in &report.repinned_rings {
+        rendered.extend(ops::render(job, ring, arch, opts.sign.as_deref())?);
+    }
+    for d in &report.details {
+        eprintln!("  {d}");
+    }
+    job.post_event(&serde_json::json!({
+        "kind": "verify", "status": if report.clean() { "ok" } else if report.unfixable > 0 { "error" } else { "warn" },
+        "summary": report.summary(),
+        "payload": { "objects": report.objects, "bad_signatures": report.bad_signatures, "repaired_signatures": report.repaired_signatures,
+                     "mismatched": report.mismatched, "repinned": report.repinned, "unfixable": report.unfixable, "rendered": rendered,
+                     "details": report.details.iter().take(60).collect::<Vec<_>>() },
+    }))?;
+    Ok(Outcome {
+        summary: format!(
+            "{}{}",
+            report.summary(),
+            if rendered.is_empty() {
+                String::new()
+            } else {
+                format!("; rendered {}", rendered.join(", "))
+            }
+        ),
+        result: serde_json::to_value(&report)?,
     })
 }
 

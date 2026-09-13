@@ -68,6 +68,8 @@ export const RULES: Rule[] = [
   { workflow: "health", at: { hour: 8, minute: 30 }, job: { kind: "health", params: {} } },
   { workflow: "factory-update.yml", at: { hour: 5, minute: 45 } },
   { workflow: "gc", at: { hour: 4, minute: 0, weekday: 0 }, job: { kind: "gc", params: {} } },
+  // Does what the pool serves verify? Every OPR object, once a week, repaired when not.
+  { workflow: "verify", at: { hour: 3, minute: 0, weekday: 6 }, job: { kind: "verify", params: {} } },
 ];
 
 /** The tasks a rule expands to in job mode: sync is one per architecture (all its sources), health one per ring and architecture. */
