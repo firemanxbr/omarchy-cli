@@ -35,13 +35,23 @@ export async function handleQueueJob(c: Contributor, request: Request, env: Env)
       if (!RINGS.includes(from) || !RINGS.includes(to) || from === to) return json({ error: "promote needs from and to (edge, rc, stable)" }, 400);
       const params: Record<string, string> = { from, to, note: s("note") || `manual ${from} → ${to} by ${c.login}` };
       if (s("force") === "yes") params.force = "yes"; // skips the evidence and the gate; the target's health still decides
+      if (s("arch")) {
+        // One architecture only: its evidence, its gate, its rows; the other keeps what the target serves.
+        if (!ARCHES.includes(s("arch"))) return json({ error: "arch must be x86_64 or aarch64" }, 400);
+        params.arch = s("arch");
+      }
       job = { kind: "promote", params, arch: "x86_64" };
       break;
     }
     case "rollback": {
       const ring = s("ring"), to = s("to");
       if (!RINGS.includes(ring) || !/^\d+$/.test(to)) return json({ error: "rollback needs ring (edge, rc, stable) and to (a release id of that ring)" }, 400);
-      job = { kind: "rollback", params: { ring, to, note: s("note") || `rollback to release ${to} by ${c.login}` }, arch: "x86_64" };
+      const params: Record<string, string> = { ring, to, note: s("note") || `rollback to release ${to} by ${c.login}` };
+      if (s("arch")) {
+        if (!ARCHES.includes(s("arch"))) return json({ error: "arch must be x86_64 or aarch64" }, 400);
+        params.arch = s("arch");
+      }
+      job = { kind: "rollback", params, arch: "x86_64" };
       break;
     }
     case "render":

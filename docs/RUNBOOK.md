@@ -49,7 +49,9 @@ pkg-repo job sync --param source=packages --param arch=x86_64 --param ring=rc   
 pkg-repo job promote --param from=edge --param to=rc --param note="…"
 pkg-repo job promote --param from=rc --param to=stable --param note="…"        # evidence-gated, one-day soak
 pkg-repo job promote --param from=rc --param to=stable --param force=yes       # emergency: skips the gate (the target's health still rolls back)
+pkg-repo job promote --param from=rc --param to=stable --param arch=aarch64    # one architecture only: its evidence, its gate, its rows; x86_64 keeps what stable serves
 pkg-repo job rollback --param ring=stable --param to=<release id>              # then renders both architectures (or the overview's roll back button)
+pkg-repo job rollback --param ring=stable --param to=<release id> --param arch=x86_64   # that architecture only
 pkg-repo job render --param ring=stable --param arch=x86_64
 pkg-repo job health --param ring=stable --param arch=aarch64
 pkg-repo job security

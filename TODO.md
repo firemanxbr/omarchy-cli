@@ -30,10 +30,6 @@ request (see [CONTRIBUTING.md](CONTRIBUTING.md)), and keep
       `pkg-extract` so CVEs in vendored crates/modules are visible, since no
       soname reveals them.
 
-- [ ] **Per-architecture promotion.** `promote` copies the whole selection; add
-      `--arch` to `POST /api/v1/releases` (copy only rows of that arch, keep the
-      others) so x86_64 and aarch64 can move at different times when one
-      architecture's evidence is red and the other's green.
 - [ ] **ABI gate on real installations.** The gate checks the upgrades against the
       official base image; run it also against an exported Omarchy installation
       (the ISO's package set) so the check covers what users actually have.
@@ -113,7 +109,8 @@ on profiles · any agent provider on a worker · Worker tests inside workerd
 architecture a release did not touch, CVE metadata pruned by gc · releases
 stored as deltas with checkpoints every 24th · OPR provenance (Omarchy's own
 or AUR-synced, per package; the AUR count in stable on the overview) ·
-security regressions block a promotion.
+security regressions block a promotion · promotion and rollback per
+architecture.
 
 ## Factory findings (2026-09-12)
 

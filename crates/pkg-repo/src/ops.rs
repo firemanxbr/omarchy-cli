@@ -174,17 +174,27 @@ pub fn publish(
     Ok(())
 }
 
-pub fn promote(api: &Api, from: &str, to: &str, note: Option<&str>) -> Result<u64> {
+/// Promotes `from` into `to`: the whole selection, or one architecture
+/// (`arch`) while the other keeps what `to` serves today.
+pub fn promote(
+    api: &Api,
+    from: &str,
+    to: &str,
+    note: Option<&str>,
+    arch: Option<&str>,
+) -> Result<u64> {
     let started = Instant::now();
     let created = api.create_release(&ReleaseRequest {
         ring: to,
         from_ring: Some(from),
         note,
+        arch,
         ..ReleaseRequest::default()
     })?;
     let took = started.elapsed();
     println!(
-        "promoted {from} → {}#{} (id {}, from release {:?}) — {} packages, {} bytes, {:?}, zero bytes copied",
+        "promoted {from}{} → {}#{} (id {}, from release {:?}) — {} packages, {} bytes, {:?}, zero bytes copied",
+        arch.map(|a| format!(" ({a} only)")).unwrap_or_default(),
         created.release.ring,
         created.release.seq,
         created.release.id,
@@ -194,20 +204,29 @@ pub fn promote(api: &Api, from: &str, to: &str, note: Option<&str>) -> Result<u6
         took
     );
     api.post_event(&serde_json::json!({
-        "kind": "promote", "ring": to, "status": "ok",
-        "summary": format!("{from} → {to}#{}: {} packages ({}), zero bytes copied", created.release.seq, created.package_count, sync::human(created.size_download)),
+        "kind": "promote", "ring": to, "source": arch, "status": "ok",
+        "summary": format!("{from} → {to}#{}{}: {} packages ({}), zero bytes copied", created.release.seq, arch.map(|a| format!(" ({a} only)")).unwrap_or_default(), created.package_count, sync::human(created.size_download)),
         "duration_ms": millis(took),
-        "payload": { "release_id": created.release.id, "from_release_id": created.release.source_id, "note": note },
+        "payload": { "release_id": created.release.id, "from_release_id": created.release.source_id, "note": note, "arch": arch },
     }))?;
     Ok(created.release.id)
 }
 
-pub fn rollback(api: &Api, ring: &str, to: u64, note: Option<&str>) -> Result<u64> {
+/// Points `ring` at the selection of release `to` — all of it, or one
+/// architecture (`arch`) while the other keeps what the ring serves today.
+pub fn rollback(
+    api: &Api,
+    ring: &str,
+    to: u64,
+    note: Option<&str>,
+    arch: Option<&str>,
+) -> Result<u64> {
     let started = Instant::now();
     let created = api.create_release(&ReleaseRequest {
         ring,
         from_release_id: Some(to),
         note,
+        arch,
         ..ReleaseRequest::default()
     })?;
     let took = started.elapsed();
@@ -220,10 +239,10 @@ pub fn rollback(api: &Api, ring: &str, to: u64, note: Option<&str>) -> Result<u6
         took
     );
     api.post_event(&serde_json::json!({
-        "kind": "rollback", "ring": ring, "status": "warn",
-        "summary": format!("{ring} rolled back to release {to} as #{} ({} packages)", created.release.seq, created.package_count),
+        "kind": "rollback", "ring": ring, "source": arch, "status": "warn",
+        "summary": format!("{ring}{} rolled back to release {to} as #{} ({} packages)", arch.map(|a| format!(" ({a} only)")).unwrap_or_default(), created.release.seq, created.package_count),
         "duration_ms": millis(took),
-        "payload": { "release_id": created.release.id, "to_release_id": to, "note": note },
+        "payload": { "release_id": created.release.id, "to_release_id": to, "note": note, "arch": arch },
     }))?;
     Ok(created.release.id)
 }

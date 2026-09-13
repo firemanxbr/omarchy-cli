@@ -148,11 +148,11 @@ Publisher commands used by the script, for manual runs against any worker:
 ```bash
 export OMARCHY_API=http://127.0.0.1:8787 OMARCHY_TOKEN=<a job token>   # tests/e2e-worker.sh shows how one is minted from JOB_TOKEN_SECRET
 pkg-repo publish --ring edge foo-1.0-1-x86_64.pkg.tar.zst   # pool + index + new edge release
-pkg-repo promote --from edge --to rc
+pkg-repo promote --from edge --to rc                        # --arch aarch64: that architecture only
 pkg-repo render --ring rc                                   # databases for the ring head (the pool signs them)
 pkg-repo releases --ring rc                                 # history, newest first (--json, --all)
 pkg-repo diff --ring rc                                     # what the head changed: added, removed, upgraded
-pkg-repo rollback --ring rc --to <release id>               # then render again
+pkg-repo rollback --ring rc --to <release id>               # then render again (--arch x86_64: that architecture only)
 ```
 
 ## End-to-end: the thin client
