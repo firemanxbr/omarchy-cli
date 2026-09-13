@@ -246,6 +246,14 @@ tasks from the pool ([factory/README.md](../factory/README.md)). Day to day:
   Mac (`pkg-repo work`, one process per architecture). No GitHub runner
   builds packages; a queued build waits for a project worker. Workers
   hold no key: the pool signs what they publish.
+- **OPR provenance**: once a day (05:15 UTC) the brain reads
+  `omacom/omarchy-pkgs` — one tree request, then one request per package
+  whose PKGBUILD changed — and records whether each OPR recipe is Omarchy's
+  own or synced from the AUR (`.omarchy/package.json`), the AUR commit it
+  tracks and the last commit that touched it. The package page says which;
+  the overview's coverage section counts the AUR-synced recipes `stable`
+  still serves — the number to drive to zero. `provenance` lines in the
+  journal record each scan that changed something.
 - **The audit** (the second agent, GOVERNANCE.md): every staged community
   build queues an `audit` task. A project worker takes it only when it
   was started with an agent key in its environment — `ANTHROPIC_API_KEY`,

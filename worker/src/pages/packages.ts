@@ -167,6 +167,12 @@ const PACKAGE_SCRIPT = String.raw`
     } else if (mt.packager) {
       $("#maint").innerHTML = 'Packaged upstream by ' + esc(mt.packager.replace(/<.*>/, "").trim()) + ' (' + esc(p.source) + '); the pool serves the file as built and signed there.';
     }
+    // An OPR package: where its recipe comes from — Omarchy's own, or synced from the AUR.
+    var pv = d.provenance;
+    if (pv) {
+      var origin = pv.source === "aur" ? '<span class="pill warn">AUR-synced</span> recipe' + (pv.upstream_commit ? ' tracking <a class="mono" href="' + esc(pv.aur) + '">' + esc(pv.upstream_commit.slice(0, 7)) + '</a>' : '') : pv.source === "local" ? "<span class=\"pill ok\">Omarchy's own</span> recipe" : '<span class="pill none">recipe of unknown origin</span>';
+      $("#maint").innerHTML += (($("#maint").innerHTML) ? ' · ' : '') + origin + ' in <a href="' + esc(pv.pkgbuild) + '">omarchy-pkgs</a>' + (pv.pkgbuild_commit ? ', last changed <span class="mono">' + esc(pv.pkgbuild_commit.slice(0, 7)) + '</span> ' + ago(pv.pkgbuild_committed_at) : '') + (pv.release_ring === "fast" ? ' · <span class="muted">built natively for every channel</span>' : '') + (pv.pinned ? ' · <span class="muted">version pinned per release</span>' : '');
+    }
     $("#rings tbody").innerHTML = ["stable", "rc", "edge"].map(function (r) {
       var row = (d.rings || []).filter(function (x) { return x.ring === r; })[0];
       if (!row) return '<tr><td>' + r + '</td><td colspan="5" class="muted">not in ' + r + ' for ' + arch + '</td></tr>';

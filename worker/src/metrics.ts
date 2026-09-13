@@ -5,6 +5,7 @@
  * Actions runs — the pipeline no longer runs there.
  */
 import type { Env } from "./index";
+import { provenanceCounts } from "./provenance";
 import { version } from "./meta";
 
 const EVERY_MINUTES = 30;
@@ -100,6 +101,8 @@ export async function snapshotMetrics(env: Env, now = new Date()): Promise<strin
       reclaimable_objects: reclaimable?.objects ?? 0,
     },
     rings: rings.results,
+    // OPR recipes by origin, per ring: the AUR-synced count is the one to drive to zero.
+    provenance: { stable: await provenanceCounts(env, "stable"), rc: await provenanceCounts(env, "rc"), edge: await provenanceCounts(env, "edge") },
     version: version(env).version,
   };
   // Snapshots are worth 90 days of history; the charts read 7.

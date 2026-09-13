@@ -33,10 +33,6 @@ request (see [CONTRIBUTING.md](CONTRIBUTING.md)), and keep
       package from a clean version to one with an open advisory (exact
       confidence) when the source ring also serves a clean one.
 
-- [ ] **Package provenance.** Record, per OPR package, the PKGBUILD commit and
-      whether it is AUR-synced or Omarchy's own (`omarchy-pkgs` has
-      `.omarchy/package.json`), and show on the dashboard how many packages in
-      `stable` still come from an AUR-synced PKGBUILD — the number to drive to zero.
 - [ ] **Per-architecture promotion.** `promote` copies the whole selection; add
       `--arch` to `POST /api/v1/releases` (copy only rows of that arch, keep the
       others) so x86_64 and aarch64 can move at different times when one
@@ -118,7 +114,8 @@ on profiles · any agent provider on a worker · Worker tests inside workerd
 (releases, the factory) · release diff (API, page, `pkg-repo diff`),
 `releases --json --all`, the rollback button, databases kept for an
 architecture a release did not touch, CVE metadata pruned by gc · releases
-stored as deltas with checkpoints every 24th.
+stored as deltas with checkpoints every 24th · OPR provenance (Omarchy's own
+or AUR-synced, per package; the AUR count in stable on the overview).
 
 ## Factory findings (2026-09-12)
 

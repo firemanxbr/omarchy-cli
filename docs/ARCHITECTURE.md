@@ -57,6 +57,7 @@ Promoting a release copies and re-uploads most of that data, so a bump takes
 | `release_deltas` | `(release_id, package_id, op)` — what a release added or removed against its parent |
 | `release_packages` | `(release_id, package_id)` — the full selection of checkpoint releases only |
 | `ring_heads` | `ring → release_id` currently served |
+| `opr_packages` | per OPR package, where its recipe comes from (`omacom/omarchy-pkgs`, `.omarchy/package.json`): `source` local or aur, the AUR commit tracked, the last commit that touched it |
 
 Migrations live in `worker/migrations/`.
 
@@ -101,7 +102,7 @@ Nothing of the pipeline runs on GitHub Actions.
 | `audit` | when a community build is staged | the second agent ([GOVERNANCE.md](GOVERNANCE.md#the-second-agent)): a project worker whose owner set an agent key (Anthropic, OpenAI, Gemini or xAI) reads the staged PKGBUILD, log and `.PKGINFO`, asks its model for a structured review (`factory/bin/audit-pkgbuild`, `factory/prompts/audit.md`) and attaches `audit.json` / `audit.md` to the evidence; the Review page shows the verdict. Never taken by the hosted fallback |
 | `build` | on approval, on merge, on a new upstream release | a package built in a fresh container: community trust on a contributor's worker into their staging workspace, project trust on a trusted worker into `edge` |
 | metrics snapshot (`src/metrics.ts`) | every 30 minutes | taken by the Worker itself, no job: the pool's jobs of the last 7 days (runs, failures, worker minutes, per kind), builds, workers alive, pool totals and ring sizes, as a `metrics` event; the dashboard's charts and jobs table read from it |
-| worker cron trigger | every 10 minutes | the pool's own scheduler: queues the jobs above when due, requeues expired leases, applies `factory/MAINTAINERS.toml`, reads package-request issues, checks upstreams for bumps (05:45), estimates the bill (06:30), starts the hosted fallback worker when pool jobs wait and no project worker is idle; see RUNBOOK |
+| worker cron trigger | every 10 minutes | the pool's own scheduler: queues the jobs above when due, requeues expired leases, applies `factory/MAINTAINERS.toml`, reads package-request issues, reads the OPR's recipe repository for provenance (05:15, `src/provenance.ts`: per package, Omarchy's own or AUR-synced, the upstream AUR commit, the last commit), checks upstreams for bumps (05:45), estimates the bill (06:30), starts the hosted fallback worker when pool jobs wait and no project worker is idle; see RUNBOOK |
 | `ci.yml`, `e2e.yml` | every pull request | fmt, clippy, tests and the worker typecheck on x86_64 and aarch64; real pacman end to end through a local worker |
 | `release.yml` | every merge into `main` | CI + E2E again on the merged commit, next version from the last tag (`v0.0.1`, `v0.0.2`, …), binaries for both architectures, GitHub release, `wrangler deploy` carrying `POOL_VERSION` — the dashboard shows what is running |
 
