@@ -136,21 +136,52 @@ async function enqueue(env: Env, t: { name: string; group: string; arches: strin
 
 // ---------- maintainers / pipeline ----------
 
+const REQUEST_STATUSES = ["requested", "drafting", "validating", "review", "approved", "rejected", "failed"];
+
+/**
+ * A request is a project URL and a name. It is what a user files (an issue,
+ * this API); the request workflow drafts the PKGBUILD, validates it with a
+ * dry-run build and opens the pull request a maintainer approves — every
+ * stage reported back here (PATCH) so the Factory page tells the story.
+ */
 export async function handleCreateRequest(request: Request, env: Env): Promise<Response> {
-  const b = (await request.json()) as { name?: string; group?: string; arches?: unknown; requested_by?: string; reason?: string; override?: boolean };
+  const b = (await request.json()) as { name?: string; group?: string; arches?: unknown; url?: string; requested_by?: string; reason?: string; issue_url?: string; override?: boolean };
   if (!b.name || !/^[a-z0-9@._+-]+$/.test(b.name)) return json({ error: "name must be a pacman package name" }, 400);
+  if (b.url && !/^https?:\/\/[^\s]+$/.test(b.url)) return json({ error: "url must be http(s)" }, 400);
   const group = b.group ?? "community";
   const arches = parseArches(b.arches);
   const { build, skipped } = splitByUpstream(await providedBy(env, b.name), arches, b.override);
   if (!build.length) return nothingToBuild(skipped);
   const row = await env.DB.prepare(
-    `INSERT INTO build_requests (name, "group", arches, requested_by, reason) VALUES (?, ?, ?, ?, ?)
-     ON CONFLICT (name) DO UPDATE SET reason = COALESCE(excluded.reason, reason), arches = excluded.arches RETURNING *`,
+    `INSERT INTO build_requests (name, "group", arches, url, requested_by, reason, issue_url) VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT (name) DO UPDATE SET reason = COALESCE(excluded.reason, reason), arches = excluded.arches, url = COALESCE(excluded.url, url),
+       issue_url = COALESCE(excluded.issue_url, issue_url), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') RETURNING *`,
   )
-    .bind(b.name, group, JSON.stringify(build), b.requested_by ?? null, b.reason ?? null)
+    .bind(b.name, group, JSON.stringify(build), b.url ?? null, b.requested_by ?? null, b.reason ?? null, b.issue_url ?? null)
     .first();
-  await event(env, "request", "ok", `${b.name} requested for ${build.join(", ")}${b.requested_by ? " by " + b.requested_by : ""}`, { name: b.name, group, arches: build, skipped, requested_by: b.requested_by ?? null });
+  await event(env, "request", "ok", `${b.name} requested for ${build.join(", ")}${b.requested_by ? " by " + b.requested_by : ""}${b.url ? " from " + b.url : ""}`, { name: b.name, group, arches: build, skipped, url: b.url ?? null, requested_by: b.requested_by ?? null });
   return json({ request: row, skipped }, 201);
+}
+
+export async function handleUpdateRequest(idOrName: number | string, request: Request, env: Env): Promise<Response> {
+  const b = (await request.json()) as { status?: string; detail?: string; pr_url?: string; pkgbuild_ref?: string; by?: string };
+  if (b.status && !REQUEST_STATUSES.includes(b.status)) return json({ error: `status must be one of ${REQUEST_STATUSES.join(", ")}` }, 400);
+  const req = await env.DB.prepare(typeof idOrName === "number" ? "SELECT * FROM build_requests WHERE id = ?" : "SELECT * FROM build_requests WHERE name = ?")
+    .bind(idOrName)
+    .first<{ id: number; name: string; status: string }>();
+  if (!req) return json({ error: "no such request" }, 404);
+  const id = req.id;
+  const approving = b.status === "approved";
+  await env.DB.prepare(
+    `UPDATE build_requests SET status = COALESCE(?, status), detail = COALESCE(?, detail), pr_url = COALESCE(?, pr_url), pkgbuild_ref = COALESCE(?, pkgbuild_ref),
+       approved_by = CASE WHEN ? THEN ? ELSE approved_by END, approved_at = CASE WHEN ? THEN ? ELSE approved_at END, updated_at = ? WHERE id = ?`,
+  )
+    .bind(b.status ?? null, b.detail ?? null, b.pr_url ?? null, b.pkgbuild_ref ?? null, approving ? 1 : 0, b.by ?? null, approving ? 1 : 0, now(), now(), id)
+    .run();
+  if (b.status && b.status !== req.status) {
+    await event(env, "request", b.status === "failed" || b.status === "rejected" ? "warn" : "ok", `${req.name}: ${b.status}${b.detail ? " — " + b.detail.slice(0, 160) : ""}`, { request: id, status: b.status, pr_url: b.pr_url ?? null });
+  }
+  return json({ request: id, status: b.status ?? req.status });
 }
 
 export async function handleApproveRequest(id: number, request: Request, env: Env): Promise<Response> {

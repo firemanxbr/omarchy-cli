@@ -43,7 +43,7 @@ import { handlePackage, handlePackageFiles, handleSearch } from "./routes/search
 import { handlePrune, handlePutAdvisories, handlePutMatches, handleSecurity } from "./routes/security";
 import {
   handleApproveRequest, handleCancelTask, handleClaim, handleComplete, handleCreateRequest, handleEnqueue, handleFactory, handleFail,
-  handleHeartbeat, handleRejectRequest, handleTask, handleBuilt,
+  handleHeartbeat, handleRejectRequest, handleTask, handleBuilt, handleUpdateRequest,
 } from "./routes/factory";
 import { requireFactoryAuth } from "./auth";
 import { handleGetEvents, handlePostEvent } from "./routes/events";
@@ -196,6 +196,8 @@ async function api(method: string, path: string, url: URL, request: Request, env
   if ((m = path.match(/^\/factory\/tasks\/(\d+)\/cancel$/)) && method === "POST") return requireAuth(request, env) ?? handleCancelTask(Number(m[1]), env);
   if (method === "POST" && path === "/factory/requests") return requireAuth(request, env) ?? handleCreateRequest(request, env);
   if ((m = path.match(/^\/factory\/requests\/(\d+)\/approve$/)) && method === "POST") return requireAuth(request, env) ?? handleApproveRequest(Number(m[1]), request, env);
+  if ((m = path.match(/^\/factory\/requests\/(\d+)$/)) && method === "PATCH") return requireAuth(request, env) ?? handleUpdateRequest(Number(m[1]), request, env);
+  if ((m = path.match(/^\/factory\/requests\/name\/([a-z0-9@._+-]+)$/)) && method === "PATCH") return requireAuth(request, env) ?? handleUpdateRequest(m[1], request, env);
   if ((m = path.match(/^\/factory\/requests\/(\d+)\/reject$/)) && method === "POST") return requireAuth(request, env) ?? handleRejectRequest(Number(m[1]), request, env);
   if (method === "POST" && path === "/factory/enqueue") return requireAuth(request, env) ?? handleEnqueue(request, env);
   if (method === "PUT" && path === "/security/advisories") return requireAuth(request, env) ?? handlePutAdvisories(request, env);

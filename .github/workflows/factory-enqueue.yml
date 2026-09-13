@@ -66,7 +66,10 @@ jobs:
             code="$(curl -sS -o /tmp/resp -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/enqueue" \
               -H "authorization: Bearer $OMARCHY_PUBLISH_TOKEN" -H "content-type: application/json" --data "$body")"
             case "$code" in
-              201) echo "queued $(jq -c '{tasks, skipped}' /tmp/resp)"; queued=$((queued + 1)) ;;
+              201) echo "queued $(jq -c '{tasks, skipped}' /tmp/resp)"; queued=$((queued + 1))
+                   # A merged PKGBUILD is the approval of its request, if there was one.
+                   curl -sS -o /dev/null -X PATCH "$OMARCHY_API/api/v1/factory/requests/name/$name" -H "authorization: Bearer $OMARCHY_PUBLISH_TOKEN" -H "content-type: application/json" \
+                     --data "$(jq -n --arg r "$GITHUB_SHA" --arg by "$GITHUB_ACTOR" '{status:"approved", pkgbuild_ref:$r, by:$by, detail:"PKGBUILD merged; building"}')" || true ;;
               409) echo "skipped — $(jq -r .error /tmp/resp)" ;;
               *)   echo "HTTP $code $(cat /tmp/resp)"; exit 1 ;;
             esac

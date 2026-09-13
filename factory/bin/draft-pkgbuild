@@ -1,0 +1,237 @@
+#!/usr/bin/env python3
+"""Draft a PKGBUILD for a project URL.
+
+    draft-pkgbuild --url https://github.com/owner/repo [--name NAME] --out DIR
+                   [--previous DIR/PKGBUILD --log build.log] [--hint TEXT]
+
+Analyses the repository through the GitHub API (metadata, latest release and
+its assets, the files that reveal the build system, the README head) and asks
+Claude for the PKGBUILD following factory/prompts/pkgbuild.md; without
+ANTHROPIC_API_KEY it falls back to a template for Rust, Go, CMake, Meson and
+prebuilt release binaries. Writes DIR/PKGBUILD and prints a JSON summary.
+Checksums are left as SKIP for updpkgsums.
+"""
+import argparse, json, os, re, sys, urllib.request, urllib.error, base64
+
+GH = "https://api.github.com"
+FILES = ["Cargo.toml", "go.mod", "package.json", "pyproject.toml", "setup.py", "CMakeLists.txt",
+         "meson.build", "Makefile", "configure.ac", "configure", "build.zig", "Gemfile", "mix.exs", "CMakePresets.json"]
+
+
+def gh(path, raw=False):
+    req = urllib.request.Request(GH + path, headers={"accept": "application/vnd.github+json", "user-agent": "omarchy-pool-factory"})
+    if os.environ.get("GITHUB_TOKEN"):
+        req.add_header("authorization", "Bearer " + os.environ["GITHUB_TOKEN"])
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return r.read() if raw else json.load(r)
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return None
+        raise
+
+
+def analyze(url, name):
+    m = re.match(r"^https?://github\.com/([^/]+)/([^/#?]+)", url)
+    if not m:
+        sys.exit("only GitHub project URLs are supported for automatic drafting today: " + url)
+    owner, repo = m.group(1), m.group(2).removesuffix(".git")
+    meta = gh(f"/repos/{owner}/{repo}") or sys.exit(f"{owner}/{repo} not found on GitHub")
+    rel = gh(f"/repos/{owner}/{repo}/releases/latest")
+    tag = rel["tag_name"] if rel else None
+    if not tag:
+        tags = gh(f"/repos/{owner}/{repo}/tags?per_page=1") or []
+        tag = tags[0]["name"] if tags else None
+    ref = tag or meta.get("default_branch", "main")
+    tree = gh(f"/repos/{owner}/{repo}/git/trees/{ref}") or {"tree": []}
+    top = {t["path"]: t for t in tree.get("tree", []) if t["type"] == "blob"}
+    files = {}
+    for f in FILES:
+        if f in top:
+            blob = gh(f"/repos/{owner}/{repo}/contents/{f}?ref={ref}")
+            if blob and blob.get("encoding") == "base64":
+                files[f] = base64.b64decode(blob["content"]).decode("utf-8", "replace")[:6000]
+    readme = ""
+    rd = gh(f"/repos/{owner}/{repo}/readme?ref={ref}")
+    if rd and rd.get("encoding") == "base64":
+        readme = base64.b64decode(rd["content"]).decode("utf-8", "replace")[:5000]
+    licenses = [t["path"] for t in top.values() if re.match(r"(?i)^(LICENSE|COPYING|LICENCE)", t["path"])]
+    assets = [a["name"] for a in (rel or {}).get("assets", [])]
+    return {
+        "owner": owner, "repo": repo, "url": f"https://github.com/{owner}/{repo}", "name": name or repo.lower(),
+        "description": (meta.get("description") or "").strip(), "license_spdx": (meta.get("license") or {}).get("spdx_id"),
+        "language": meta.get("language"), "tag": tag, "pkgver": (tag or "0").lstrip("v").replace("-", "_") if tag else None,
+        "default_branch": meta.get("default_branch"), "top_level": sorted(top.keys())[:80], "license_files": licenses,
+        "release_assets": assets, "files": files, "readme": readme,
+    }
+
+
+def build_system(a):
+    f = a["files"]
+    if "Cargo.toml" in f: return "rust"
+    if "go.mod" in f: return "go"
+    if "meson.build" in f: return "meson"
+    if "CMakeLists.txt" in f: return "cmake"
+    if "configure.ac" in f or "configure" in f: return "autotools"
+    if "pyproject.toml" in f or "setup.py" in f: return "python"
+    if "package.json" in f: return "node"
+    if "Makefile" in f: return "make"
+    linux = [x for x in a["release_assets"] if "linux" in x.lower()]
+    if linux: return "binary"
+    return "unknown"
+
+
+def template(a):
+    """A conservative PKGBUILD without a model: the common build systems."""
+    bs = build_system(a)
+    n, v, u = a["name"], a["pkgver"], a["url"]
+    lic = a["license_spdx"] if a["license_spdx"] and a["license_spdx"] != "NOASSERTION" else "custom"
+    desc = (a["description"] or n).replace('"', "'")[:80]
+    head = f"# Maintainer: omarchy-pool factory <https://github.com/firemanxbr/omarchy-pool>\n# Requested from: {u}\n# Drafted from a template ({bs}); review the dependencies.\n"
+    src = f'source=("$pkgname-$pkgver.tar.gz::{u}/archive/refs/tags/{a["tag"]}.tar.gz")\nsha256sums=(\'SKIP\')\n'
+    lic_install = "\n  install -Dm644 " + a["license_files"][0] + ' -t "$pkgdir/usr/share/licenses/$pkgname"' if a["license_files"] else ""
+    common = f'pkgname={n}\npkgver={v}\npkgrel=1\npkgdesc="{desc}"\narch=(\'x86_64\' \'aarch64\')\nurl="{u}"\nlicense=(\'{lic}\')\n'
+    srcdir = f'"$srcdir/{a["repo"]}-{a["tag"].lstrip("v")}"'
+    if bs == "rust":
+        return head + common + "makedepends=('cargo')\n" + src + f'''
+prepare() {{
+  cd {srcdir}
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}}
+
+build() {{
+  cd {srcdir}
+  export CARGO_TARGET_DIR=target
+  cargo build --frozen --release
+}}
+
+package() {{
+  cd {srcdir}
+  # Every binary the crate builds lands in /usr/bin.
+  find target/release -maxdepth 1 -type f -perm -u+x -exec install -Dm755 {{}} -t "$pkgdir/usr/bin" \\;{lic_install}
+}}
+'''
+    if bs == "go":
+        return head + common + "makedepends=('go')\n" + src + f'''
+build() {{
+  cd {srcdir}
+  export CGO_CPPFLAGS="$CPPFLAGS" CGO_CFLAGS="$CFLAGS" CGO_CXXFLAGS="$CXXFLAGS" CGO_LDFLAGS="$LDFLAGS"
+  export GOFLAGS="-buildmode=pie -trimpath -mod=readonly -modcacherw"
+  go build -ldflags "-linkmode external -extldflags \\"$LDFLAGS\\"" -o build/ ./...
+}}
+
+package() {{
+  cd {srcdir}
+  install -Dm755 build/* -t "$pkgdir/usr/bin"{lic_install}
+}}
+'''
+    if bs == "cmake":
+        return head + common + "makedepends=('cmake')\n" + src + f'''
+build() {{
+  cmake -B build -S {srcdir} -DCMAKE_BUILD_TYPE=None -DCMAKE_INSTALL_PREFIX=/usr
+  cmake --build build
+}}
+
+package() {{
+  DESTDIR="$pkgdir" cmake --install build
+  cd {srcdir}{lic_install}
+}}
+'''
+    if bs == "meson":
+        return head + common + "makedepends=('meson' 'ninja')\n" + src + f'''
+build() {{
+  arch-meson {srcdir} build
+  meson compile -C build
+}}
+
+package() {{
+  meson install -C build --destdir "$pkgdir"
+  cd {srcdir}{lic_install}
+}}
+'''
+    if bs in ("autotools", "make"):
+        conf = "  ./configure --prefix=/usr\n" if bs == "autotools" else ""
+        return head + common + src + f'''
+build() {{
+  cd {srcdir}
+{conf}  make
+}}
+
+package() {{
+  cd {srcdir}
+  make DESTDIR="$pkgdir" PREFIX=/usr install{lic_install}
+}}
+'''
+    if bs == "binary":
+        pick = lambda words: next((x for x in a["release_assets"] if all(w in x.lower() for w in words)), None)
+        x86 = pick(["linux", "amd64"]) or pick(["linux", "x86_64"]) or pick(["linux", "x64"])
+        arm = pick(["linux", "arm64"]) or pick(["linux", "aarch64"])
+        if not x86 and not arm:
+            sys.exit("release assets carry no linux binaries: " + ", ".join(a["release_assets"]))
+        base = f"{u}/releases/download/{a['tag']}/"
+        lines = f'pkgname={n}-bin\npkgver={v}\npkgrel=1\npkgdesc="{desc}"\narch=('
+        lines += " ".join(f"'{x}'" for x, y in (("x86_64", x86), ("aarch64", arm)) if y) + f')\nurl="{u}"\nlicense=(\'{lic}\')\nprovides=(\'{n}\')\nconflicts=(\'{n}\')\n'
+        if x86: lines += f'source_x86_64=("{base}{x86}")\nsha256sums_x86_64=(\'SKIP\')\n'
+        if arm: lines += f'source_aarch64=("{base}{arm}")\nsha256sums_aarch64=(\'SKIP\')\n'
+        lines += f'''
+package() {{
+  # The archive ships the binary at its top level or in a single directory.
+  local bin; bin="$(find "$srcdir" -maxdepth 2 -type f -name '{n}' -perm -u+x | head -n1)"
+  [[ -n "$bin" ]] || bin="$(find "$srcdir" -maxdepth 2 -type f -perm -u+x ! -name '*.sh' | head -n1)"
+  install -Dm755 "$bin" "$pkgdir/usr/bin/{n}"
+  local lic; lic="$(find "$srcdir" -maxdepth 2 -iname 'LICENSE*' | head -n1)"
+  [[ -z "$lic" ]] || install -Dm644 "$lic" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}}
+'''
+        return head + lines
+    sys.exit(f"no template for build system '{bs}' and no ANTHROPIC_API_KEY to draft with")
+
+
+def claude(a, previous, log, hint):
+    key = os.environ["ANTHROPIC_API_KEY"]
+    rules = open(os.path.join(os.path.dirname(__file__), "..", "prompts", "pkgbuild.md")).read()
+    facts = {k: v for k, v in a.items() if k not in ("files", "readme")}
+    user = "Project facts:\n" + json.dumps(facts, indent=1) + "\n\n"
+    for f, body in a["files"].items():
+        user += f"--- {f} ---\n{body}\n\n"
+    user += "--- README (head) ---\n" + a["readme"] + "\n"
+    if previous:
+        user += "\n--- previous PKGBUILD ---\n" + previous + "\n--- build log tail ---\n" + (log or "")[-6000:] + "\n"
+    if hint:
+        user += "\n--- maintainer hint ---\n" + hint + "\n"
+    user += "\nReturn the PKGBUILD only."
+    body = json.dumps({"model": os.environ.get("FACTORY_MODEL", "claude-sonnet-5"), "max_tokens": 4000, "system": rules,
+                       "messages": [{"role": "user", "content": user}]}).encode()
+    req = urllib.request.Request("https://api.anthropic.com/v1/messages", data=body, method="POST",
+                                 headers={"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"})
+    with urllib.request.urlopen(req, timeout=180) as r:
+        out = json.load(r)
+    text = "".join(c.get("text", "") for c in out.get("content", []))
+    text = re.sub(r"^```\w*\n|\n```\s*$", "", text.strip())
+    if "pkgname=" not in text or "package()" not in text:
+        sys.exit("the model did not return a PKGBUILD:\n" + text[:500])
+    return text + ("\n" if not text.endswith("\n") else "")
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--url", required=True); ap.add_argument("--name"); ap.add_argument("--out", required=True)
+    ap.add_argument("--previous"); ap.add_argument("--log"); ap.add_argument("--hint")
+    args = ap.parse_args()
+    a = analyze(args.url, args.name)
+    if not a["tag"]:
+        sys.exit(f"{a['url']} has no release or tag; the factory packages releases only")
+    previous = open(args.previous).read() if args.previous else None
+    log = open(args.log).read() if args.log else None
+    mode = "claude" if os.environ.get("ANTHROPIC_API_KEY") else "template"
+    text = claude(a, previous, log, args.hint) if mode == "claude" else template(a)
+    os.makedirs(args.out, exist_ok=True)
+    with open(os.path.join(args.out, "PKGBUILD"), "w") as f:
+        f.write(text)
+    m = re.search(r"^pkgname=(\S+)", text, re.M)
+    print(json.dumps({"name": m.group(1) if m else a["name"], "pkgver": a["pkgver"], "tag": a["tag"], "build_system": build_system(a),
+                      "mode": mode, "license": a["license_spdx"], "unfixable": "# UNFIXABLE:" in text}))
+
+
+if __name__ == "__main__":
+    main()

@@ -138,11 +138,13 @@ schedules are all there is.
 What no upstream ships is built from `factory/pkgbuilds` by workers that pull
 tasks from the pool ([factory/README.md](../factory/README.md)). Day to day:
 
-- **Add a package**: open a pull request with
-  `factory/pkgbuilds/<group>/<name>/PKGBUILD`; the group's CODEOWNERS review
-  it; merging queues the builds. Check first that no source ships it for the
-  architecture (`curl $OMARCHY_API/api/v1/package/<name>`) — the enqueue
-  refuses those architectures.
+- **Add a package**: file a *Package request* issue with the project URL —
+  the factory drafts the PKGBUILD, builds it as a dry run on both
+  architectures and opens the pull request; the group's CODEOWNERS review it;
+  merging queues the builds. Set the `ANTHROPIC_API_KEY` secret for
+  Claude-drafted PKGBUILDs (without it a template handles Rust, Go, CMake,
+  Meson, autotools and release binaries). A hand-written pull request with
+  `factory/pkgbuilds/<group>/<name>/PKGBUILD` works the same way.
 - **Rebuild**: *Actions → Factory enqueue → Run workflow* with `group/name`
   (`override` builds even a name upstream ships).
 - **A failed task**: the Factory page shows the error and the log tail

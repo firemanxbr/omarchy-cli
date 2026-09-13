@@ -28,14 +28,14 @@ const BODY = String.raw`
 
   <section>
     <h2>Requests</h2>
-    <p class="sub">A request is the first step for a package nobody ships: a maintainer of its group approves it by merging a PKGBUILD; after that, new versions build without a human.</p>
-    <div class="table-wrap"><table id="requests"><thead><tr><th>#</th><th>Package</th><th>Group</th><th>Arches</th><th>Status</th><th>Requested by</th><th>Reason</th><th>When</th></tr></thead><tbody></tbody></table></div>
+    <p class="sub">A request is a project URL. The factory drafts the PKGBUILD, builds it as a dry run on both architectures and opens a pull request; a maintainer of the group approves it once by merging. After that, new versions build without a human. <a href="${REPO_URL}/issues/new?template=package-request.yml">Request a package →</a></p>
+    <div class="table-wrap"><table id="requests"><thead><tr><th>#</th><th>Package</th><th>Project</th><th>Arches</th><th>Stage</th><th>Requested by</th><th>Detail</th><th>Updated</th></tr></thead><tbody></tbody></table></div>
   </section>
 `;
 
 const SCRIPT = String.raw`
   function statusPill(s) {
-    var c = { leased: "var(--blue)", queued: "var(--amber)", done: "var(--green)", failed: "var(--red)", cancelled: "var(--dim)", requested: "var(--amber)", approved: "var(--green)", rejected: "var(--dim)" }[s] || "var(--dim)";
+    var c = { leased: "var(--blue)", queued: "var(--amber)", done: "var(--green)", failed: "var(--red)", cancelled: "var(--dim)", requested: "var(--amber)", drafting: "var(--blue)", validating: "var(--blue)", review: "var(--amber)", approved: "var(--green)", rejected: "var(--dim)" }[s] || "var(--dim)";
     return '<span class="pill" style="color:' + c + ';border-color:' + c + '">' + esc(s === "leased" ? "building" : s) + '</span>';
   }
   function took(ms) { if (ms == null) return "—"; var s = Math.round(ms / 1000); return s < 60 ? s + " s" : Math.floor(s / 60) + " min " + (s % 60) + " s"; }
@@ -66,8 +66,10 @@ const SCRIPT = String.raw`
           '<td class="mono">' + esc(t.lease_owner || "") + '</td><td>' + took(t.duration_ms) + '</td><td>' + result + '</td></tr>';
       }).join("") || '<tr><td colspan="8" class="muted">nothing queued or built yet</td></tr>';
       $("#requests tbody").innerHTML = d.requests.map(function (r) {
-        return '<tr><td>' + r.id + '</td><td><b>' + esc(r.name) + '</b></td><td>' + esc(r.group) + '</td><td>' + esc(JSON.parse(r.arches || "[]").join(", ")) + '</td><td>' + statusPill(r.status) + (r.approved_by ? ' <span class="muted">by ' + esc(r.approved_by) + '</span>' : '') + '</td>' +
-          '<td>' + esc(r.requested_by || "—") + '</td><td>' + esc(r.reason || "") + '</td><td>' + ago(r.created_at) + '</td></tr>';
+        var links = (r.pr_url ? ' <a class="run" href="' + esc(r.pr_url) + '">pull request</a>' : '') + (r.issue_url ? ' <a class="run" href="' + esc(r.issue_url) + '">issue</a>' : '');
+        return '<tr><td>' + r.id + '</td><td><b>' + esc(r.name) + '</b> <span class="src">' + esc(r.group) + '</span></td><td>' + (r.url ? '<a href="' + esc(r.url) + '">' + esc(r.url.replace(/^https?:\/\/(www\.)?/, "")) + '</a>' : '<span class="muted">—</span>') + '</td><td>' + esc(JSON.parse(r.arches || "[]").join(", ")) + '</td>' +
+          '<td>' + statusPill(r.status) + (r.approved_by ? ' <span class="muted">by ' + esc(r.approved_by) + '</span>' : '') + links + '</td>' +
+          '<td>' + esc(r.requested_by || "—") + '</td><td>' + esc(r.detail || r.reason || "") + '</td><td>' + ago(r.updated_at || r.created_at) + '</td></tr>';
       }).join("") || '<tr><td colspan="8" class="muted">no requests</td></tr>';
     }).catch(function (e) { $("#updated").textContent = "failed: " + e; });
   }
