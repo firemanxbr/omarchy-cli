@@ -57,9 +57,7 @@ jobs:
             docker run --rm -v "$PWD/$dir:/pkg" -w /pkg docker.io/library/archlinux:base-devel bash -c '
               sed -i -e "s/^#\?DisableSandboxSyscalls/DisableSandboxSyscalls/" -e "s/^#\?DisableSandboxFilesystem/DisableSandboxFilesystem/" /etc/pacman.conf
               pacman -Sy --noconfirm --needed pacman-contrib >/dev/null && useradd -m b && chown -R b /pkg && sudo -u b updpkgsums' 2>&1 | tail -3
-            git add "$dir" && git commit -qm "factory: $name $current → $latest
-
-Automatic bump of an approved package after an upstream release." || { echo "$pkg: nothing changed"; continue; }
+            git add "$dir" && git commit -q -m "factory: $name $current → $latest" -m "Automatic bump of an approved package after an upstream release." || { echo "$pkg: nothing changed"; continue; }
             git push -q -f origin "$branch"
             url="$(gh pr create --base main --head "$branch" --title "factory: $name $current → $latest" \
               --body "Upstream released **$latest** (this PKGBUILD had $current). pkgver bumped, pkgrel reset, checksums refreshed with updpkgsums. Opened by the Factory update workflow; auto-merge is on — CI is the gate, the merge queues the build.")"
