@@ -25,6 +25,10 @@ on:
         description: Build even if an upstream source ships this name
         type: boolean
         default: false
+      dry_run:
+        description: Build and measure only — never publish (sizing)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -42,6 +46,7 @@ jobs:
           ONLY: ${{ inputs.package }}
           FORCE: ${{ inputs.force || 'false' }}
           OVERRIDE: ${{ inputs.override || 'false' }}
+          DRY_RUN: ${{ inputs.dry_run || 'false' }}
         run: |
           set -euo pipefail
           built="$(curl -sS --fail-with-body "$OMARCHY_API/api/v1/factory/built")"
@@ -56,8 +61,8 @@ jobs:
             fi
             if [[ "$arches" == "[]" ]]; then echo "$group/$name $META_VERSION: nothing to queue"; continue; fi
             printf '%s/%s %s → %s: ' "$group" "$name" "$META_VERSION" "$arches"
-            body="$(jq -n --arg n "$name" --arg g "$group" --arg r "$GITHUB_SHA" --arg v "$META_VERSION" --argjson a "$arches" --argjson o "$OVERRIDE" \
-              '{name:$n, group:$g, pkgbuild_ref:$r, version:$v, arches:$a, reason:"pkgbuild-changed", override:$o}')"
+            body="$(jq -n --arg n "$name" --arg g "$group" --arg r "$GITHUB_SHA" --arg v "$META_VERSION" --argjson a "$arches" --argjson o "$OVERRIDE" --argjson d "$DRY_RUN" \
+              '{name:$n, group:$g, pkgbuild_ref:$r, version:$v, arches:$a, reason:(if $d then "sizing" else "pkgbuild-changed" end), override:$o, publish:($d|not)}')"
             code="$(curl -sS -o /tmp/resp -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/enqueue" \
               -H "authorization: Bearer $OMARCHY_PUBLISH_TOKEN" -H "content-type: application/json" --data "$body")"
             case "$code" in

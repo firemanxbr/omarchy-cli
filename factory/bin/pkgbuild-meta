@@ -5,6 +5,7 @@
 # architecture directory) and META_VERSION.
 set -euo pipefail
 f="${1:?PKGBUILD path}"
+(( BASH_VERSINFO[0] >= 4 )) || { echo "pkgbuild-meta needs bash 4+ (PKGBUILDs use declare -g); this is $BASH_VERSION" >&2; exit 2; }
 # A throwaway bash sources the file with functions neutralised; PKGBUILDs are
 # reviewed code, but this keeps a stray command from running here.
 IFS=$'\t' read -r arches pkgver pkgrel epoch < <(bash -c '
