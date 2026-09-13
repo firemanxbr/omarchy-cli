@@ -7,7 +7,7 @@ Two roles, one file, decisions by pull request.
   nothing spent by the project.
 - The logins listed under a group in [`factory/MAINTAINERS.toml`](../factory/MAINTAINERS.toml)
   are the **maintainers** of that group. Nobody is above that — no owner,
-  no administrator, no API that grants a role: the project belongs to its
+  no superuser, no API that grants a role: the project belongs to its
   maintainers and contributors, and the pool reads the file on `main` every
   ten minutes and
   applies it (`worker/src/governance.ts`); every change is a `role` line in

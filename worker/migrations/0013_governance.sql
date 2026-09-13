@@ -21,4 +21,4 @@ CREATE TABLE settings (
 ALTER TABLE contributors ADD COLUMN session_hash TEXT;
 CREATE UNIQUE INDEX idx_contributors_session ON contributors (session_hash);
 
-UPDATE contributors SET role = 'maintainer' WHERE role = 'admin';
+UPDATE contributors SET role = 'maintainer' WHERE role NOT IN ('contributor', 'maintainer');

@@ -11,7 +11,7 @@
 # maintainer approves (CODEOWNERS + branch protection; never auto-merged).
 # The pool reads main every ten minutes and applies it.
 #
-# Nobody is above this file: no owner, no administrator. The project
+# Nobody is above this file: no owner, no superuser. The project
 # belongs to its maintainers and contributors.
 #
 # Bootstrap: while there is a single maintainer, that maintainer merges
