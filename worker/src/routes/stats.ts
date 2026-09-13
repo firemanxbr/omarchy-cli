@@ -30,7 +30,8 @@ export async function handleStats(env: Env): Promise<Response> {
   // seconds from every edge location, and D1 bills every row read. Without
   // a snapshot yet (a fresh deployment), the cheap totals are computed live.
   const snap = await env.DB.prepare("SELECT payload, created_at FROM events WHERE kind = 'metrics' ORDER BY id DESC LIMIT 1").first<{ payload: string; created_at: string }>();
-  const snapPool = snap ? ((JSON.parse(snap.payload) as { pool?: Record<string, unknown> }).pool ?? {}) : {};
+  const snapPayload = snap ? (JSON.parse(snap.payload) as { pool?: Record<string, unknown>; provenance?: unknown }) : {};
+  const snapPool = snapPayload.pool ?? {};
   const n = (k: string) => (typeof snapPool[k] === "number" ? (snapPool[k] as number) : null);
   const live = snap && n("names") !== null
     ? null
@@ -146,6 +147,7 @@ export async function handleStats(env: Env): Promise<Response> {
       version: version(env),
       rings,
       pool: { ...pool, by_source: bySource.results, referenced_by_heads: referenced, referenced_by_any_release: anyRelease, reclaimable, snapshot_at: snap?.created_at ?? null },
+      provenance: snapPayload.provenance ?? null,
       coverage,
       series: {
         imports_daily: importsDaily.results,

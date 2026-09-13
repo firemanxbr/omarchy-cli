@@ -4,6 +4,7 @@ import { snapshotMetrics } from "./metrics";
 import { syncGovernance } from "./governance";
 import { syncRequests } from "./requests";
 import { checkUpdates } from "./updates";
+import { syncProvenance } from "./provenance";
 import { costGuard, dailyCost } from "./cost";
 
 /**
@@ -216,6 +217,15 @@ export async function runScheduler(env: Env, now = new Date()): Promise<string[]
       if (u !== "updates: checked today") log.push(u);
     } catch (e) {
       log.push(`updates: ${String(e)}`);
+    }
+  }
+  // OPR provenance: once a day, after 05:15 UTC, where each OPR recipe comes from.
+  if (now.getUTCHours() * 60 + now.getUTCMinutes() >= 5 * 60 + 15) {
+    try {
+      const p = await syncProvenance(env, now);
+      if (p !== "provenance: scanned today") log.push(p);
+    } catch (e) {
+      log.push(`provenance: ${String(e)}`);
     }
   }
   // The metrics snapshot is the brain's own bookkeeping: no worker needed.
