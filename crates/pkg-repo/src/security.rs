@@ -641,27 +641,62 @@ fn severity_rank(s: &str) -> u8 {
 }
 
 #[derive(Debug, Deserialize)]
-struct SecurityRow {
-    name: String,
-    version: String,
-    worst: String,
-    kev: bool,
-    advisories: Vec<SecurityAdvisory>,
-    fixed_in: Vec<FixedIn>,
+pub struct SecurityRow {
+    pub name: String,
+    pub version: String,
+    pub worst: String,
+    pub kev: bool,
+    pub advisories: Vec<SecurityAdvisory>,
+    pub fixed_in: Vec<FixedIn>,
 }
 #[derive(Debug, Deserialize)]
-struct SecurityAdvisory {
+pub struct SecurityAdvisory {
+    #[serde(default)]
+    pub id: String,
     #[serde(rename = "match")]
-    r#match: String,
+    pub r#match: String,
 }
 #[derive(Debug, Deserialize)]
-struct FixedIn {
-    ring: String,
-    version: String,
+pub struct FixedIn {
+    pub ring: String,
+    pub version: String,
 }
+/// `GET /security?ring=&arch=`: the packages with an open advisory.
 #[derive(Debug, Deserialize)]
-struct SecurityView {
-    vulnerable: Vec<SecurityRow>,
+pub struct SecurityView {
+    pub vulnerable: Vec<SecurityRow>,
+}
+
+/// What a promotion of `from` into `to` would make worse: a package `to`
+/// serves clean today (the tracker lists a clean version there) that
+/// `from` serves with an open advisory the tracker is sure about (an
+/// exact match), of at least `min_severity` or exploited in the wild. One
+/// line per package, for the promotion gate's reasons.
+#[must_use]
+pub fn security_regressions(from: &SecurityView, to: &str, min_severity: &str) -> Vec<String> {
+    from.vulnerable
+        .iter()
+        .filter(|v| v.advisories.iter().any(|a| a.r#match == "exact"))
+        .filter(|v| v.kev || severity_rank(&v.worst) <= severity_rank(min_severity))
+        .filter_map(|v| {
+            let clean = v.fixed_in.iter().find(|f| f.ring == to)?;
+            let ids: Vec<&str> = v
+                .advisories
+                .iter()
+                .filter(|a| a.r#match == "exact")
+                .map(|a| a.id.as_str())
+                .collect();
+            Some(format!(
+                "{} {} ({}{}; {}) would replace clean {} in {to}",
+                v.name,
+                v.version,
+                v.worst,
+                if v.kev { ", exploited in the wild" } else { "" },
+                ids.join(", "),
+                clean.version
+            ))
+        })
+        .collect()
 }
 
 /// Which packages of `ring` a fast-track would replace: an open advisory we
@@ -900,7 +935,10 @@ mod tests {
                     version: version.into(),
                     worst: worst.into(),
                     kev,
-                    advisories: vec![SecurityAdvisory { r#match: m.into() }],
+                    advisories: vec![SecurityAdvisory {
+                        id: String::new(),
+                        r#match: m.into(),
+                    }],
                     fixed_in: fixed
                         .iter()
                         .map(|(r, v)| FixedIn {
@@ -967,5 +1005,45 @@ mod tests {
         let s = chrono_now();
         assert_eq!(s.len(), 20);
         assert!(s.starts_with("20") && s.ends_with('Z'));
+    }
+}
+
+#[cfg(test)]
+mod regression_tests {
+    use super::*;
+
+    fn view(json: &str) -> SecurityView {
+        serde_json::from_str(json).unwrap()
+    }
+
+    #[test]
+    fn a_clean_target_version_replaced_by_an_exact_open_advisory_is_a_regression() {
+        let from = view(
+            r#"{"vulnerable":[
+              {"name":"djvulibre","version":"3.5.30.1-1","worst":"high","kev":false,
+               "advisories":[{"id":"arch:AVG-2907:djvulibre","match":"exact"}],
+               "fixed_in":[{"ring":"stable","version":"3.5.29-1"}]},
+              {"name":"curl","version":"8.10.0-1","worst":"critical","kev":true,
+               "advisories":[{"id":"arch:AVG-1","match":"exact"}],"fixed_in":[]},
+              {"name":"zlib","version":"1.3-1","worst":"low","kev":false,
+               "advisories":[{"id":"arch:AVG-2","match":"exact"}],
+               "fixed_in":[{"ring":"stable","version":"1.2-1"}]},
+              {"name":"xz","version":"5.8-1","worst":"critical","kev":false,
+               "advisories":[{"id":"debian:CVE-1:xz","match":"name-only"}],
+               "fixed_in":[{"ring":"stable","version":"5.6-1"}]}
+            ]}"#,
+        );
+        let r = security_regressions(&from, "stable", "medium");
+        // djvulibre: exact, high, stable clean → blocks. curl: stable has no
+        // clean version (not served, or vulnerable too) → not a regression.
+        // zlib: low → below the bar. xz: name-only → not sure enough.
+        assert_eq!(r.len(), 1, "{r:?}");
+        assert!(r[0].starts_with("djvulibre 3.5.30.1-1 (high; arch:AVG-2907:djvulibre) would replace clean 3.5.29-1 in stable"));
+        assert!(security_regressions(&from, "rc", "medium").is_empty());
+        // KEV counts regardless of severity.
+        let from = view(
+            r#"{"vulnerable":[{"name":"a","version":"2","worst":"low","kev":true,"advisories":[{"id":"x","match":"exact"}],"fixed_in":[{"ring":"stable","version":"1"}]}]}"#,
+        );
+        assert_eq!(security_regressions(&from, "stable", "medium").len(), 1);
     }
 }

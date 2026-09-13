@@ -29,9 +29,6 @@ request (see [CONTRIBUTING.md](CONTRIBUTING.md)), and keep
       (`debug/buildinfo`), Rust ones only with `cargo-auditable`; extract it in
       `pkg-extract` so CVEs in vendored crates/modules are visible, since no
       soname reveals them.
-- [ ] **Security in the promotion gate.** Block a promotion that would move a
-      package from a clean version to one with an open advisory (exact
-      confidence) when the source ring also serves a clean one.
 
 - [ ] **Per-architecture promotion.** `promote` copies the whole selection; add
       `--arch` to `POST /api/v1/releases` (copy only rows of that arch, keep the
@@ -115,7 +112,8 @@ on profiles · any agent provider on a worker · Worker tests inside workerd
 `releases --json --all`, the rollback button, databases kept for an
 architecture a release did not touch, CVE metadata pruned by gc · releases
 stored as deltas with checkpoints every 24th · OPR provenance (Omarchy's own
-or AUR-synced, per package; the AUR count in stable on the overview).
+or AUR-synced, per package; the AUR count in stable on the overview) ·
+security regressions block a promotion.
 
 ## Factory findings (2026-09-12)
 

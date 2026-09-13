@@ -128,10 +128,14 @@ and is undone automatically when the target ring turns out not to be:
    ring is recent and not an error; no health inside the soak window failed
    (0 days into `rc`, 1 day into `stable`: edge is upstream in real time, rc a day behind, stable a day behind rc) and the source ring's content has
    been there that long (the age of its last promotion; syncs of the OPR channel
-   do not reset it); a recent ABI check found no blocker.
-   A ring with nothing rendered for an architecture is not evidence against it.
-   If the target already serves the source's head there is nothing to promote.
-   The verdict and its reasons are a `gate` event.
+   do not reset it); a recent ABI check found no blocker; and the security
+   layer reports no **regression** — a package the target serves clean today
+   that the source would replace with a version under an open advisory the
+   tracker is sure about (exact match, medium or worse, or exploited in the
+   wild). The fast-track pulls fixes forward; the gate never pushes a known
+   hole. A ring with nothing rendered for an architecture is not evidence
+   against it. If the target already serves the source's head there is
+   nothing to promote. The verdict and its reasons are a `gate` event.
 3. **Promote, render, verify.** The index write records the previous head; the
    databases are rendered and signed for both architectures; the target ring gets
    the same health check on both.

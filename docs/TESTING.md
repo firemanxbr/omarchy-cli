@@ -274,9 +274,13 @@ complete with the verdict).
 blocked, reasons printed and recorded as a `gate` event unless `--dry-run`). The
 decision is a pure function with unit tests in `crates/pkg-repo/src/gate.rs`:
 fresh green evidence promotes; a failed latest health, a failure inside the soak
-window, stale or missing evidence, or recent ABI blockers block; `warn` (nothing
-rendered for an architecture) is ignored; a target that already serves the
-source's head is a skip. `cargo test -p pkg-repo gate` runs them.
+window, stale or missing evidence, recent ABI blockers, or a security
+regression (a package the target serves clean that the source would replace
+with a version under an open exact advisory of medium severity or worse, or
+in KEV — `security::security_regressions`, from `GET /security?ring=<from>`)
+block; `warn` (nothing rendered for an architecture) is ignored; a target that
+already serves the source's head is a skip. `cargo test -p pkg-repo gate` and
+`cargo test -p pkg-repo regression` run them.
 
 ## Cloudflare (staging)
 
