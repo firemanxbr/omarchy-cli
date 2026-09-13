@@ -1,0 +1,191 @@
+name: Factory request
+
+# From a project URL to a pull request a maintainer can approve, without a
+# human in between: an issue with the "package-request" label (or a manual
+# run) → is it shipped already? → draft the PKGBUILD (Claude when
+# ANTHROPIC_API_KEY is set, a template otherwise) → checksums and namcap in
+# an Arch container → a draft pull request → dry-run builds on both
+# architectures by the factory's workers → on success the pull request is
+# ready for review; on failure the draft is corrected from the build log and
+# tried again (three attempts). Every stage is reported to the pool, so the
+# Factory page shows where a request stands.
+
+on:
+  issues:
+    types: [opened, labeled]
+  workflow_dispatch:
+    inputs:
+      url:
+        description: Project URL (GitHub)
+        required: true
+      name:
+        description: "Package name (default: repository name)"
+      group:
+        description: Group (who reviews)
+        default: community
+      hint:
+        description: Notes for the packager
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  actions: write
+
+jobs:
+  request:
+    name: URL → validated pull request
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.issue.labels.*.name, 'package-request')
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    env:
+      OMARCHY_API: ${{ vars.OMARCHY_API }}
+      OMARCHY_PUBLISH_TOKEN: ${{ secrets.OMARCHY_PUBLISH_TOKEN }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      GH_TOKEN: ${{ github.token }}
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read the request
+        id: req
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "issues" ]]; then
+            body="$(gh issue view ${{ github.event.issue.number }} --json body -q .body)"
+            field() { awk -v h="### $1" '$0==h{f=1;next} /^### /{f=0} f&&NF{print;exit}' <<<"$body" | tr -d '\r'; }
+            url="$(field 'Project URL')"; name="$(field 'Package name (optional)')"; group="$(field 'Group')"; hint="$(field 'Notes for the packager (optional)')"
+            [[ "$name" == "_No response_" ]] && name=""; [[ "$hint" == "_No response_" ]] && hint=""
+            echo "issue=${{ github.event.issue.number }}" >> "$GITHUB_OUTPUT"
+            echo "issue_url=${{ github.event.issue.html_url }}" >> "$GITHUB_OUTPUT"
+            echo "by=${{ github.event.issue.user.login }}" >> "$GITHUB_OUTPUT"
+          else
+            url="${{ inputs.url }}"; name="${{ inputs.name }}"; group="${{ inputs.group }}"; hint="${{ inputs.hint }}"
+            echo "by=${{ github.actor }}" >> "$GITHUB_OUTPUT"
+          fi
+          [[ "$url" =~ ^https://github\.com/[^/]+/[^/#?]+ ]] || { echo "::error::not a GitHub project URL: $url"; exit 1; }
+          url="${url%/}"; url="${url%.git}"
+          [[ -n "$name" ]] || name="$(basename "$url" | tr 'A-Z' 'a-z')"
+          [[ -n "$group" ]] || group=community
+          { echo "url=$url"; echo "name=$name"; echo "group=$group"; echo "hint=$hint"; } >> "$GITHUB_OUTPUT"
+          echo "$name from $url (group $group)"
+      - name: Record the request in the pool (and stop if someone ships it already)
+        id: record
+        run: |
+          set -euo pipefail
+          body="$(jq -n --arg n "${{ steps.req.outputs.name }}" --arg g "${{ steps.req.outputs.group }}" --arg u "${{ steps.req.outputs.url }}" \
+            --arg by "${{ steps.req.outputs.by }}" --arg r "${{ steps.req.outputs.hint }}" --arg i "${{ steps.req.outputs.issue_url }}" \
+            '{name:$n, group:$g, url:$u, requested_by:$by, reason:(if $r=="" then "requested" else $r end), issue_url:(if $i=="" then null else $i end)}')"
+          code="$(curl -sS -o /tmp/resp -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/requests" -H "authorization: Bearer $OMARCHY_PUBLISH_TOKEN" -H "content-type: application/json" --data "$body")"
+          if [[ "$code" == 409 ]]; then
+            msg="$(jq -r .error /tmp/resp)"
+            echo "$msg"
+            if [[ -n "${{ steps.req.outputs.issue }}" ]]; then
+              printf -v note '**Already available.** %s\n\nInstall it from the pool (`omarchy-cli install %s` or pacman) — nothing to build here.' "$msg" "${{ steps.req.outputs.name }}"
+              gh issue comment ${{ steps.req.outputs.issue }} --body "$note" && gh issue close ${{ steps.req.outputs.issue }} --reason "not planned"
+            fi
+            echo "shipped=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          [[ "$code" == 201 ]] || { echo "::error::pool answered $code: $(cat /tmp/resp)"; exit 1; }
+          echo "id=$(jq -r .request.id /tmp/resp)" >> "$GITHUB_OUTPUT"
+          echo "arches=$(jq -c '.request.arches | fromjson' /tmp/resp)" >> "$GITHUB_OUTPUT"
+          echo "shipped=false" >> "$GITHUB_OUTPUT"
+      - name: Draft, validate, open the pull request
+        if: steps.record.outputs.shipped == 'false'
+        env:
+          NAME: ${{ steps.req.outputs.name }}
+          GROUP: ${{ steps.req.outputs.group }}
+          URL: ${{ steps.req.outputs.url }}
+          HINT: ${{ steps.req.outputs.hint }}
+          ISSUE: ${{ steps.req.outputs.issue }}
+          BY: ${{ steps.req.outputs.by }}
+          REQUEST_ID: ${{ steps.record.outputs.id }}
+          ARCHES: ${{ steps.record.outputs.arches }}
+        run: |
+          set -euo pipefail
+          auth=(-H "authorization: Bearer $OMARCHY_PUBLISH_TOKEN" -H "content-type: application/json")
+          stage() { curl -sS -o /dev/null -X PATCH "$OMARCHY_API/api/v1/factory/requests/$REQUEST_ID" "${auth[@]}" --data "$(jq -n --arg s "$1" --arg d "${2:-}" --arg p "${PR_URL:-}" '{status:$s, detail:(if $d=="" then null else $d end), pr_url:(if $p=="" then null else $p end)}')"; }
+          say() { [[ -n "$ISSUE" ]] && gh issue comment "$ISSUE" --body "$1" >/dev/null || true; }
+          git config user.name "omarchy-pool factory"; git config user.email "factory@omarchy-pool.invalid"
+          dir="factory/pkgbuilds/$GROUP/$NAME"; branch="factory/request-$NAME"
+          git checkout -q -B "$branch" origin/main
+          mkdir -p "$dir"
+          stage drafting "drafting the PKGBUILD from $URL"
+          PR_URL=""; attempt=0; ok=false; log=""
+          while (( attempt < 3 )); do
+            attempt=$((attempt + 1))
+            # 1. Draft (or correct, from the previous attempt's log).
+            if (( attempt == 1 )); then
+              summary="$(factory/bin/draft-pkgbuild --url "$URL" --name "$NAME" --out "$dir" ${HINT:+--hint "$HINT"})"
+            else
+              summary="$(factory/bin/draft-pkgbuild --url "$URL" --name "$NAME" --out "$dir" --previous "$dir/PKGBUILD.prev" --log /tmp/build.log ${HINT:+--hint "$HINT"})"
+            fi
+            echo "attempt $attempt: $summary"
+            pkgname="$(jq -r .name <<<"$summary")"
+            if [[ "$pkgname" != "$NAME" ]]; then
+              # The draft chose another name (a -bin package); the directory follows.
+              git mv -k "$dir" "factory/pkgbuilds/$GROUP/$pkgname" 2>/dev/null || { mkdir -p "factory/pkgbuilds/$GROUP/$pkgname"; mv "$dir/PKGBUILD" "factory/pkgbuilds/$GROUP/$pkgname/"; }
+              NAME="$pkgname"; dir="factory/pkgbuilds/$GROUP/$NAME"
+            fi
+            # 2. Checksums and lint in an Arch container.
+            docker run --rm -v "$PWD/$dir:/pkg" -w /pkg docker.io/library/archlinux:base-devel bash -c '
+              sed -i -e "s/^#\?DisableSandboxSyscalls/DisableSandboxSyscalls/" -e "s/^#\?DisableSandboxFilesystem/DisableSandboxFilesystem/" /etc/pacman.conf
+              pacman -Sy --noconfirm --needed pacman-contrib namcap >/dev/null && useradd -m b && chown -R b /pkg
+              sudo -u b updpkgsums && (sudo -u b namcap PKGBUILD || true)' 2>&1 | tail -20
+            eval "$(factory/bin/pkgbuild-meta "$dir/PKGBUILD")"
+            # 3. Commit and push the draft; open the pull request once.
+            git add -A "$dir"
+            git commit -q -m "factory: add $NAME $META_VERSION (requested${ISSUE:+ in #$ISSUE})" -m "Drafted by the factory from $URL$( [[ $attempt -gt 1 ]] && echo " (attempt $attempt, corrected from the build log)" )." || true
+            git push -q -f origin "$branch"
+            sha="$(git rev-parse HEAD)"
+            if [[ -z "$PR_URL" ]]; then
+              printf -v prbody 'Requested%s by @%s from %s.\n\nDrafted by the factory (%s, build system %s). Dry-run builds on both architectures follow; this pull request becomes ready for review when they pass. Merging it is the approval: the factory then builds and publishes it, and bumps it on every upstream release.' \
+                "${ISSUE:+ in #$ISSUE}" "$BY" "$URL" "$(jq -r .mode <<<"$summary")" "$(jq -r .build_system <<<"$summary")"
+              PR_URL="$(gh pr create --draft --base main --head "$branch" --title "factory: add $NAME $META_VERSION" --body "$prbody")"
+              echo "pull request: $PR_URL"
+              say "Drafting a PKGBUILD for \`$NAME\` from $URL: $PR_URL — the factory is now building it as a dry run on ${ARCHES//\"/}."
+            fi
+            stage validating "attempt $attempt: dry-run builds at ${sha:0:7}"
+            # 4. Dry-run builds on the factory.
+            enq="$(curl -sS -X POST "$OMARCHY_API/api/v1/factory/enqueue" "${auth[@]}" --data "$(jq -n --arg n "$NAME" --arg g "$GROUP" --arg r "$sha" --arg v "$META_VERSION" --argjson a "$META_ARCHES" \
+              '{name:$n, group:$g, pkgbuild_ref:$r, version:$v, arches:$a, reason:"request-validation", publish:false, priority:20}')")"
+            tasks="$(jq -r '.tasks[]' <<<"$enq")"
+            [[ -n "$tasks" ]] || { echo "::error::no task queued: $enq"; break; }
+            echo "tasks: $tasks"
+            # 5. Wait for them (workers are started by the pool's scheduler).
+            deadline=$((SECONDS + 5400)); result=""; failed=""
+            while (( SECONDS < deadline )); do
+              result=""; pending=0; failed=""
+              for t in $tasks; do
+                tj="$(curl -sS "$OMARCHY_API/api/v1/factory/tasks/$t")"
+                st="$(jq -r .task.status <<<"$tj")"
+                case "$st" in
+                  done) result+="- **$(jq -r .task.arch <<<"$tj")**: built in $(( $(jq -r '.task.duration_ms // 0' <<<"$tj") / 1000 )) s ($(jq -r .task.result_filename <<<"$tj"))"$'\n' ;;
+                  failed) failed="$t"; jq -r '.task.log_tail // ""' <<<"$tj" > /tmp/build.log; result+="- **$(jq -r .task.arch <<<"$tj")**: failed — $(jq -r '.task.error // ""' <<<"$tj" | head -c 200)"$'\n' ;;
+                  cancelled) failed="$t"; result+="- task $t cancelled"$'\n' ;;
+                  *) pending=$((pending + 1)) ;;
+                esac
+              done
+              (( pending == 0 )) && break
+              sleep 60
+            done
+            if [[ -z "$failed" && $pending -eq 0 ]]; then ok=true; break; fi
+            if (( pending > 0 )); then result+="- timed out waiting for the workers"$'\n'; break; fi
+            # Some task failed: keep the PKGBUILD for the corrector and go around.
+            cp "$dir/PKGBUILD" "$dir/PKGBUILD.prev"
+            for t in $tasks; do curl -sS -o /dev/null -X POST "$OMARCHY_API/api/v1/factory/tasks/$t/cancel" "${auth[@]}" || true; done
+            if (( attempt < 3 )); then next="Correcting the PKGBUILD from the log and trying again."; else next="Giving up after three attempts; a maintainer can fix the PKGBUILD on this branch."; fi
+            printf -v note 'Attempt %s failed:\n%s\n<details><summary>build log tail</summary>\n\n```\n%s\n```\n</details>\n%s' "$attempt" "$result" "$(tail -n 60 /tmp/build.log)" "$next"
+            gh pr comment "$PR_URL" --body "$note"
+          done
+          rm -f "$dir/PKGBUILD.prev"
+          if $ok; then
+            gh pr ready "$PR_URL"
+            printf -v note 'Dry-run builds passed:\n%s\nReady for review — merging approves the package: the factory builds it for real, publishes it into `edge` and bumps it on every upstream release. Log tail: %s/api/v1/factory/tasks/%s' "$result" "$OMARCHY_API" "$(echo $tasks | cut -d" " -f1)"
+            gh pr comment "$PR_URL" --body "$note"
+            stage review "dry-run builds passed after $attempt attempt(s); waiting for a maintainer"
+            say "\`$NAME\` builds on ${ARCHES//\"/}. A maintainer of \`$GROUP\` now reviews $PR_URL — merging it publishes the package."
+          else
+            stage failed "dry-run builds failed after $attempt attempt(s): $(head -c 200 <<<"$result")"
+            say "The factory could not build \`$NAME\` after $attempt attempt(s). The draft and the logs are on $PR_URL for a maintainer to look at."
+            exit 1
+          fi

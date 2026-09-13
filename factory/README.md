@@ -23,38 +23,47 @@ PKGBUILD reviewed and merged ──▶ pool: build_requests / build_tasks (D1)
 
 ## A package's life
 
-1. **Does someone ship it already?** Ask the pool: `curl $API/api/v1/package/NAME`.
-   If Arch, Arch Linux ARM or the OPR ship it for an architecture, it enters
-   the pool's cycle as it is — the factory refuses to build it for that
-   architecture (`override:true` exists for the deliberate case). It only
-   builds what is missing: a request for `x86_64` and `aarch64` of a name the
-   OPR ships for x86_64 becomes one aarch64 task.
-2. **First time: a human approves.** A pull request adds
-   `factory/pkgbuilds/<group>/<name>/PKGBUILD` (start from the AUR file; add
-   `aarch64` to `arch=`; keep a header saying where it came from). CODEOWNERS
-   of the group review it — that review *is* the approval. Merging it into
-   `main` runs `factory-enqueue.yml`, which queues one task per architecture
-   at that exact commit. The same workflow runs hourly from the pool's
-   scheduler as a reconcile — every PKGBUILD version on `main` without a
-   task (`GET /api/v1/factory/built`) is queued — so nothing depends on a
-   push event arriving. Optionally, a request can be recorded first so the
-   dashboard shows what is waiting: `POST /api/v1/factory/requests`.
-3. **After that: automatic.** `factory-update.yml` runs daily: for every
+1. **Someone asks for it** — a [package request issue](../../../issues/new?template=package-request.yml)
+   with the project's URL (or `POST /api/v1/factory/requests`, or *Actions →
+   Factory request*). `factory-request.yml` takes it from there.
+2. **Does someone ship it already?** The pool is asked first. If Arch, Arch
+   Linux ARM or the OPR ship the name for an architecture it enters the pool's
+   cycle as it is: the issue gets the answer and closes, the factory refuses to
+   build that architecture (`override:true` exists for the deliberate case).
+   It only builds what is missing.
+3. **The PKGBUILD is drafted, not written.** `factory/bin/draft-pkgbuild`
+   reads the repository (metadata, latest release, build files, README) and
+   asks Claude for the PKGBUILD following `factory/prompts/pkgbuild.md`;
+   without `ANTHROPIC_API_KEY` a template covers Rust, Go, CMake, Meson,
+   autotools and prebuilt release binaries. `updpkgsums` fills the checksums
+   and `namcap` lints, in an Arch container.
+4. **It is built before anyone reviews it.** The draft goes to a branch and a
+   draft pull request; the factory queues **dry-run builds** on both
+   architectures (nothing published). A failure feeds the log back to the
+   drafter for a corrected PKGBUILD — three attempts. When the builds pass the
+   pull request is marked ready and the build times are posted on it.
+5. **First time: a human approves.** CODEOWNERS of the group
+   (`factory/pkgbuilds/<group>/`) review the pull request — that review *is*
+   the approval. Merging queues the real builds (`factory-enqueue.yml`, and
+   its hourly reconcile from the pool's scheduler); the request is marked
+   approved.
+6. **After that: automatic.** `factory-update.yml` runs daily: for every
    PKGBUILD with a GitHub `url=` it asks upstream for the latest release,
-   bumps `pkgver` (`pkgrel=1`), refreshes the checksums (`updpkgsums` in an
-   Arch container) and opens a pull request with auto-merge on. CI is the
-   only gate — CODEOWNERS are not asked again for a version bump — and the
-   merge queues the build. `factory/bin/check-updates` is the checker; a
-   person can still bump by hand the same way.
-4. **A worker builds it.** Any worker of that architecture claims the task,
-   holds a lease, builds in its clean container, signs, publishes the result
+   bumps `pkgver` (`pkgrel=1`), refreshes the checksums and opens a pull
+   request with auto-merge on. CI is the only gate — CODEOWNERS are not asked
+   again for a version bump — and the merge queues the build.
+7. **A worker builds it.** Any worker of that architecture claims the task,
+   holds a lease, builds in its fresh container, signs, publishes the result
    into `edge` as source `factory` and renders the edge databases. From there
    it is a package like any other: health checks, the soak, `rc`, `stable`,
    the security layer, `omarchy-cli`.
-5. **If it fails**, the task returns to the queue with the log tail; after
+8. **If it fails**, the task returns to the queue with the log tail; after
    three attempts it is marked failed and the Factory page shows why. A
    worker that dies mid-build loses its lease and the task is requeued by the
    pool's scheduler within ten minutes.
+
+The Factory page follows a request through every stage
+(`requested → drafting → validating → review → approved`).
 
 ## Sizing a package before committing to it
 
@@ -152,7 +161,10 @@ factory/
   pkgbuilds/<group>/<name>/       reviewed PKGBUILDs; CODEOWNERS per group
 .github/workflows/factory-enqueue.yml   merged PKGBUILD → tasks
 .github/workflows/factory-worker.yml    a worker on a hosted runner, started on demand
+.github/workflows/factory-request.yml   issue with a URL → drafted PKGBUILD → dry-run builds → pull request
 .github/workflows/factory-update.yml    daily: bump approved packages to their latest upstream release
+  bin/draft-pkgbuild              project URL → PKGBUILD (Claude, or a template), checksums left to updpkgsums
+  prompts/pkgbuild.md             the packaging rules the drafter follows
   bin/check-updates               which PKGBUILDs are behind their GitHub upstream
 .github/CODEOWNERS                      who approves which group
 ```
