@@ -27,6 +27,8 @@ jobs:
     timeout-minutes: 340
     steps:
       - uses: actions/checkout@v4
+      - name: Containers of the other architecture (health and ABI evidence on both)
+        run: docker run --privileged --rm tonistiigi/binfmt --install all >/dev/null
       - name: pkg-repo and omarchy-cli from the latest release
         run: |
           set -euo pipefail

@@ -153,7 +153,11 @@ with a maintainer's contributor token; an admin names maintainers with
 (the publish token works for that while the transition lasts). Every task
 runs with a per-job token the pool issues at claim time (SECURITY.md);
 the worker's own token only claims. Kinds not listed in `JOB_KINDS` keep
-running as GitHub workflows, dispatched by the same scheduler. Worker
+running as GitHub workflows, dispatched by the same scheduler; today
+`sync`, `promote`, `health` and `gc` are jobs (their workflows keep only
+`workflow_dispatch`, for manual runs), `security` and `metrics` still run
+on GitHub. When no project worker is idle, the scheduler starts one on a
+GitHub-hosted runner (`pool-worker.yml`) — the fallback fleet. Worker
 secrets: `JOB_TOKEN_SECRET` (any random string) signs the job tokens.
 
 ## Maintainers: reviewing contributed builds

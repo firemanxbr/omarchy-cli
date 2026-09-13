@@ -8,10 +8,10 @@ name: Promote
 # soak — edge is upstream in real time, rc a day behind, stable a day behind rc.
 # Set the repository variable STABLE_ENVIRONMENT=stable to require a human
 # approval before stable moves (the `stable` environment has a reviewer).
+# Scheduled runs moved to the pool: the Cloudflare cron creates this as a
+# pulled job for a project worker (pkg-repo work). This workflow stays for
+# manual runs and as documentation of the steps.
 on:
-  schedule:
-    - cron: "0 6 * * *"
-    - cron: "0 9 * * *"
   workflow_dispatch:
     inputs:
       from:
