@@ -1,0 +1,28 @@
+# Omarchy Packaging — the contributor's build worker.
+#
+# One container, one task: it asks the pool for a build of the contributor's
+# package, builds it here with makepkg as an unprivileged user, uploads the
+# result to the contributor's staging workspace and exits. The image carries
+# no key and no publish token; whoever runs it brings only a worker token
+# (POST /api/v1/factory/workers) and, if they want an agent to draft and fix
+# PKGBUILDs, their own ANTHROPIC_API_KEY.
+#
+# Built for both architectures by .github/workflows/factory-image.yml and
+# signed with cosign (keyless, GitHub OIDC): verify with
+#   cosign verify ghcr.io/firemanxbr/omarchy-packaging:latest \
+#     --certificate-identity-regexp 'github.com/firemanxbr/omarchy-pool' \
+#     --certificate-oidc-issuer https://token.actions.githubusercontent.com
+ARG BASE=docker.io/library/archlinux:base-devel
+FROM ${BASE}
+LABEL org.opencontainers.image.source="https://github.com/firemanxbr/omarchy-pool" \
+      org.opencontainers.image.description="Omarchy Packaging: a factory worker that builds a contributor's package into staging" \
+      org.opencontainers.image.licenses="MIT"
+# The worker script and the drafter; pacman runs at first start (fresh
+# mirrors every time, this image only pins the tooling).
+COPY factory/worker/omarchy-build-worker.sh /usr/local/bin/omarchy-build-worker
+COPY factory/bin/draft-pkgbuild factory/bin/pkgbuild-meta /usr/local/lib/omarchy-factory/bin/
+COPY factory/prompts/pkgbuild.md /usr/local/lib/omarchy-factory/prompts/pkgbuild.md
+RUN chmod 755 /usr/local/bin/omarchy-build-worker /usr/local/lib/omarchy-factory/bin/* && mkdir -p /build /task
+ENV OMARCHY_API=https://pkgs.firemanxbr.org OMARCHY_POOL=https://pool.firemanxbr.org
+WORKDIR /build
+ENTRYPOINT ["omarchy-build-worker", "--container"]
