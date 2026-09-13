@@ -39,9 +39,18 @@ post() { # status summary payload
     --duration-ms $(( $(ms) - started )) --payload "$3" >/dev/null 2>&1 || true
 }
 
+# The head release may not have been rendered for this architecture yet
+# (a build or sync renders the architecture it touched); what users get is
+# the latest rendered database at <arch>/<repo>.db, so check those.
 if [[ -z "$repos" ]]; then
-  post warn "$RING $ARCH: no databases rendered yet" '{}'
-  echo "$RING $ARCH: nothing rendered"; exit 0
+  for src in core extra multilib alarm packages factory; do
+    if curl -sfI --max-time 20 "$POOL/$ARCH/omarchy-$src-$RING.db" >/dev/null; then repos="$repos omarchy-$src-$RING"; fi
+  done
+  repos="${repos# }"
+fi
+if [[ -z "$repos" ]]; then
+  post error "$RING $ARCH: no database is served" '{}'
+  echo "$RING $ARCH: nothing served"; exit 1
 fi
 
 {

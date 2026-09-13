@@ -169,11 +169,11 @@ const CSS = String.raw`
   a.run:hover { color: var(--text); }
   #graph { overflow-x: auto; } #graph svg { min-width: 720px; }
   @media (max-width: 720px) {
-    header { display: grid; grid-template-columns: 1fr auto; grid-template-areas: "brand chip" "nav nav" "status gh"; gap: 10px 12px; padding: 12px 16px; align-items: center; }
+    header { display: grid; grid-template-columns: 1fr auto; grid-template-areas: "brand chip" "nav nav" "status status"; gap: 10px 12px; padding: 12px 16px; align-items: center; }
     header .brand { grid-area: brand; } header .ver { grid-area: chip; justify-self: end; } header .spacer { display: none; }
     header nav { grid-area: nav; display: flex; gap: 18px; overflow-x: auto; white-space: nowrap; padding-bottom: 4px; margin: 0 -16px; padding-left: 16px; padding-right: 16px; scrollbar-width: none; }
     header nav::-webkit-scrollbar { display: none; }
-    header #status { grid-area: status; } header .gh { grid-area: gh; justify-self: end; }
+    header #status { grid-area: status; }
     main { padding: 20px 16px 40px; }
     h1 { font-size: 22px; line-height: 1.25; } h2 { font-size: 19px; }
     .lede { font-size: 14px; }
@@ -279,14 +279,12 @@ export interface PageOptions {
 }
 
 export const NAV: { key: PageOptions["active"]; href: string; label: string }[] = [
-  { key: "overview", href: "/", label: "Overview" },
   { key: "packages", href: "/packages", label: "Packages" },
   { key: "security", href: "/security", label: "Security" },
   { key: "factory", href: "/factory", label: "Factory" },
   { key: "contribute", href: "/contribute", label: "Contribute" },
   { key: "review", href: "/review", label: "Review" },
   { key: "get-started", href: "/get-started", label: "Get started" },
-  { key: "pipeline", href: "/#pipeline", label: "Pipeline" },
   { key: "how-it-works", href: "/how-it-works", label: "How it works" },
 ];
 
@@ -324,7 +322,6 @@ export function page(o: PageOptions): string {
   </nav>
   <span class="spacer"></span>
   <a id="status" class="status" href="/status" title="checking"><i class="led"></i><span>checking</span></a>
-  <a class="gh" href="https://github.com/firemanxbr/omarchy-pool" title="Open source on GitHub (MIT)">${GITHUB_ICON} Open source</a>
 </header>
 
 <main>
