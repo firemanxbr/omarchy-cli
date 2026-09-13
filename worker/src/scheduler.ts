@@ -23,19 +23,77 @@ interface Rule {
   /** …or once a day after this UTC time (hour, minute), when nothing ran since. */
   at?: { hour: number; minute: number; weekday?: number };
   inputs?: Record<string, string>;
+  /**
+   * The same work as a pulled job (kind + params) for a trusted worker.
+   * Used instead of the workflow when JOB_KINDS lists the kind: the cron
+   * creates the task, GitHub is not involved.
+   */
+  job?: { kind: string; params: Record<string, string>; arch?: string };
 }
 
-export const RULES: Rule[] = [
-  { workflow: "sync.yml", every: 60 },
-  { workflow: "metrics.yml", every: 30 },
-  { workflow: "security.yml", every: 180 },
-  { workflow: "factory-enqueue.yml", every: 60 },
-  { workflow: "promote.yml", at: { hour: 6, minute: 0 }, inputs: { from: "edge", to: "rc", note: "daily rc" } },
-  { workflow: "promote.yml", at: { hour: 9, minute: 0 }, inputs: { from: "rc", to: "stable", note: "daily stable" } },
-  { workflow: "health.yml", at: { hour: 8, minute: 30 } },
-  { workflow: "factory-update.yml", at: { hour: 5, minute: 45 } },
-  { workflow: "gc.yml", at: { hour: 4, minute: 0, weekday: 0 } },
+/**
+ * What the sync job pulls, per source and architecture — the table sync.yml
+ * carries, so the two stay in step until the workflow retires.
+ */
+export const SYNC_SOURCES: { source: string; arch: string; ring: string; base_url: string; db_name: string; keyring: string; defer_to?: string }[] = [
+  { source: "core", arch: "x86_64", ring: "edge", base_url: "https://mirror.omarchy.org/core/os/x86_64", db_name: "core", keyring: "archlinux" },
+  { source: "multilib", arch: "x86_64", ring: "edge", base_url: "https://mirror.omarchy.org/multilib/os/x86_64", db_name: "multilib", keyring: "archlinux" },
+  { source: "extra", arch: "x86_64", ring: "edge", base_url: "https://mirror.omarchy.org/extra/os/x86_64", db_name: "extra", keyring: "archlinux" },
+  { source: "packages", arch: "x86_64", ring: "edge", base_url: "https://pkgs.omarchy.org/edge/x86_64", db_name: "omarchy", keyring: "omarchy" },
+  { source: "packages", arch: "x86_64", ring: "rc", base_url: "https://pkgs.omarchy.org/rc/x86_64", db_name: "omarchy", keyring: "omarchy" },
+  { source: "packages", arch: "x86_64", ring: "stable", base_url: "https://pkgs.omarchy.org/stable/x86_64", db_name: "omarchy", keyring: "omarchy" },
+  { source: "chaotic", arch: "x86_64", ring: "edge", base_url: "https://builds.garudalinux.org/repos/chaotic-aur/x86_64", db_name: "chaotic-aur", keyring: "chaotic", defer_to: "core,extra,multilib,packages,factory" },
+  { source: "core", arch: "aarch64", ring: "edge", base_url: "http://os.archlinuxarm.org/aarch64/core", db_name: "core", keyring: "archlinuxarm" },
+  { source: "alarm", arch: "aarch64", ring: "edge", base_url: "http://os.archlinuxarm.org/aarch64/alarm", db_name: "alarm", keyring: "archlinuxarm" },
+  { source: "extra", arch: "aarch64", ring: "edge", base_url: "http://os.archlinuxarm.org/aarch64/extra", db_name: "extra", keyring: "archlinuxarm" },
+  { source: "packages", arch: "aarch64", ring: "edge", base_url: "https://pkgs.omarchy.org/edge/aarch64", db_name: "omarchy", keyring: "omarchy" },
 ];
+
+export const RULES: Rule[] = [
+  { workflow: "sync.yml", every: 60, job: { kind: "sync", params: {} } },
+  { workflow: "metrics.yml", every: 30 },
+  { workflow: "security.yml", every: 180, job: { kind: "security", params: {} } },
+  { workflow: "factory-enqueue.yml", every: 60 },
+  { workflow: "promote.yml", at: { hour: 6, minute: 0 }, inputs: { from: "edge", to: "rc", note: "daily rc" }, job: { kind: "promote", params: { from: "edge", to: "rc", note: "daily rc" } } },
+  { workflow: "promote.yml", at: { hour: 9, minute: 0 }, inputs: { from: "rc", to: "stable", note: "daily stable" }, job: { kind: "promote", params: { from: "rc", to: "stable", note: "daily stable" } } },
+  { workflow: "health.yml", at: { hour: 8, minute: 30 }, job: { kind: "health", params: {} } },
+  { workflow: "factory-update.yml", at: { hour: 5, minute: 45 } },
+  { workflow: "gc.yml", at: { hour: 4, minute: 0, weekday: 0 }, job: { kind: "gc", params: {} } },
+];
+
+/** The tasks a rule expands to in job mode: sync is one per source and architecture, health one per ring and architecture. */
+export function jobsOf(rule: Rule): { kind: string; params: Record<string, string>; arch: string }[] {
+  const j = rule.job;
+  if (!j) return [];
+  if (j.kind === "sync") return SYNC_SOURCES.map((s) => ({ kind: "sync", params: { ...s, defer_to: s.defer_to ?? "" }, arch: s.arch }));
+  if (j.kind === "health") {
+    const out: { kind: string; params: Record<string, string>; arch: string }[] = [];
+    for (const ring of ["edge", "rc", "stable"]) for (const arch of ["x86_64", "aarch64"]) out.push({ kind: "health", params: { ring, arch }, arch });
+    return out;
+  }
+  return [{ kind: j.kind, params: j.params, arch: j.arch ?? "x86_64" }];
+}
+
+function jobMode(env: Env, kind: string): boolean {
+  return (env.JOB_KINDS ?? "").split(",").map((k) => k.trim()).includes(kind);
+}
+
+/** Recent tasks of a kind with these parameters, shaped like workflow runs so isDue() applies. */
+async function recentJobs(env: Env, kind: string, params: Record<string, string>): Promise<RunSummary[]> {
+  const rows = await env.DB.prepare("SELECT created_at, status FROM build_tasks WHERE kind = ? AND params = ? ORDER BY id DESC LIMIT 10")
+    .bind(kind, JSON.stringify(params))
+    .all<{ created_at: string; status: string }>();
+  return rows.results.map((r) => ({ created_at: r.created_at, status: r.status === "queued" || r.status === "leased" ? "in_progress" : "completed", event: "schedule" }));
+}
+
+async function createJob(env: Env, job: { kind: string; params: Record<string, string>; arch: string }): Promise<number> {
+  const row = await env.DB.prepare(
+    `INSERT INTO build_tasks (name, "group", arch, pkgbuild_ref, reason, priority, status, publish, trust, kind, params) VALUES (?, 'pool', ?, '-', 'scheduled', 50, 'queued', 1, 'project', ?, ?) RETURNING id`,
+  )
+    .bind(job.kind, job.arch, job.kind, JSON.stringify(job.params))
+    .first<{ id: number }>();
+  return row?.id ?? 0;
+}
 
 interface RunSummary {
   created_at: string;
@@ -120,12 +178,35 @@ export async function runScheduler(env: Env, now = new Date()): Promise<string[]
   } catch (e) {
     log.push(`factory requeue: ${String(e)}`);
   }
+  // Rules whose kind runs as pulled jobs: the cron creates the tasks; a
+  // trusted worker anywhere does the work. No GitHub in the loop.
+  for (const rule of RULES) {
+    if (!rule.job || !jobMode(env, rule.job.kind)) continue;
+    for (const job of jobsOf(rule)) {
+      try {
+        const { due, why } = isDue({ ...rule, inputs: undefined }, await recentJobs(env, job.kind, job.params), now);
+        const label = `${job.kind}${job.params.source ? " " + job.params.source + "/" + job.arch : job.params.to ? " → " + job.params.to : job.params.ring ? " " + job.params.ring + "/" + job.arch : ""}`;
+        if (!due) {
+          log.push(`job ${label}: ${why}`);
+          continue;
+        }
+        const id = await createJob(env, job);
+        log.push(`job ${label}: queued as task ${id} (${why})`);
+        await env.DB.prepare("INSERT INTO events (kind, ring, source, status, summary, payload) VALUES ('dispatch', ?, ?, 'ok', ?, ?)")
+          .bind(job.params.to ?? job.params.ring ?? null, job.params.source ?? null, `${label} queued by the pool scheduler as task ${id} — ${why}`, JSON.stringify({ task: id, job, why }))
+          .run();
+      } catch (e) {
+        log.push(`job ${job.kind}: ${String(e)}`);
+      }
+    }
+  }
   if (!env.GITHUB_TOKEN) {
     log.push("GITHUB_TOKEN not set; scheduler idle");
     return log;
   }
   const cache = new Map<string, RunSummary[]>();
   for (const rule of RULES) {
+    if (rule.job && jobMode(env, rule.job.kind)) continue;
     try {
       const runs = cache.get(rule.workflow) ?? (await recentRuns(env, rule.workflow));
       cache.set(rule.workflow, runs);

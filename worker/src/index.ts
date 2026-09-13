@@ -45,12 +45,14 @@ import {
   handleApproveRequest, handleCancelTask, handleClaim, handleComplete, handleCreateRequest, handleEnqueue, handleFactory, handleFail,
   handleHeartbeat, handleRejectRequest, handleTask, handleBuilt, handleUpdateRequest,
 } from "./routes/factory";
-import { requireFactoryAuth, isProjectFactoryToken, requireAuthOk } from "./auth";
+import { isProjectFactoryToken, requireAuthOk, authorize, authorizeRelease, authorizeArtifacts } from "./auth";
 import {
   contributorOf, workerOf, handleRegister, handleMe, handleRegisterPackage, handleDeletePackage, handleBuildPackage, handleRegisterWorker,
   handleRevokeWorker, handleListPackages, handleStagingPut, handleStagingMultipart, handleStagingList, handleStagingGet,
 } from "./routes/contributors";
 import type { Actor } from "./routes/factory";
+import { jobOf } from "./jobtoken";
+import { handleTrustWorker, handleSetRole, handleTrustList } from "./routes/contributors";
 import { handleGetEvents, handlePostEvent } from "./routes/events";
 import { handleServiceStatus, handleStats } from "./routes/stats";
 import { handleGc, handleUnreferenced } from "./routes/gc";
@@ -84,6 +86,10 @@ export interface Env {
   GITHUB_TOKEN?: string;
   /** Bearer token build workers present to the factory endpoints. */
   FACTORY_TOKEN?: string;
+  /** Signs per-job tokens (jobtoken.ts); any random string. */
+  JOB_TOKEN_SECRET?: string;
+  /** Task kinds the scheduler creates as pulled jobs instead of GitHub workflows (comma-separated). */
+  JOB_KINDS?: string;
 }
 
 
@@ -159,26 +165,42 @@ async function factoryRoutes(method: string, path: string, url: URL, request: Re
     if ((m = path.match(/^\/factory\/packages\/([a-z0-9@._+-]+)$/)) && method === "DELETE") return handleDeletePackage(c, m[1], env);
     if (method === "POST" && path === "/factory/workers") return handleRegisterWorker(c, request, env);
     if ((m = path.match(/^\/factory\/workers\/([A-Za-z0-9_.-]+)$/)) && method === "DELETE") return handleRevokeWorker(c, m[1], env);
+    if ((m = path.match(/^\/factory\/workers\/([A-Za-z0-9_.-]+)\/trust$/)) && method === "POST") return handleTrustWorker(c, m[1], request, env);
     return null;
+  }
+  // Roles: an admin's token, or the publish token while the transition lasts.
+  if ((m = path.match(/^\/factory\/contributors\/([A-Za-z0-9-]+)$/)) && method === "PATCH") {
+    const c = await contributorOf(request, env);
+    if (c && c.role === "admin") return handleSetRole(m[1], request, env, c.login);
+    return requireAuth(request, env) ?? handleSetRole(m[1], request, env, "publish-token");
   }
   // Workers: the project's (shared secret) or a registered one (own token).
   const workerActor = async (): Promise<Actor | Response> => {
     if (isProjectFactoryToken(request, env)) return { kind: "project" };
     const w = await workerOf(request, env);
-    return w ? { kind: "worker", w } : json({ error: "unauthorized: a worker token (POST /factory/workers) or the project's FACTORY_TOKEN" }, 401);
+    if (w) return { kind: "worker", w };
+    const job = await jobOf(request, env);
+    return job ? { kind: "job", job } : json({ error: "unauthorized: a worker token (POST /factory/workers), a job token, or the project's FACTORY_TOKEN" }, 401);
+  };
+  // A job token good for this task's staging, as the worker it was issued to.
+  const stagingActor = async (taskId: number) => {
+    const w = await workerOf(request, env);
+    if (w) return w;
+    const job = await jobOf(request, env);
+    return job && job.s.includes(`staging:${taskId}`) ? { id: job.w, owner: null, mode: "", packages: [], arch: "", trust: "community" } : null;
   };
   if (method === "POST" && path === "/factory/claim") { const a = await workerActor(); return a instanceof Response ? a : handleClaim(request, env, a); }
   if ((m = path.match(/^\/factory\/tasks\/(\d+)\/heartbeat$/)) && method === "POST") { const a = await workerActor(); return a instanceof Response ? a : handleHeartbeat(Number(m[1]), request, env, a); }
   if ((m = path.match(/^\/factory\/tasks\/(\d+)\/complete$/)) && method === "POST") { const a = await workerActor(); return a instanceof Response ? a : handleComplete(Number(m[1]), request, env, a); }
   if ((m = path.match(/^\/factory\/tasks\/(\d+)\/fail$/)) && method === "POST") { const a = await workerActor(); return a instanceof Response ? a : handleFail(Number(m[1]), request, env, a); }
   if ((m = path.match(/^\/factory\/tasks\/(\d+)\/artifacts\/([A-Za-z0-9][A-Za-z0-9._:+-]{0,200})$/)) && method === "PUT") {
-    const w = await workerOf(request, env);
-    if (!w) return json({ error: "a registered worker token is required" }, 401);
+    const w = await stagingActor(Number(m[1]));
+    if (!w) return json({ error: "a registered worker token or this task's job token is required" }, 401);
     return handleStagingPut(Number(m[1]), m[2], request, env, w);
   }
   if ((m = path.match(/^\/factory\/tasks\/(\d+)\/artifacts\/([A-Za-z0-9][A-Za-z0-9._:+-]{0,200})\/multipart$/)) && method === "POST") {
-    const w = await workerOf(request, env);
-    if (!w) return json({ error: "a registered worker token is required" }, 401);
+    const w = await stagingActor(Number(m[1]));
+    if (!w) return json({ error: "a registered worker token or this task's job token is required" }, 401);
     return handleStagingMultipart(Number(m[1]), m[2], url, request, env, w);
   }
   return null;
@@ -240,6 +262,7 @@ async function api(method: string, path: string, url: URL, request: Request, env
   if (method === "GET" && path === "/factory") return handleFactory(env);
   if (method === "GET" && path === "/factory/built") return handleBuilt(env);
   if (method === "GET" && path === "/factory/packages") return handleListPackages(env);
+  if (method === "GET" && path === "/factory/trust") return handleTrustList(env);
   if (method === "GET" && path === "/factory/me") {
     const c = await contributorOf(request, env);
     return c ? handleMe(c, env) : json({ error: "a contributor token is required (POST /factory/register)" }, 401);
@@ -258,35 +281,35 @@ async function api(method: string, path: string, url: URL, request: Request, env
   if ((m = path.match(/^\/factory\/requests\/name\/([a-z0-9@._+-]+)$/)) && method === "PATCH") return requireAuth(request, env) ?? handleUpdateRequest(m[1], request, env);
   if ((m = path.match(/^\/factory\/requests\/(\d+)\/reject$/)) && method === "POST") return requireAuth(request, env) ?? handleRejectRequest(Number(m[1]), request, env);
   if (method === "POST" && path === "/factory/enqueue") return requireAuth(request, env) ?? handleEnqueue(request, env);
-  if (method === "PUT" && path === "/security/advisories") return requireAuth(request, env) ?? handlePutAdvisories(request, env);
-  if (method === "PUT" && path === "/security/matches") return requireAuth(request, env) ?? handlePutMatches(request, env);
-  if (method === "POST" && path === "/security/prune") return requireAuth(request, env) ?? handlePrune(url, env);
+  if (method === "PUT" && path === "/security/advisories") return (await authorize(request, env, "security:write")) ?? handlePutAdvisories(request, env);
+  if (method === "PUT" && path === "/security/matches") return (await authorize(request, env, "security:write")) ?? handlePutMatches(request, env);
+  if (method === "POST" && path === "/security/prune") return (await authorize(request, env, "security:write")) ?? handlePrune(url, env);
   if ((m = path.match(/^\/package\/([A-Za-z0-9@._+-]+)$/)) && method === "GET") return handlePackage(m[1], url, env);
   if ((m = path.match(/^\/package\/([A-Za-z0-9@._+-]+)\/files$/)) && method === "GET") return handlePackageFiles(m[1], url, env);
   if (method === "GET" && path === "/events") return handleGetEvents(url, env);
   if (method === "GET" && path === "/pool/unreferenced") return handleUnreferenced(url, env);
-  if (method === "POST" && path === "/pool/gc") return requireAuth(request, env) ?? handleGc(url, env);
-  if (method === "POST" && path === "/events") return requireAuth(request, env) ?? handlePostEvent(request, env);
+  if (method === "POST" && path === "/pool/gc") return (await authorize(request, env, "gc")) ?? handleGc(url, env);
+  if (method === "POST" && path === "/events") return (await authorize(request, env, "events")) ?? handlePostEvent(request, env);
 
   if ((m = path.match(/^\/pool\/([0-9a-f]{64})$/)) && method === "PUT") {
-    return requireAuth(request, env) ?? handlePutPool(m[1], url, request, env);
+    return (await authorize(request, env, "pool:write")) ?? handlePutPool(m[1], url, request, env);
   }
   if ((m = path.match(/^\/pool\/([0-9a-f]{64})\/sig$/)) && method === "PUT") {
-    return requireAuth(request, env) ?? handlePutPoolSig(m[1], url, request, env);
+    return (await authorize(request, env, "pool:write")) ?? handlePutPoolSig(m[1], url, request, env);
   }
   if ((m = path.match(/^\/pool\/([0-9a-f]{64})\/multipart$/)) && method === "POST") {
-    return requireAuth(request, env) ?? handleMultipartCreate(m[1], url, env);
+    return (await authorize(request, env, "pool:write")) ?? handleMultipartCreate(m[1], url, env);
   }
   if ((m = path.match(/^\/pool\/multipart\/([A-Za-z0-9._-]+)\/part\/(\d+)$/)) && method === "PUT") {
     const key = url.searchParams.get("key") ?? "";
-    return requireAuth(request, env) ?? handleMultipartPart(key, m[1], Number(m[2]), request, env);
+    return (await authorize(request, env, "pool:write")) ?? handleMultipartPart(key, m[1], Number(m[2]), request, env);
   }
   if ((m = path.match(/^\/pool\/multipart\/([A-Za-z0-9._-]+)\/complete$/)) && method === "POST") {
     const key = url.searchParams.get("key") ?? "";
-    return requireAuth(request, env) ?? handleMultipartComplete(key, m[1], request, env);
+    return (await authorize(request, env, "pool:write")) ?? handleMultipartComplete(key, m[1], request, env);
   }
   if (path === "/packages" && method === "POST") {
-    return requireAuth(request, env) ?? handlePostPackage(url, request, env);
+    return (await authorize(request, env, "pool:write")) ?? handlePostPackage(url, request, env);
   }
   if (path === "/packages/known" && method === "POST") {
     return handleKnownPackages(request, env);
@@ -295,7 +318,7 @@ async function api(method: string, path: string, url: URL, request: Request, env
     return handleGetPackage(m[1], env);
   }
   if (path === "/releases" && method === "POST") {
-    return requireAuth(request, env) ?? handleCreateRelease(request, env);
+    return (await authorizeRelease(request, env)) ?? handleCreateRelease(request, env);
   }
   if ((m = path.match(/^\/releases\/([a-z]+)$/)) && method === "GET") {
     return handleGetRelease(m[1], url, env);
@@ -304,7 +327,7 @@ async function api(method: string, path: string, url: URL, request: Request, env
     return handleReleaseHistory(m[1], env);
   }
   if ((m = path.match(/^\/releases\/(\d+)\/artifacts\/(db|db\.sig|files|files\.sig)$/)) && method === "PUT") {
-    return requireAuth(request, env) ?? handlePutArtifact(Number(m[1]), m[2], url, request, env);
+    return (await authorizeArtifacts(request, env, Number(m[1]))) ?? handlePutArtifact(Number(m[1]), m[2], url, request, env);
   }
   return json({ error: "not found" }, 404);
 }

@@ -43,15 +43,18 @@ export interface Contributor {
   login: string;
   name: string | null;
   avatar_url: string | null;
+  role: string;
+  areas: string[];
 }
 
 /** The contributor behind a `omc_…` token, or null. */
 export async function contributorOf(request: Request, env: Env): Promise<Contributor | null> {
   const token = bearer(request);
   if (!token.startsWith("omc_")) return null;
-  const row = await env.DB.prepare("SELECT login, name, avatar_url FROM contributors WHERE token_hash = ?").bind(await sha256Hex(token)).first<Contributor>();
-  if (row) await env.DB.prepare("UPDATE contributors SET last_seen = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE login = ?").bind(row.login).run();
-  return row ?? null;
+  const row = await env.DB.prepare("SELECT login, name, avatar_url, role, areas FROM contributors WHERE token_hash = ?").bind(await sha256Hex(token)).first<{ login: string; name: string | null; avatar_url: string | null; role: string; areas: string | null }>();
+  if (!row) return null;
+  await env.DB.prepare("UPDATE contributors SET last_seen = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE login = ?").bind(row.login).run();
+  return { ...row, areas: row.areas ? JSON.parse(row.areas) : [] };
 }
 
 export interface WorkerIdentity {
@@ -60,15 +63,17 @@ export interface WorkerIdentity {
   mode: string;
   packages: string[];
   arch: string;
+  /** community: its own or shared builds · project: everything, approved by a maintainer. */
+  trust: string;
 }
 
 /** The registered worker behind a `omw_…` token (not revoked), or null. */
 export async function workerOf(request: Request, env: Env): Promise<WorkerIdentity | null> {
   const token = bearer(request);
   if (!token.startsWith("omw_")) return null;
-  const row = await env.DB.prepare("SELECT id, owner, mode, packages, arch FROM build_workers WHERE token_hash = ? AND revoked_at IS NULL")
+  const row = await env.DB.prepare("SELECT id, owner, mode, packages, arch, trust FROM build_workers WHERE token_hash = ? AND revoked_at IS NULL")
     .bind(await sha256Hex(token))
-    .first<{ id: string; owner: string | null; mode: string; packages: string | null; arch: string }>();
+    .first<{ id: string; owner: string | null; mode: string; packages: string | null; arch: string; trust: string }>();
   return row ? { ...row, packages: row.packages ? JSON.parse(row.packages) : [] } : null;
 }
 
@@ -317,4 +322,45 @@ export async function handleStagingGet(taskId: number, filename: string, env: En
   const obj = await env.STAGING.get(row.key);
   if (!obj) return json({ error: "gone (staging objects expire after 30 days)" }, 404);
   return new Response(obj.body, { headers: { "content-type": isText ? "text/plain; charset=utf-8" : "application/octet-stream", "cache-control": "no-store" } });
+}
+
+// ---------- maintainers ----------
+
+export function isMaintainer(c: Contributor): boolean {
+  return c.role === "maintainer" || c.role === "admin";
+}
+
+/** A maintainer promotes a worker to project trust (or back): a recorded action, revocable. */
+export async function handleTrustWorker(c: Contributor, id: string, request: Request, env: Env): Promise<Response> {
+  if (!isMaintainer(c)) return json({ error: "a maintainer's token is required" }, 403);
+  const b = (await request.json()) as { trust?: string };
+  const trust = b.trust === "project" ? "project" : "community";
+  const res = await env.DB.prepare("UPDATE build_workers SET trust = ?, trusted_by = ?, trusted_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? AND revoked_at IS NULL")
+    .bind(trust, c.login, id)
+    .run();
+  if (!res.meta.changes) return json({ error: "no such worker (or revoked)" }, 404);
+  await env.DB.prepare("INSERT INTO events (kind, ring, source, status, summary, payload) VALUES ('trust', NULL, 'factory', 'ok', ?, ?)")
+    .bind(`worker ${id} set to ${trust} trust by ${c.login}`, JSON.stringify({ worker: id, trust, by: c.login }))
+    .run();
+  return json({ worker: id, trust, by: c.login });
+}
+
+/** Roles: an admin (or, while the transition lasts, the publish token) names maintainers and their areas. */
+export async function handleSetRole(login: string, request: Request, env: Env, by: string): Promise<Response> {
+  const b = (await request.json()) as { role?: string; areas?: unknown };
+  const role = ["contributor", "maintainer", "admin"].includes(b.role ?? "") ? (b.role as string) : "contributor";
+  const areas = Array.isArray(b.areas) ? b.areas.filter((a): a is string => typeof a === "string") : [];
+  const res = await env.DB.prepare("UPDATE contributors SET role = ?, areas = ? WHERE login = ?").bind(role, JSON.stringify(areas), login).run();
+  if (!res.meta.changes) return json({ error: `${login} has not registered yet (POST /factory/register)` }, 404);
+  await env.DB.prepare("INSERT INTO events (kind, ring, source, status, summary, payload) VALUES ('role', NULL, 'factory', 'ok', ?, ?)")
+    .bind(`${login} is now ${role}${areas.length ? " of " + areas.join(", ") : ""} (by ${by})`, JSON.stringify({ login, role, areas, by }))
+    .run();
+  return json({ login, role, areas });
+}
+
+/** Workers the project trusts and the people who may approve: the dashboard's trust page. */
+export async function handleTrustList(env: Env): Promise<Response> {
+  const workers = await env.DB.prepare("SELECT id, owner, arch, mode, trust, trusted_by, trusted_at, last_seen, revoked_at FROM build_workers WHERE trust = 'project' OR owner IS NULL ORDER BY trust DESC, last_seen DESC LIMIT 100").all();
+  const people = await env.DB.prepare("SELECT login, name, role, areas, last_seen FROM contributors WHERE role != 'contributor' ORDER BY role, login").all();
+  return json({ workers: workers.results, maintainers: people.results.map((p) => ({ ...p, areas: p.areas ? JSON.parse(p.areas as string) : [] })) }, 200, { "cache-control": "public, max-age=30" });
 }
