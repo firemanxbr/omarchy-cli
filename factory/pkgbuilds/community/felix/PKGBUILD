@@ -1,0 +1,32 @@
+# Maintainer: omarchy-pool factory <https://github.com/firemanxbr/omarchy-pool>
+# Requested from: https://github.com/kyoheiu/felix
+# Drafted from a template (rust); review the dependencies.
+pkgname=felix
+pkgver=2.16.1
+pkgrel=1
+pkgdesc="tui file manager with vim-like key mapping"
+arch=('x86_64' 'aarch64')
+url="https://github.com/kyoheiu/felix"
+license=('MIT')
+depends=('bzip2' 'libgit2' 'xz' 'zlib' 'zstd')
+makedepends=('cargo')
+source=("$pkgname-$pkgver.tar.gz::https://github.com/kyoheiu/felix/archive/refs/tags/v2.16.1.tar.gz")
+sha256sums=('a001dfe81cdbdfa19ba653a4711a17e4c92aa528139739c895df5791a26ea9f5')
+
+prepare() {
+  cd "$srcdir/felix-2.16.1"
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+  cd "$srcdir/felix-2.16.1"
+  export CARGO_TARGET_DIR=target
+  cargo build --frozen --release
+}
+
+package() {
+  cd "$srcdir/felix-2.16.1"
+  # Every binary the crate builds lands in /usr/bin.
+  find target/release -maxdepth 1 -type f -perm -u+x -exec install -Dm755 {} -t "$pkgdir/usr/bin" \;
+  install -Dm644 LICENSE -t "$pkgdir/usr/share/licenses/$pkgname"
+}
