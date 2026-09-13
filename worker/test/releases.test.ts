@@ -187,6 +187,33 @@ describe("GET /releases/:ring/diff", () => {
   });
 });
 
+describe("per-architecture promotion", () => {
+  it("moves one architecture from the source ring and keeps the other as the target serves it", async () => {
+    // edge x86_64 gains a newer zlib; rc keeps the old one on both.
+    const zlibNew = await index("core", "x86_64", { name: "zlib", version: "1:1.3.3-1", arch: "x86_64" }, pool);
+    const e = await call("POST", "/releases", { ring: "edge", add: [zlibNew], remove_arch: "x86_64" }, edge);
+    expect(e.status).toBe(201);
+    expect((await call("POST", "/releases", { ring: "rc", arch: "x86_64" }, rc)).status).toBe(400); // arch goes with a source
+    expect((await call("POST", "/releases", { ring: "rc", from_ring: "edge", arch: "mips" }, rc)).status).toBe(400);
+    const p = await call("POST", "/releases", { ring: "rc", from_ring: "edge", arch: "x86_64", note: "x86_64 only" }, rc);
+    expect(p.status).toBe(201);
+    expect(p.json.unchanged_arches).toEqual(["aarch64"]);
+    const x86 = (await call("GET", "/releases/rc?fields=summary&arch=x86_64")).json.packages;
+    expect(x86.find((q: any) => q.name === "zlib").version).toBe("1:1.3.3-1");
+    const arm = (await call("GET", "/releases/rc?fields=summary&arch=aarch64")).json.packages;
+    expect(arm.map((q: any) => `${q.name} ${q.version}`).sort()).toEqual(["xz 5.8.4-1", "zlib 1:1.3.2-3"]);
+    // The delta says exactly that: one x86_64 object out, one in.
+    const d = await call("GET", `/releases/rc/diff?to=${p.json.release.id}`);
+    expect(d.json.counts).toMatchObject({ added: 0, removed: 0, upgraded: 1 });
+    expect(d.json.upgraded[0]).toMatchObject({ name: "zlib", arch: "x86_64", to: "1:1.3.3-1" });
+    // Roll that architecture back alone: aarch64 untouched again.
+    const rb = await call("POST", "/releases", { ring: "rc", from_release_id: p.json.release.parent_id, arch: "x86_64", note: "x86_64 back" }, rc);
+    expect(rb.status).toBe(201);
+    expect(rb.json.unchanged_arches).toEqual(["aarch64"]);
+    expect((await call("GET", "/releases/rc?fields=summary&arch=x86_64")).json.packages.find((q: any) => q.name === "zlib").version).toBe("1:1.3.2-3");
+  });
+});
+
 describe("GET /releases/:ring", () => {
   it("pages the manifests in (name, arch) order and pins a release while paging", async () => {
     const all = await call("GET", "/releases/stable");

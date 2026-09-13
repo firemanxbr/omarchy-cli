@@ -316,32 +316,7 @@ fn execute(opts: &WorkOptions, task: &Task, token: &Arc<Mutex<String>>) -> Resul
         }
         "promote" => promote_job(opts, &job, task, token),
         "security" => security_job(opts, &job, token),
-        "rollback" => {
-            let ring = s(&task.params, "ring");
-            let to = task
-                .params
-                .get("to")
-                .and_then(|v| {
-                    v.as_u64()
-                        .or_else(|| v.as_str().and_then(|x| x.parse().ok()))
-                })
-                .ok_or_else(|| anyhow!("rollback needs `to`, a release id"))?;
-            let note = s(&task.params, "note");
-            let created = ops::rollback(
-                &job,
-                &ring,
-                to,
-                if note.is_empty() { None } else { Some(&note) },
-            )?;
-            let rendered = render_both(opts, &job, &ring, &opts.arch, &[])?;
-            Ok(Outcome {
-                summary: format!(
-                    "{ring} rolled back to release {to} as release {created}; rendered {}",
-                    rendered.join(", ")
-                ),
-                result: serde_json::json!({ "ring": ring, "to": to, "release_id": created, "rendered": rendered }),
-            })
-        }
+        "rollback" => rollback_job(opts, &job, task),
         "enqueue" => {
             let r = crate::reconcile::run(&job, &opts.work_dir, &opts.arch)?;
             Ok(Outcome {
@@ -661,6 +636,47 @@ fn script(
     Ok(status.success())
 }
 
+/// A rollback: the ring pointed at an earlier release — all of it, or one
+/// architecture — then rendered where it changed.
+fn rollback_job(opts: &WorkOptions, job: &Api, task: &Task) -> Result<Outcome> {
+    let ring = s(&task.params, "ring");
+    let to = task
+        .params
+        .get("to")
+        .and_then(|v| {
+            v.as_u64()
+                .or_else(|| v.as_str().and_then(|x| x.parse().ok()))
+        })
+        .ok_or_else(|| anyhow!("rollback needs `to`, a release id"))?;
+    let note = s(&task.params, "note");
+    let only = s(&task.params, "arch");
+    let created = ops::rollback(
+        job,
+        &ring,
+        to,
+        if note.is_empty() { None } else { Some(&note) },
+        if only.is_empty() { None } else { Some(&only) },
+    )?;
+    // One architecture rolled back: the other's databases are as they were.
+    let keep: Vec<String> = if only.is_empty() {
+        Vec::new()
+    } else {
+        ["x86_64", "aarch64"]
+            .iter()
+            .filter(|a| **a != only)
+            .map(|a| (*a).to_owned())
+            .collect()
+    };
+    let rendered = render_both(opts, job, &ring, &opts.arch, &keep)?;
+    Ok(Outcome {
+        summary: format!(
+            "{ring} rolled back to release {to} as release {created}; rendered {}",
+            rendered.join(", ")
+        ),
+        result: serde_json::json!({ "ring": ring, "to": to, "release_id": created, "rendered": rendered }),
+    })
+}
+
 /// A project build: the PKGBUILD (from the repository, a contributor's
 /// repository, a draft, or a staged build a maintainer approved) built in a
 /// fresh Arch container by the pipeline's own script, then signed,
@@ -902,7 +918,19 @@ fn promote_job(
             .unwrap_or(1),
     )
     .unwrap_or(1);
-    let arches = ["x86_64".to_owned(), "aarch64".to_owned()];
+    // One architecture only (`arch`): its evidence, its gate, its rows, its
+    // databases, its health — the other keeps what `to` serves today.
+    let only = s(&task.params, "arch");
+    let arches: Vec<String> = if only.is_empty() {
+        vec!["x86_64".to_owned(), "aarch64".to_owned()]
+    } else {
+        vec![only.clone()]
+    };
+    let only_arch = if only.is_empty() {
+        None
+    } else {
+        Some(only.as_str())
+    };
     // `force` (a maintainer's emergency, queued by hand) skips the evidence
     // and the gate; the health check of the target still runs and still
     // rolls back.
@@ -949,7 +977,7 @@ fn promote_job(
         Verdict::Promote => {}
     }
     let previous = ops::head(job, &to)?;
-    let created = ops::promote(job, &from, &to, Some(&note))?;
+    let created = ops::promote(job, &from, &to, Some(&note), only_arch)?;
     // The OPR channel that matches the ring (aarch64 has only edge upstream).
     let keys = keyrings(opts)?;
     for arch in &arches {
@@ -1006,6 +1034,7 @@ fn promote_job(
                     "automatic rollback: health failed after promotion from {from} ({})",
                     unhealthy.join(", ")
                 )),
+                only_arch,
             )?;
             for arch in &arches {
                 ops::render(job, &to, arch, opts.sign.as_deref())?;
@@ -1106,6 +1135,7 @@ fn verify_fast_track(
             "automatic rollback: health failed after a security fast-track ({})",
             unhealthy.join(", ")
         )),
+        None,
     )?;
     for arch in arches {
         ops::render(job, ring, arch, opts.sign.as_deref())?;

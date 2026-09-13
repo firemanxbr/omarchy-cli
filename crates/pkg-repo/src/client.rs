@@ -50,6 +50,8 @@ pub struct ReleaseRequest<'a> {
     pub remove: &'a [String],
     /// Scope `add` lookups and `remove` to one repository architecture.
     pub remove_arch: Option<&'a str>,
+    /// Promote or roll back this architecture only; the other keeps what the ring serves.
+    pub arch: Option<&'a str>,
     pub note: Option<&'a str>,
 }
 
@@ -475,6 +477,7 @@ impl Api {
             "add": req.add,
             "remove": req.remove,
             "remove_arch": req.remove_arch,
+            "arch": req.arch,
             "note": req.note,
         });
         with_retry("create_release", || {

@@ -161,6 +161,9 @@ enum Command {
         to: String,
         #[arg(long)]
         note: Option<String>,
+        /// This architecture only; the other keeps what the target serves.
+        #[arg(long)]
+        arch: Option<String>,
     },
     /// Points a ring at the selection of an earlier release (a new release is created;
     /// history stays append-only). Re-run `render` afterwards.
@@ -174,6 +177,9 @@ enum Command {
         to: u64,
         #[arg(long)]
         note: Option<String>,
+        /// This architecture only; the other keeps what the ring serves.
+        #[arg(long)]
+        arch: Option<String>,
     },
     /// Lists the releases of a ring, newest first.
     Releases {
@@ -439,13 +445,15 @@ fn main() -> Result<()> {
             from,
             to,
             note,
-        } => ops::promote(&api(&remote)?, &from, &to, note.as_deref()).map(|_| ()),
+            arch,
+        } => ops::promote(&api(&remote)?, &from, &to, note.as_deref(), arch.as_deref()).map(|_| ()),
         Command::Rollback {
             remote,
             ring,
             to,
             note,
-        } => ops::rollback(&api(&remote)?, &ring, to, note.as_deref()).map(|_| ()),
+            arch,
+        } => ops::rollback(&api(&remote)?, &ring, to, note.as_deref(), arch.as_deref()).map(|_| ()),
         Command::Releases {
             remote,
             ring,

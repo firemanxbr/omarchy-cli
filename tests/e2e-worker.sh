@@ -118,6 +118,10 @@ grep -q '"name":"zlib"' <<<"$summary_body" || { echo "rollback lost zlib"; exit 
 grep -q '"name":"xz"' <<<"$summary_body" && { echo "rollback still serves xz"; exit 1; }
 "$PKG_REPO" promote --from rc --to stable --note "forward again"
 "$PKG_REPO" releases --ring stable
+# One architecture at a time: rc gets edge's aarch64 rows (there are none in the
+# fixtures) while its x86_64 keeps what it serves; the response says x86_64 is unchanged.
+"$PKG_REPO" promote --from edge --to rc --arch aarch64 --note "aarch64 only"
+rc_arch=$(curl -s "$OMARCHY_API/api/v1/releases/rc?fields=summary&arch=x86_64"); grep -q '"name":"zlib"' <<<"$rc_arch" && grep -q '"name":"xz"' <<<"$rc_arch" || { echo "a per-arch promotion must keep the other architecture: $(head -c 200 <<<"$rc_arch")"; exit 1; }
 # The diff between two releases: the rollback dropped xz, the promotion put it back.
 diff_out=$("$PKG_REPO" diff --ring stable); grep -q "^+ xz 5.8.4-1 (x86_64)" <<<"$diff_out" || { echo "diff does not show xz coming back: $diff_out"; exit 1; }
 diff_json=$("$PKG_REPO" diff --ring stable --json); python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["counts"]["added"]==1 and d["counts"]["removed"]==0 and d["from"]["id"] < d["to"]["id"], d["counts"]' <<<"$diff_json" || { echo "diff --json is off"; exit 1; }

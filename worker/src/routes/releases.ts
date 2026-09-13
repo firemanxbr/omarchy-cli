@@ -14,6 +14,13 @@ interface CreateRelease {
   /** Package names to drop from the selection (scoped by `remove_arch` when given). */
   remove?: string[];
   remove_arch?: string | null;
+  /**
+   * Promote or roll back one architecture only: the source's rows of this
+   * architecture replace the ring's, the other architecture keeps what
+   * the ring serves today. So x86_64 and aarch64 move at different times
+   * when one architecture's evidence is red and the other's green.
+   */
+  arch?: string | null;
   note?: string | null;
 }
 
@@ -67,6 +74,9 @@ export async function handleCreateRelease(request: Request, env: Env): Promise<R
   // Where the selection starts: the ring's own live rows (a sync, a
   // publish), another ring's (a promotion), or an older release's
   // checkpoint rows (a rollback — materialised first if it has none).
+  const onlyArch = body.arch ?? null;
+  if (onlyArch !== null && !isRepoArch(onlyArch)) return json({ error: "arch must be x86_64 or aarch64" }, 400);
+  if (onlyArch !== null && !source) return json({ error: "arch goes with from_ring or from_release_id" }, 400);
   let baseSql = "(SELECT package_id FROM ring_packages WHERE ring = '__none__')";
   if (source && !(parent && source.id === parent.id)) {
     const asHead = await env.DB.prepare("SELECT ring FROM ring_heads WHERE release_id = ?").bind(source.id).first<{ ring: Ring }>();
@@ -74,6 +84,11 @@ export async function handleCreateRelease(request: Request, env: Env): Promise<R
     else {
       await ensureCheckpoint(env, source.id);
       baseSql = `(SELECT package_id FROM release_packages WHERE release_id = ${source.id})`;
+    }
+    // One architecture from the source, the other as the ring serves it.
+    if (onlyArch !== null && parent) {
+      baseSql = `(SELECT b.package_id FROM ${baseSql} b JOIN packages p ON p.id = b.package_id WHERE p.repo_arch = '${onlyArch}'
+                  UNION SELECT o.package_id FROM ${ringMembers(ring)} o JOIN packages p ON p.id = o.package_id WHERE p.repo_arch != '${onlyArch}')`;
     }
   } else if (parent) baseSql = ringMembers(ring);
 
@@ -123,7 +138,9 @@ export async function handleCreateRelease(request: Request, env: Env): Promise<R
   // are already rendered, at the live keys. The parent's artifact rows
   // carry over, and the caller is told not to render it again (a sync of
   // an aarch64 source no longer re-renders the 15k-package x86_64 extra).
-  const unchanged: string[] = parent && base?.id === parent.id && removeArch !== null ? REPO_ARCHES.filter((a) => a !== removeArch) : [];
+  const untouched = (body.remove ?? []).length === 0 && added.length === 0;
+  const scoped = parent && base?.id === parent.id ? removeArch : onlyArch !== null && (untouched || removeArch === onlyArch) ? onlyArch : null;
+  const unchanged: string[] = parent && scoped !== null ? REPO_ARCHES.filter((a) => a !== scoped) : [];
   if (unchanged.length) {
     stmts.push(
       env.DB.prepare(

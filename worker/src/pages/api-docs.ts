@@ -72,7 +72,7 @@ curl -s  https://pool.firemanxbr.org/x86_64/omarchy-core-stable.db | tar -tz | h
       <tr><td><code>PUT /pool/:sha256?filename=&amp;arch=</code> · <code>/sig</code> · <code>/multipart</code></td><td>Store a package object (integrity-checked, never overwritten) and its upstream signature.</td></tr>
       <tr><td><code>POST /pool/:sha256/sign?filename=&amp;arch=</code></td><td>The pool signs a package it built (source <em>factory</em>) with its own key; the key never leaves the service.</td></tr>
       <tr><td><code>POST /packages?source=&amp;arch=</code> · <code>POST /packages/known</code></td><td>Index a manifest; ask which sha256s are already indexed.</td></tr>
-      <tr><td><code>POST /releases</code></td><td>Create, promote or roll back a release (an index write).</td></tr>
+      <tr><td><code>POST /releases</code></td><td>Create, promote or roll back a release (an index write); <code>arch</code> moves one architecture only while the other keeps what the ring serves.</td></tr>
       <tr><td><code>PUT /releases/:id/artifacts/:kind?repo=&amp;arch=</code></td><td>Publish a rendered database beside the packages; the pool signs it as it stores it.</td></tr>
       <tr><td><code>POST /events</code> · <code>POST /pool/gc</code></td><td>Record a journal entry; run retention.</td></tr>
       <tr><td><code>PUT /factory/tasks/:id/artifacts/&lt;file&gt;</code></td><td>A community build's token uploads its evidence to its own staging workspace; an audit's token adds <code>audit.json</code> / <code>audit.md</code> to a staged build, and nothing else.</td></tr>
