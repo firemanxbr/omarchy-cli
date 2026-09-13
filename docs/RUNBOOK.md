@@ -49,7 +49,7 @@ pkg-repo job sync --param source=packages --param arch=x86_64 --param ring=rc   
 pkg-repo job promote --param from=edge --param to=rc --param note="…"
 pkg-repo job promote --param from=rc --param to=stable --param note="…"        # evidence-gated, one-day soak
 pkg-repo job promote --param from=rc --param to=stable --param force=yes       # emergency: skips the gate (the target's health still rolls back)
-pkg-repo job rollback --param ring=stable --param to=<release id>              # then renders both architectures
+pkg-repo job rollback --param ring=stable --param to=<release id>              # then renders both architectures (or the overview's roll back button)
 pkg-repo job render --param ring=stable --param arch=x86_64
 pkg-repo job health --param ring=stable --param arch=aarch64
 pkg-repo job security
@@ -71,12 +71,21 @@ path: the evidence is the reviewer, and a maintainer who disagrees rolls back.
 pkg-repo fast-track --ring stable --from edge --dry-run        # security fixes edge has and stable lacks (exit 3: none)
 pkg-repo gate --from rc --to stable --soak-days 1 --dry-run   # exit 0 promote, 3 nothing new, 1 blocked
 pkg-repo head --ring stable                                    # current release id (rollback target)
+pkg-repo diff --ring stable                                    # what the head changed against its parent (+ − ↑)
+pkg-repo diff --ring rc --from 41 --to 45 --arch aarch64 --json  # any two releases inside retention
+pkg-repo releases --all --json                                 # every ring's history, for scripts and agents
 tests/abi-gate.sh rc x86_64                                    # ABI check of rc's upgrades, exit 2 on blockers
 ```
 
 The reads run directly from anywhere (`pkg-repo releases --ring stable`,
-`pkg-repo head`, `pkg-repo gc --keep 3` without `--delete` is a report); the
-writes above are jobs.
+`pkg-repo diff`, `pkg-repo head`, `pkg-repo gc --keep 3` without `--delete`
+is a report); the writes above are jobs. A signed-in maintainer also rolls a
+ring back from the overview's *Ring history* (the *roll back* button on any
+earlier row queues the same `rollback` job), and every row's *diff* link,
+like the *diff* on a promotion or rollback line of the journal, opens
+`/diff?ring=&from=&to=` — added, removed and upgraded packages, per
+architecture (`GET /api/v1/releases/:ring/diff`). Both releases must still
+be inside retention: GC prunes the membership of older ones (410).
 
 ## Releasing the pool itself
 

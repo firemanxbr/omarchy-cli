@@ -1,6 +1,6 @@
 import { signingEnabled, detachedSignature } from "../signing";
 import { isRing, json, type Env, type Ring } from "../index";
-import { artifactKey, isRepoArch, SHORT } from "../r2";
+import { artifactKey, isRepoArch, REPO_ARCHES, SHORT } from "../r2";
 import { releaseManifests, releaseSummary, releaseSources, ringHead, type ManifestDetail, type ReleaseRow } from "../db";
 
 interface CreateRelease {
@@ -108,13 +108,84 @@ export async function handleCreateRelease(request: Request, env: Env): Promise<R
   for (let i = 0; i < added.length; i += 2000) {
     stmts.push(env.DB.prepare("UPDATE packages SET released = 1 WHERE released = 0 AND id IN (SELECT value FROM json_each(?))").bind(JSON.stringify(added.slice(i, i + 2000))));
   }
+  // An architecture the request could not have touched — the base copied
+  // from the parent, every add and remove scoped to the other one by
+  // remove_arch — serves exactly what the parent served: its databases
+  // are already rendered, at the live keys. The parent's artifact rows
+  // carry over, and the caller is told not to render it again (a sync of
+  // an aarch64 source no longer re-renders the 15k-package x86_64 extra).
+  const unchanged: string[] = parent && base?.id === parent.id && removeArch !== null ? REPO_ARCHES.filter((a) => a !== removeArch) : [];
+  if (unchanged.length) {
+    stmts.push(
+      env.DB.prepare(
+        "INSERT OR IGNORE INTO release_artifacts (release_id, repo, arch, kind, r2_key, size) SELECT ?, repo, arch, kind, r2_key, size FROM release_artifacts WHERE release_id = ? AND arch IN (SELECT value FROM json_each(?))",
+      ).bind(id, parent!.id, JSON.stringify(unchanged)),
+    );
+  }
   await env.DB.batch(stmts);
   // Immutable from here: what it holds is computed once and kept on the row.
   const summary = await releaseSummary(env, id);
   await releaseSources(env, id);
 
   const release = await env.DB.prepare("SELECT * FROM releases WHERE id = ?").bind(id).first<ReleaseRow>();
-  return json({ release, ...summary }, 201);
+  return json({ release, ...summary, unchanged_arches: unchanged }, 201);
+}
+
+/**
+ * What changed between two releases of a ring: packages added, removed and
+ * upgraded (same name and architecture, another version — a downgrade
+ * shows there too, with the versions telling). Both releases must still
+ * be inside retention: GC prunes the membership of older ones, and a
+ * pruned side answers 410 rather than an empty diff.
+ */
+export async function handleReleaseDiff(ring: string, url: URL, env: Env): Promise<Response> {
+  if (!isRing(ring)) return json({ error: "unknown ring" }, 404);
+  const to = Number(url.searchParams.get("to") ?? 0) || (await ringHead(env, ring))?.id || 0;
+  const toRow = await env.DB.prepare("SELECT * FROM releases WHERE id = ? AND ring = ?").bind(to, ring).first<ReleaseRow>();
+  if (!toRow) return json({ error: `release ${to} is not a ${ring} release` }, 404);
+  const from = Number(url.searchParams.get("from") ?? 0) || toRow.parent_id || 0;
+  const fromRow = from ? await env.DB.prepare("SELECT * FROM releases WHERE id = ?").bind(from).first<ReleaseRow>() : null;
+  if (from && !fromRow) return json({ error: `release ${from} does not exist` }, 404);
+  const arch = url.searchParams.get("arch");
+  if (arch !== null && !isRepoArch(arch)) return json({ error: "unknown arch" }, 400);
+  // A release inside retention keeps its membership; one GC pruned has a
+  // package_count on its row but no rows to compare.
+  for (const r of [toRow, fromRow]) {
+    if (!r || !r.package_count) continue;
+    const n = await env.DB.prepare("SELECT COUNT(*) AS n FROM release_packages WHERE release_id = ?").bind(r.id).first<{ n: number }>();
+    if (!n?.n) return json({ error: `release ${r.id} is outside retention: its package list was pruned, only its summary remains` }, 410);
+  }
+  const side = (id: number) =>
+    env.DB.prepare(
+      `SELECT p.name, p.repo_arch AS arch, p.version, p.sha256, p.source FROM release_packages rp JOIN packages p ON p.id = rp.package_id
+        WHERE rp.release_id = ?1 AND (?2 IS NULL OR p.repo_arch = ?2)`,
+    ).bind(id, arch).all<{ name: string; arch: string; version: string; sha256: string; source: string }>();
+  const [a, b] = await Promise.all([fromRow ? side(fromRow.id) : Promise.resolve({ results: [] as { name: string; arch: string; version: string; sha256: string; source: string }[] }), side(toRow.id)]);
+  const key = (p: { name: string; arch: string }) => `${p.name}\0${p.arch}`;
+  const before = new Map(a.results.map((p) => [key(p), p]));
+  const after = new Map(b.results.map((p) => [key(p), p]));
+  const added = [], removed = [], upgraded = [];
+  for (const [k, p] of after) {
+    const was = before.get(k);
+    if (!was) added.push(p);
+    else if (was.sha256 !== p.sha256) upgraded.push({ name: p.name, arch: p.arch, from: was.version, to: p.version, source: p.source });
+  }
+  for (const [k, p] of before) if (!after.has(k)) removed.push(p);
+  const byName = (x: { name: string; arch: string }, y: { name: string; arch: string }) => x.name.localeCompare(y.name) || x.arch.localeCompare(y.arch);
+  return json(
+    {
+      ring,
+      from: fromRow ? { id: fromRow.id, seq: fromRow.seq, created_at: fromRow.created_at, note: fromRow.note } : null,
+      to: { id: toRow.id, seq: toRow.seq, created_at: toRow.created_at, note: toRow.note },
+      arch,
+      counts: { added: added.length, removed: removed.length, upgraded: upgraded.length, before: a.results.length, after: b.results.length },
+      added: added.sort(byName),
+      removed: removed.sort(byName),
+      upgraded: upgraded.sort(byName),
+    },
+    200,
+    { "cache-control": "public, max-age=300" },
+  );
 }
 
 /** Above this many manifests a caller must page (`limit`/`offset`). */

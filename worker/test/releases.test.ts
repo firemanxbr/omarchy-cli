@@ -146,6 +146,42 @@ describe("POST /releases", () => {
   });
 });
 
+describe("GET /releases/:ring/diff", () => {
+  it("lists what a release changed against its parent, or against any earlier one, per architecture", async () => {
+    // rc: release A (5 pkgs) → B (xz removed, 3) → C (rollback to A, 5).
+    const hist = (await call("GET", "/releases/rc/history")).json.releases;
+    const [c, b, a] = hist;
+    const d1 = await call("GET", `/releases/rc/diff?from=${a.id}&to=${b.id}`);
+    expect(d1.status).toBe(200);
+    expect(d1.json.counts).toEqual({ added: 0, removed: 2, upgraded: 0, before: 5, after: 3 });
+    expect(d1.json.removed.map((p: any) => `${p.name}/${p.arch}`)).toEqual(["xz/aarch64", "xz/x86_64"]);
+    // Defaults: to = the head, from = its parent (B → C puts xz back).
+    const d2 = await call("GET", "/releases/rc/diff");
+    expect(d2.json.to.id).toBe(c.id);
+    expect(d2.json.from.id).toBe(b.id);
+    expect(d2.json.counts.added).toBe(2);
+    // A rollback against the release it restored: nothing changed.
+    const d3 = await call("GET", `/releases/rc/diff?from=${a.id}&to=${c.id}`);
+    expect(d3.json.counts).toEqual({ added: 0, removed: 0, upgraded: 0, before: 5, after: 5 });
+    // Per architecture, and the edge history's xz upgrade shows as upgraded.
+    const eh = (await call("GET", "/releases/edge/history")).json.releases;
+    const up = eh.find((r: any) => r.seq === 3); // the release that added xz 5.8.5 for x86_64
+    const d4 = await call("GET", `/releases/edge/diff?to=${up.id}&arch=x86_64`);
+    expect(d4.json.upgraded).toEqual([{ name: "xz", arch: "x86_64", from: "5.8.4-1", to: "5.8.5-1", source: "core" }]);
+    expect((await call("GET", `/releases/edge/diff?to=${up.id}&arch=aarch64`)).json.counts.upgraded).toBe(0);
+    expect((await call("GET", "/releases/rc/diff?to=999")).status).toBe(404);
+    expect((await call("GET", "/releases/rc/diff?arch=mips")).status).toBe(400);
+  });
+
+  it("answers 410 for a release whose membership GC pruned", async () => {
+    const a = (await call("GET", "/releases/rc/history")).json.releases.at(-1);
+    await env.DB.prepare("DELETE FROM release_packages WHERE release_id = ?").bind(a.id).run();
+    const d = await call("GET", `/releases/rc/diff?from=${a.id}`);
+    expect(d.status).toBe(410);
+    expect(d.json.error).toMatch(/retention/);
+  });
+});
+
 describe("GET /releases/:ring", () => {
   it("pages the manifests in (name, arch) order and pins a release while paging", async () => {
     const all = await call("GET", "/releases/stable");
@@ -198,5 +234,23 @@ describe("GET /stats", () => {
     expect(s.json.rings.map((r: any) => r.ring)).toEqual(["edge", "rc", "stable"]);
     expect(s.json.rings.find((r: any) => r.ring === "stable").package_count).toBe(5);
     expect(s.json.pool.objects).toBeGreaterThanOrEqual(6);
+  });
+});
+
+describe("unchanged architectures", () => {
+  it("a release scoped to one architecture carries the parent's artifacts for the other, and says so", async () => {
+    // Render x86_64 databases for stable's head: an artifact row.
+    const head = (await call("GET", "/releases/stable?fields=summary")).json.release;
+    await env.DB.prepare("INSERT INTO release_artifacts (release_id, repo, arch, kind, r2_key, size) VALUES (?, 'omarchy-core-stable', 'x86_64', 'db', 'x86_64/omarchy-core-stable.db', 10), (?, 'omarchy-core-stable', 'aarch64', 'db', 'aarch64/omarchy-core-stable.db', 10)").bind(head.id, head.id).run();
+    // An aarch64-only change: x86_64 is untouched, its artifact row comes along.
+    const r = await call("POST", "/releases", { ring: "stable", remove: ["xz"], remove_arch: "aarch64" }, stable);
+    expect(r.status).toBe(201);
+    expect(r.json.unchanged_arches).toEqual(["x86_64"]);
+    const view = await call("GET", "/releases/stable?fields=summary");
+    expect(view.json.artifacts).toEqual([{ repo: "omarchy-core-stable", arch: "x86_64", kind: "db", size: 10, created_at: expect.any(String) }]);
+    // A promotion or an unscoped change may touch both: nothing is assumed.
+    const r2 = await call("POST", "/releases", { ring: "stable", remove: ["curl"] }, stable);
+    expect(r2.json.unchanged_arches).toEqual([]);
+    expect((await call("GET", "/releases/stable?fields=summary")).json.artifacts).toEqual([]);
   });
 });

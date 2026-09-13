@@ -72,5 +72,13 @@ export async function handleGc(url: URL, env: Env): Promise<Response> {
     ]);
     bytes += p.size_download;
   }
-  return json({ keep, deleted: victims.length, bytes, remaining: packages.length - victims.length, membership_rows_pruned: pruned.meta.changes ?? 0 });
+  // Advisories and matches are replaced by every security run (the run
+  // prunes what it did not refresh); the CVE metadata behind them (KEV,
+  // EPSS) is not, so a CVE no advisory mentions any more goes after 90
+  // days.
+  const cves = await env.DB.prepare(
+    `DELETE FROM cve_meta WHERE updated_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-90 days')
+       AND NOT EXISTS (SELECT 1 FROM advisories a, json_each(a.cves) j WHERE j.value = cve_meta.cve)`,
+  ).run();
+  return json({ keep, deleted: victims.length, bytes, remaining: packages.length - victims.length, membership_rows_pruned: pruned.meta.changes ?? 0, cve_meta_pruned: cves.meta.changes ?? 0 });
 }

@@ -149,7 +149,8 @@ export OMARCHY_API=http://127.0.0.1:8787 OMARCHY_TOKEN=<a job token>   # tests/e
 pkg-repo publish --ring edge foo-1.0-1-x86_64.pkg.tar.zst   # pool + index + new edge release
 pkg-repo promote --from edge --to rc
 pkg-repo render --ring rc                                   # databases for the ring head (the pool signs them)
-pkg-repo releases --ring rc                                 # history, newest first
+pkg-repo releases --ring rc                                 # history, newest first (--json, --all)
+pkg-repo diff --ring rc                                     # what the head changed: added, removed, upgraded
 pkg-repo rollback --ring rc --to <release id>               # then render again
 ```
 

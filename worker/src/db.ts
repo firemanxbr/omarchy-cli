@@ -11,6 +11,9 @@ export interface ReleaseRow {
   source_id: number | null;
   note: string | null;
   created_at: string;
+  /** Stored once the release is complete (migration 0015); null on rows older than that. */
+  package_count?: number | null;
+  bytes?: number | null;
 }
 
 export async function ringHead(env: Env, ring: Ring): Promise<ReleaseRow | null> {

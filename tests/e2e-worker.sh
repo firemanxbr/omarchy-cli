@@ -111,6 +111,11 @@ grep -q '"name":"zlib"' <<<"$summary_body" || { echo "rollback lost zlib"; exit 
 grep -q '"name":"xz"' <<<"$summary_body" && { echo "rollback still serves xz"; exit 1; }
 "$PKG_REPO" promote --from rc --to stable --note "forward again"
 "$PKG_REPO" releases --ring stable
+# The diff between two releases: the rollback dropped xz, the promotion put it back.
+diff_out=$("$PKG_REPO" diff --ring stable); grep -q "^+ xz 5.8.4-1 (x86_64)" <<<"$diff_out" || { echo "diff does not show xz coming back: $diff_out"; exit 1; }
+diff_json=$("$PKG_REPO" diff --ring stable --json); python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["counts"]["added"]==1 and d["counts"]["removed"]==0 and d["from"]["id"] < d["to"]["id"], d["counts"]' <<<"$diff_json" || { echo "diff --json is off"; exit 1; }
+rel_json=$("$PKG_REPO" releases --all --json); python3 -c 'import json,sys; d=json.load(sys.stdin); assert set(d)=={"edge","rc","stable"} and d["stable"]["releases"][0]["is_head"]==1, list(d)' <<<"$rel_json" || { echo "releases --all --json is off"; exit 1; }
+dpage=$(curl -s "$OMARCHY_API/diff?ring=stable"); grep -q "Release diff" <<<"$dpage" || { echo "diff page not served"; exit 1; }
 
 step "Render databases for stable (the pool signs them)"
 signing_key=$(curl -s "$OMARCHY_API/api/v1/signing-key")
@@ -122,6 +127,11 @@ gpg --verify "$E2E/stable.db.sig" "$E2E/stable.db" 2>/dev/null || { echo "the po
 # A client's own signature is not taken over the pool's.
 sup=$(curl -s -X PUT "$OMARCHY_API/api/v1/releases/1/artifacts/db.sig?repo=omarchy-packages-stable&arch=x86_64" -H "Authorization: Bearer $OMARCHY_TOKEN" --data-binary 'not a signature')
 grep -q '"status":"superseded"' <<<"$sup" || { echo "client signature was not superseded: $sup"; exit 1; }
+# A release that only touches aarch64 keeps x86_64's rendered databases: the
+# artifact rows carry over and the response says not to render it again.
+unch=$(curl -s -X POST "$OMARCHY_API/api/v1/releases" -H "Authorization: Bearer $OMARCHY_TOKEN" -H "content-type: application/json" -d '{"ring":"stable","remove":["nothing-here"],"remove_arch":"aarch64","note":"aarch64-only change"}')
+grep -q '"unchanged_arches":\["x86_64"\]' <<<"$unch" || { echo "an aarch64-scoped release must report x86_64 unchanged: $unch"; exit 1; }
+carried=$(curl -s "$OMARCHY_API/api/v1/releases/stable?fields=summary"); grep -q '"repo":"omarchy-packages-stable","arch":"x86_64","kind":"db"' <<<"$carried" || { echo "the parent's x86_64 databases were not carried over: $(head -c 300 <<<"$carried")"; exit 1; }
 
 step "Pool sanity (flat layout: databases beside the packages)"
 for f in omarchy-packages-stable.db omarchy-packages-stable.db.sig omarchy-packages-stable.files "zlib-1:1.3.2-3-x86_64.pkg.tar.zst" "zlib-1:1.3.2-3-x86_64.pkg.tar.zst.sig"; do

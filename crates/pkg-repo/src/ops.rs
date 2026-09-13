@@ -228,22 +228,120 @@ pub fn rollback(api: &Api, ring: &str, to: u64, note: Option<&str>) -> Result<u6
     Ok(created.release.id)
 }
 
-pub fn releases(api: &Api, ring: &str) -> Result<()> {
-    let history = api.history(ring)?;
-    println!(
-        "{:<6} {:<5} {:<9} {:<8} {:<7} {:<26} note",
-        "id", "seq", "packages", "source", "head", "created"
-    );
-    for r in &history.releases {
+pub fn releases(api: &Api, rings: &[String], json: bool) -> Result<()> {
+    if json {
+        // The API's rows as they are, so scripts and agents read release
+        // state without scraping the table below.
+        let mut out = serde_json::Map::new();
+        for ring in rings {
+            out.insert(
+                ring.clone(),
+                api.get_json(&format!("/releases/{ring}/history"))?,
+            );
+        }
+        println!("{}", serde_json::to_string_pretty(&out)?);
+        return Ok(());
+    }
+    for ring in rings {
+        let history = api.history(ring)?;
+        if rings.len() > 1 {
+            println!("[{ring}]");
+        }
         println!(
-            "{:<6} {:<5} {:<9} {:<8} {:<7} {:<26} {}",
-            r.id,
-            r.seq,
-            r.package_count,
-            r.source_id.map_or("-".to_owned(), |s| s.to_string()),
-            if r.is_head == 1 { "*" } else { "" },
-            r.created_at,
-            r.note.as_deref().unwrap_or("")
+            "{:<6} {:<5} {:<9} {:<8} {:<7} {:<26} note",
+            "id", "seq", "packages", "source", "head", "created"
+        );
+        for r in &history.releases {
+            println!(
+                "{:<6} {:<5} {:<9} {:<8} {:<7} {:<26} {}",
+                r.id,
+                r.seq,
+                r.package_count,
+                r.source_id.map_or("-".to_owned(), |s| s.to_string()),
+                if r.is_head == 1 { "*" } else { "" },
+                r.created_at,
+                r.note.as_deref().unwrap_or("")
+            );
+        }
+    }
+    Ok(())
+}
+
+/// What changed between two releases of a ring (`GET /releases/:ring/diff`).
+pub fn diff(
+    api: &Api,
+    ring: &str,
+    from: Option<u64>,
+    to: Option<u64>,
+    arch: Option<&str>,
+    json: bool,
+) -> Result<()> {
+    let mut q = Vec::new();
+    if let Some(f) = from {
+        q.push(format!("from={f}"));
+    }
+    if let Some(t) = to {
+        q.push(format!("to={t}"));
+    }
+    if let Some(a) = arch {
+        q.push(format!("arch={a}"));
+    }
+    let d = api.get_json(&format!("/releases/{ring}/diff?{}", q.join("&")))?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&d)?);
+        return Ok(());
+    }
+    let id = |side: &str| {
+        d.get(side)
+            .and_then(|s| s.get("id"))
+            .and_then(serde_json::Value::as_u64)
+            .map_or("-".to_owned(), |i| i.to_string())
+    };
+    let n = |k: &str| {
+        d.get("counts")
+            .and_then(|c| c.get(k))
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0)
+    };
+    println!(
+        "{ring}: release {} → {}: +{} −{} ↑{} ({} → {} packages)",
+        id("from"),
+        id("to"),
+        n("added"),
+        n("removed"),
+        n("upgraded"),
+        n("before"),
+        n("after")
+    );
+    let list = |k: &str| {
+        d.get(k)
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default()
+    };
+    for p in list("added") {
+        println!(
+            "+ {} {} ({})",
+            p["name"].as_str().unwrap_or(""),
+            p["version"].as_str().unwrap_or(""),
+            p["arch"].as_str().unwrap_or("")
+        );
+    }
+    for p in list("removed") {
+        println!(
+            "- {} {} ({})",
+            p["name"].as_str().unwrap_or(""),
+            p["version"].as_str().unwrap_or(""),
+            p["arch"].as_str().unwrap_or("")
+        );
+    }
+    for p in list("upgraded") {
+        println!(
+            "↑ {} {} → {} ({})",
+            p["name"].as_str().unwrap_or(""),
+            p["from"].as_str().unwrap_or(""),
+            p["to"].as_str().unwrap_or(""),
+            p["arch"].as_str().unwrap_or("")
         );
     }
     Ok(())

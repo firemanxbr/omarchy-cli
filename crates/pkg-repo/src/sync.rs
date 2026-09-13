@@ -67,6 +67,8 @@ pub struct SyncReport {
     pub bytes_uploaded: u64,
     /// `None` when the ring's selection of this source did not change.
     pub release: Option<(u64, u64)>,
+    /// Architectures the release left as its parent (nothing to render there).
+    pub unchanged_arches: Vec<String>,
     pub deferred: usize,
     /// Upstream packages left to the sources in `defer_to`.
     pub yielded: usize,
@@ -194,6 +196,7 @@ pub fn run(api: &Api, opts: &SyncOptions) -> Result<SyncReport, RepoError> {
         ..ReleaseRequest::default()
     })?;
     report.release = Some((created.release.id, created.release.seq));
+    report.unchanged_arches = created.unchanged_arches;
 
     // 5. event
     post_sync_event(api, opts, &report, &base, started)?;
