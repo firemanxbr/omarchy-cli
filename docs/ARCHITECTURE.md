@@ -8,8 +8,9 @@ questions — the evidence is kept in [`poc/RESULTS.md`](../poc/RESULTS.md) — 
 runs as the staging environment at https://omarchy-pool.firemanxbr.org.
 
 Packages are standard Arch `.pkg.tar.zst` archives produced by `makepkg`; they are never
-modified. The deployment is a Cloudflare Worker + D1 + R2; the pipeline is GitHub
-Actions.
+modified. The deployment is a Cloudflare Worker + D1 + R2; the pipeline is a
+queue of jobs in D1 that workers anywhere pull; GitHub hosts the code and
+cuts the releases.
 
 ## The problem
 
@@ -60,38 +61,45 @@ Migrations live in `worker/migrations/`.
 | `POST /api/v1/packages/known` | which sha256s the index already has (the sync's diff) |
 | `GET /api/v1/version` · `/status` | running release; service check measured now (index and pool reachable, timings) — what *online* in the dashboard header means |
 | `GET /api/v1/releases/:ring` · `/history` | current release, package list, lineage. `?fields=summary` is small; full manifests are paged (`?arch=&limit=≤1000&offset=&release_id=` — above 2000 packages an unpaged request is refused with 413, since a 15k-package ring with file lists exceeds one Worker invocation); `include=files` returns each file list still gzip-compressed (`files_gz`, base64) and the reader inflates it — 500 decompressed lists of chaotic-aur games per page exceeded the Worker |
-| `POST /api/v1/releases` | create / promote / roll back a release |
+| `POST /api/v1/releases` | create / promote / roll back a release (a job's token) |
 | `PUT /api/v1/releases/:id/artifacts/:kind?repo=` | store a rendered database beside the packages |
 | `GET /api/v1/graph?targets=a,b&ring=stable&arch=` | dependency closure for the client's safety check — follows declared dependencies through *declared* provides (`package_provides.declared`, from `.PKGINFO`), as pacman does; the sonames a binary loads or ships never route the closure (a package bundling its own libstdc++ is not a provider of `libstdc++.so`) |
 | `GET /api/v1/security?ring=&arch=` · `PUT /security/advisories` · `PUT /security/matches` | open advisories on what a ring serves (per package: confidence, severity, KEV/EPSS, rings already serving a clean version, how many packages depend on it or load one of its libraries); the writes are the Security workflow's |
 | `GET /api/v1/search?q=` · `/package/:name[/files]` | search within a ring; a package's versions per ring, manifest, forward edges (declared dependencies and loaded sonames resolved to providers) and reverse edges (declared, or by loading one of its libraries) — the package page and, later, CVE propagation |
 | `GET /api/v1/pool/unreferenced` · `POST /api/v1/pool/gc` | retention: what the last N releases do not reference |
-| `GET /api/v1/factory` · `POST /factory/{requests,enqueue,claim}` · `/factory/tasks/:id/{heartbeat,complete,fail,cancel}` | the factory's brain: package requests, build tasks with leases, the workers pulling them ([factory/README.md](../factory/README.md)) |
+| `GET /api/v1/factory` · `POST /factory/{requests,enqueue,claim,jobs}` · `/factory/tasks/:id/{heartbeat,complete,fail,cancel,approve,reject}` · `/factory/{register,packages,workers,groups,review,me}` · `GET /api/v1/cost` | the factory's brain: package requests, build tasks with leases, the workers pulling them, contributors and their packages, maintainers' approvals, jobs queued by hand, the daily cost estimate ([factory/README.md](../factory/README.md), [GOVERNANCE.md](GOVERNANCE.md)) |
 | `POST /api/v1/events` · `GET /api/v1/events` · `GET /api/v1/stats` | activity log and the dashboard's data |
 | `GET /` | the dashboard |
 
 pacman never talks to the worker. The worker never resolves dependencies; it
 serves data. Decisions are made by the publisher (`pkg-repo`) and the client.
 
-### Staging pipeline (GitHub Actions)
+### Staging pipeline (pulled jobs)
 
-Every row below is a **pulled job** today: the worker's cron queues it in
+Every row below is a **pulled job**: the Worker's cron queues it in
 `build_tasks` on this schedule (`JOB_KINDS`), a project worker runs it with a
-per-job token, and the workflow of the same name remains for a run by hand.
+per-job token, and a maintainer queues the same by hand (`pkg-repo job`).
+Nothing of the pipeline runs on GitHub Actions.
 
-| Job (workflow) | Schedule | What it does |
+| Job | Schedule | What it does |
 |---|---|---|
-| `sync` (`sync.yml`) | hourly | `pkg-repo sync` for every source in its table — Arch `core`/`extra`/`multilib` (x86_64, from `mirror.omarchy.org`), Arch Linux ARM `core`/`extra`/`alarm` (aarch64), chaotic-aur (x86_64, optional repo, `--defer-to` the others so Arch and the OPR own any shared name) into `edge`; the OPR's own `edge`/`rc`/`stable` channels each into the matching ring (aarch64 has only `edge`); a filename the pool already holds with different bytes (the OPR rebuilds the same version per channel) keeps the stored object, noted in the journal — every package's upstream signature verified against that project's keyring before it enters the pool; then render the rings that changed (a sync that changes nothing creates no release) |
-| `promote` (`promote.yml`) | daily: edge→rc 06:00 UTC, rc→stable 09:00 UTC (one-day soak); or manual | evidence-driven (below): fresh health + ABI of the source ring on both architectures → gate → index write → the OPR channel of the target ring aligned (`packages` comes from the OPR's matching channel, not from the source ring) → render → health of the target → automatic rollback if that fails |
-| `health` (`health.yml`) | daily, per ring and architecture | real pacman per ring and architecture: `-Sy`, list, signed download → `health` event |
-| `gc` (`gc.yml`) | weekly | delete pool objects the last 3 releases of every ring do not reference (7-day grace for imports in flight) |
-| `security` (`security.yml`) | every 3 hours | `pkg-repo security`: the Arch Security Tracker (exact matches on Arch's versions), the Debian Security Tracker (same upstream projects, only for CVEs Arch has no advisory for, `name-version` when Debian names a fixed version newer than ours, `name-only` while still open; names whose versions are an order of magnitude apart are treated as different projects), CISA KEV and EPSS, matched with the real `vercmp` against every object the rings serve and stored in the index; then the **fast-track**: a package with a confident open advisory (exact or name-version, medium or worse, or exploited in the wild) in `rc`/`stable` whose clean newer version `edge` already serves is pulled in as one release without the soak, rendered, health-checked on both architectures and rolled back if that fails |
+| `sync` | every 3 hours, one task per architecture, one release per ring | `pkg-repo sync` for every source in its table — Arch `core`/`extra`/`multilib` (x86_64, from `mirror.omarchy.org`), Arch Linux ARM `core`/`extra`/`alarm` (aarch64), chaotic-aur (x86_64, optional repo, `--defer-to` the others so Arch and the OPR own any shared name) into `edge`; the OPR's own `edge`/`rc`/`stable` channels each into the matching ring (aarch64 has only `edge`); a filename the pool already holds with different bytes (the OPR rebuilds the same version per channel) keeps the stored object, noted in the journal — every package's upstream signature verified against that project's keyring before it enters the pool; then render the rings that changed (a sync that changes nothing creates no release) |
+| `promote` | daily: edge→rc 06:00 UTC, rc→stable 09:00 UTC (one-day soak); or manual | evidence-driven (below): fresh health + ABI of the source ring on both architectures → gate → index write → the OPR channel of the target ring aligned (`packages` comes from the OPR's matching channel, not from the source ring) → render → health of the target → automatic rollback if that fails |
+| `health` | daily, per ring and architecture | real pacman per ring and architecture: `-Sy`, list, signed download → `health` event |
+| `gc` | weekly | delete pool objects the last 3 releases of every ring do not reference (7-day grace for imports in flight) |
+| `security` | every 3 hours | `pkg-repo security`: the Arch Security Tracker (exact matches on Arch's versions), the Debian Security Tracker (same upstream projects, only for CVEs Arch has no advisory for, `name-version` when Debian names a fixed version newer than ours, `name-only` while still open; names whose versions are an order of magnitude apart are treated as different projects), CISA KEV and EPSS, matched with the real `vercmp` against every object the rings serve and stored in the index; then the **fast-track**: a package with a confident open advisory (exact or name-version, medium or worse, or exploited in the wild) in `rc`/`stable` whose clean newer version `edge` already serves is pulled in as one release without the soak, rendered, health-checked on both architectures and rolled back if that fails |
+| `enqueue` | hourly | the PKGBUILDs on `main` reconciled with what the factory built: every (package, architecture, version) without a task is queued at that commit |
+| `rollback` | by hand only | a ring pointed at an earlier release, both architectures re-rendered |
+| `build` | on approval, on merge, on a new upstream release | a package built in a fresh container: community trust on a contributor's worker into their staging workspace, project trust on a trusted worker into `edge` |
 | metrics snapshot (`src/metrics.ts`) | every 30 minutes | taken by the Worker itself, no job: the pool's jobs of the last 7 days (runs, failures, worker minutes, per kind), builds, workers alive, pool totals and ring sizes, as a `metrics` event; the dashboard's charts and jobs table read from it |
-| worker cron trigger | every 10 minutes | the pool's own scheduler: queues the jobs above when due, requeues expired leases, starts the hosted fallback worker when pool jobs wait and no project worker is idle; see RUNBOOK |
+| worker cron trigger | every 10 minutes | the pool's own scheduler: queues the jobs above when due, requeues expired leases, applies `factory/MAINTAINERS.toml`, reads package-request issues, checks upstreams for bumps (05:45), estimates the bill (06:30), starts the hosted fallback worker when pool jobs wait and no project worker is idle; see RUNBOOK |
 | `ci.yml`, `e2e.yml` | every pull request | fmt, clippy, tests and the worker typecheck on x86_64 and aarch64; real pacman end to end through a local worker |
 | `release.yml` | every merge into `main` | CI + E2E again on the merged commit, next version from the last tag (`v0.0.1`, `v0.0.2`, …), binaries for both architectures, GitHub release, `wrangler deploy` carrying `POOL_VERSION` — the dashboard shows what is running |
 
 Every step posts an event; https://omarchy-pool.firemanxbr.org renders them.
+Two workflows remain on GitHub besides CI and the release: `factory-update.yml`
+(pull requests bumping the project's own recipes, reviewed by their group's
+maintainers) and `pool-worker.yml` (the hosted fallback worker).
 Operations, trust model and the kill switch are in [RUNBOOK.md](RUNBOOK.md).
 
 #### Promotion by evidence, not by calendar
@@ -122,9 +130,8 @@ and is undone automatically when the target ring turns out not to be:
    says which release failed and which one was restored. Otherwise a `promote`
    event confirms it.
 
-Stable moves without a human by default; the repository variable
-`STABLE_ENVIRONMENT=stable` puts the GitHub environment with its required reviewer
-back in front of step 3.
+Stable moves without a human: the evidence is the reviewer, and a maintainer
+who disagrees queues a rollback.
 
 ![Release pipeline](diagrams/release-pipeline.svg)
 

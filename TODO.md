@@ -14,8 +14,15 @@ request (see [CONTRIBUTING.md](CONTRIBUTING.md)), and keep
       (a sync of an aarch64 source re-renders the 15k-package x86_64 `extra`
       database, ~45 s). The worker can copy the parent release's artifact rows
       for an architecture whose package set is identical.
-- [ ] **Prune `metrics` snapshots and old `security` matches** older than 90 days
-      in the GC workflow; both grow steadily.
+- [ ] **Prune old `security` matches** older than 90 days in the gc job
+      (metrics snapshots already are); they grow steadily.
+- [ ] **A rollback job kind on the dashboard.** `pkg-repo job rollback` exists;
+      the Review/Factory pages could offer it to a signed-in maintainer.
+- [ ] **A cheaper release model.** A release copies the ring's whole selection
+      (~32k rows, twice with the index) and D1 bills every row written; with
+      the 3-hour sync that is inside the quota, but a delta model (adds and
+      removals against the parent, with a full checkpoint every N releases)
+      would make releases free to create and let the sync go back to hourly.
 
 - [ ] **Hook preview in `omarchy-cli check`.** Parse the libalpm `.hook` files in
       `/usr/share/libalpm/hooks` and `/etc/pacman.d/hooks` and list which ones the
@@ -26,7 +33,9 @@ request (see [CONTRIBUTING.md](CONTRIBUTING.md)), and keep
       common case today.
 - [ ] **Release diff.** `GET /api/v1/releases/:ring/diff?from=<id>&to=<id>` returning
       added / removed / upgraded packages, and `pkg-repo diff`. Cheap with
-      `release_packages`; the promotion and rollback events would link to it.
+      `release_packages` while both releases are inside retention (GC prunes
+      the membership of older ones); the promotion and rollback events would
+      link to it.
 - [ ] **Client config file example** in `docs/` (`/etc/omarchy-cli/config.toml`)
       and a `--ring` sanity check against the index (`edge|rc|stable` only).
 - [ ] **Coverage on the dashboard for `any` packages built twice.** Arch Linux ARM
@@ -82,7 +91,7 @@ request (see [CONTRIBUTING.md](CONTRIBUTING.md)), and keep
       the pool lives on a personal account; moving to omarchy.org means a key in
       the team's custody (one Worker secret, `SIGNING_KEY`, RUNBOOK *Rotate the
       signing key*), the Cloudflare resources in the team's account, and
-      `STABLE_ENVIRONMENT=stable` if the team wants a human before stable moves.
+      the OAuth App and the two hosted-worker tokens registered under it.
 - [ ] **Native install engine.** `poc/crates/pkg-store` (redb state + journaled,
       crash-safe transactions) is implemented and tested but not wired into the
       client. Wiring it means also writing pacman's local database
@@ -130,7 +139,12 @@ started, How it works, Status, API docs, mobile) · package search and package p
 with dependency graph · OPR channels per ring, chaotic-aur as optional repo ·
 security layer (Arch + Debian trackers, KEV, EPSS, confidence levels, exposure
 through the graph, fast-track of fixes, `omarchy-cli security`) · paged release
-view and linear release creation at 30k packages · edge-cached API reads.
+view and linear release creation at 30k packages · edge-cached API reads ·
+the factory: contributors' workers and staging, maintainers' approvals, the
+project's rebuild, package requests and bumps as evidence · every pipeline
+step a pulled job with a per-job token, no shared secret, GitHub only
+releasing · signing inside the Worker · governance from a file, two roles ·
+the cost estimate, the guard and the daily report.
 
 ## Factory findings (2026-09-12)
 

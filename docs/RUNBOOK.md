@@ -11,7 +11,7 @@ time; there is no shared secret. Humans operate the pipeline by queueing jobs
 | Index API | https://pkgs.firemanxbr.org/api/v1/stats |
 | Pool (static, what pacman reads) | https://pool.firemanxbr.org/x86_64/ · `/aarch64/` |
 | Signing key | `docs/omarchy-staging.pub.asc` · https://pool.firemanxbr.org/omarchy-staging.pub.asc · https://pkgs.firemanxbr.org/api/v1/signing-key (expires 2027-09-12); the private key is the Worker secret `SIGNING_KEY` — nowhere else |
-| Jobs (pulled by project workers) | Sync (hourly) · Promote (edge→rc 06:00 UTC, rc→stable 09:00 UTC after a one-day soak, evidence-gated, auto-rollback) · Health (daily, both arches) · Security (every 3 h, with fast-track) · GC (Sundays) · Metrics snapshot (every 30 min, by the brain itself) · Release (GitHub, every merge into `main`) |
+| Jobs (pulled by project workers) | Sync (every 3 h, one task per architecture) · Promote (edge→rc 06:00 UTC, rc→stable 09:00 UTC after a one-day soak, evidence-gated, auto-rollback) · Health (daily, both arches) · Security (every 3 h, with fast-track) · GC (Sundays) · Metrics snapshot (every 30 min, by the brain itself) · Release (GitHub, every merge into `main`) |
 | Running version | https://pkgs.firemanxbr.org/api/v1/version · the chip in the dashboard header |
 
 ## Trust model
@@ -32,37 +32,39 @@ time; there is no shared secret. Humans operate the pipeline by queueing jobs
   three releases of any ring reference, nor anything younger than seven days.
 * **Releases are append-only.** Rollback creates a new release pointing at an old
   selection; history is never rewritten. Every action posts an event.
-* **stable needs a human.** Promotions into `stable` run in the GitHub environment
-  `stable`, which requires a reviewer's approval; edge → rc is automatic.
 * **Nobody holds R2 credentials, and nobody holds a pool credential.** Reads
   are public objects; writes go through the Worker with the per-job token of
   a task a project worker claimed; the R2 bucket has no API tokens.
 
 ## Everyday operations
 
+Everything the scheduler does can be queued by hand by a maintainer
+(`OMARCHY_API` and `OMARCHY_TOKEN=omc_…` set — the token from the Contributors
+page); a project worker runs it with a per-job token and the Factory page
+follows it:
+
 ```bash
-# manual runs (repository variables OMARCHY_API/OMARCHY_POOL and secrets are set)
-gh workflow run sync.yml -f sources="core-x86_64 packages-x86_64" -f limit=0
-gh workflow run promote.yml -f from=edge -f to=rc -f note="…"
-gh workflow run promote.yml -f from=rc -f to=stable -f note="…"   # one-day soak of rc by default
-gh workflow run promote.yml -f from=rc -f to=stable -f soak_days=0 -f force=yes   # skip the gate (emergency)
-gh workflow run health.yml
-gh workflow run gc.yml -f keep=3
+pkg-repo job sync --param arch=x86_64                                  # every source of the architecture, one release per ring
+pkg-repo job sync --param source=packages --param arch=x86_64 --param ring=rc   # one source
+pkg-repo job promote --param from=edge --param to=rc --param note="…"
+pkg-repo job promote --param from=rc --param to=stable --param note="…"        # evidence-gated, one-day soak
+pkg-repo job promote --param from=rc --param to=stable --param force=yes       # emergency: skips the gate (the target's health still rolls back)
+pkg-repo job rollback --param ring=stable --param to=<release id>              # then renders both architectures
+pkg-repo job render --param ring=stable --param arch=x86_64
+pkg-repo job health --param ring=stable --param arch=aarch64
+pkg-repo job security
+pkg-repo job enqueue                                                   # the PKGBUILDs on main → the queue, now
+pkg-repo job gc --param keep=3
 ```
 
 Promotions are gated by evidence (see *Promotion by evidence* in
-[ARCHITECTURE.md](ARCHITECTURE.md)): the run first records fresh `health` and
-`abi` events for the source ring on both architectures, then `pkg-repo gate`
+[ARCHITECTURE.md](ARCHITECTURE.md)): the job first records fresh `health` and
+`abi` events for the source ring on both architectures, then the gate
 decides — promote, nothing to promote, or blocked with the reasons in a `gate`
 event on the dashboard. After a promotion the target ring is health-checked on
 both architectures and rolled back automatically if that fails (`rollback` event
-naming the failed and the restored release).
-
-To require a human approval before stable moves, set the repository variable
-`STABLE_ENVIRONMENT=stable` (`gh variable set STABLE_ENVIRONMENT -b stable`); the
-Promote job then waits in the `stable` environment: GitHub → Actions → the
-waiting run → *Review deployments* → approve. Unset the variable to go back to
-fully automatic.
+naming the failed and the restored release). There is no human in the daily
+path: the evidence is the reviewer, and a maintainer who disagrees rolls back.
 
 ```bash
 # the same decisions by hand
@@ -72,15 +74,9 @@ pkg-repo head --ring stable                                    # current release
 tests/abi-gate.sh rc x86_64                                    # ABI check of rc's upgrades, exit 2 on blockers
 ```
 
-By hand, as a maintainer (`OMARCHY_API` and `OMARCHY_TOKEN=omc_…` set): the
-reads run directly, the writes are queued as jobs a project worker executes.
-
-```bash
-pkg-repo releases --ring stable                    # history, head marked *
-pkg-repo rollback --ring stable --to <release id>  # then render
-pkg-repo render --ring stable --arch x86_64        # the pool signs what it stores
-pkg-repo gc --keep 3                               # report; add --delete to free the pool
-```
+The reads run directly from anywhere (`pkg-repo releases --ring stable`,
+`pkg-repo head`, `pkg-repo gc --keep 3` without `--delete` is a report); the
+writes above are jobs.
 
 ## Releasing the pool itself
 
@@ -99,7 +95,8 @@ Every merge is a release — there is no separate "cut a version" step:
    merged pull requests.
 4. The worker is migrated (`wrangler d1 migrations apply`) and deployed with
    `POOL_VERSION`, `POOL_COMMIT` and `POOL_DEPLOYED_AT`; the run verifies
-   `/api/v1/version` reports the new tag and posts a `deploy` event.
+   `/api/v1/version` reports the new tag and records a `deploy` event through
+   `wrangler d1 execute` (the release holds no credential of the pool's API).
 
 The deploy step needs the `CLOUDFLARE_API_TOKEN` repository secret (Account →
 Workers Scripts: Edit, D1: Edit, Account Settings: Read; Zone → Workers Routes:
@@ -112,8 +109,8 @@ that release's run, or `git checkout vX.Y.Z && cd worker && npx wrangler deploy
 
 ## Security data
 
-The `security` job (every 3 h, pulled by a project worker; `security.yml`
-does the same by hand) fetches the Arch and Debian trackers, KEV and EPSS,
+The `security` job (every 3 h, pulled by a project worker; `pkg-repo job
+security` queues one by hand) fetches the Arch and Debian trackers, KEV and EPSS,
 matches them (`pkg-repo security`) and then fast-tracks fixes into `rc` and
 `stable` (`pkg-repo fast-track`, `--min-severity medium`, exploited-in-the-wild
 always), renders, checks health on both architectures and rolls back a ring
@@ -125,30 +122,34 @@ advisory id shown on the package page; the `same_project` heuristic in
 ## The pool's own scheduler
 
 GitHub's cron is best-effort (on 2026-09-12 it delayed the hourly sync by an
-hour and never started the half-hourly metrics). A Cloudflare cron trigger on
-the worker (`src/scheduler.ts`, every ten minutes) is the pool's own clock:
-intervals for sync (60 min) and security (3 h); daily slots for promote
-(06:00 edge→rc, 09:00 rc→stable), health (08:30) and the Sunday GC — each
-queued as a pulled job (below) when due and never doubled while one is
-queued or running; the metrics snapshot (30 min) it takes itself. Kinds not
-in `JOB_KINDS` are dispatched as workflows instead, and the factory's
-`factory-enqueue.yml`/`factory-update.yml` still are. Each dispatch is a
-`dispatch` line in the journal. Dispatching needs the worker secret
-`GITHUB_TOKEN` (fine-grained, this repository, *Actions: read and write*):
+hour and never started the half-hourly metrics), so the pool has its own
+clock: a Cloudflare cron trigger on the Worker (`src/scheduler.ts`, every
+ten minutes). Intervals for sync (3 h) and security (3 h), the PKGBUILD
+reconcile (`enqueue`, hourly); daily slots for promote (06:00 edge→rc,
+09:00 rc→stable), health (08:30) and the Sunday GC — each queued as a
+pulled job (below) when due and never doubled while one is queued or
+running. The metrics snapshot (30 min), the governance sync (10 min), the
+package-request issues (10 min), the update check (05:45) and the cost
+estimate (06:30) it does itself. Two things still start on GitHub, by
+dispatch: `factory-update.yml` (05:45, pull requests for the project's own
+recipes) and `pool-worker.yml` (a hosted worker when pool jobs wait and no
+project worker is idle). Each dispatch is a `dispatch` line in the journal
+and needs the worker secret `GITHUB_TOKEN` (fine-grained, this repository,
+*Actions: read and write*):
 
 ```bash
 cd worker && npx wrangler secret put GITHUB_TOKEN < ~/.cache/omarchy-cli-poc/github-token
 ```
 
-Without the secret the trigger logs "idle" and the workflow files' own
-schedules are all there is.
+Without the secret the jobs still run; only those two dispatches stop.
 
 ## Pulled jobs (the pool without GitHub)
 
-The pool's own work — sync, promote, render, health, gc — runs as tasks in
-the factory's queue when `JOB_KINDS` (a Worker var, comma-separated kinds)
-lists the kind: the cron creates them on the same schedule the workflows
-had, and a **project worker** pulls and runs them:
+The pool's own work — sync, promote, rollback, render, health, security,
+enqueue, gc — runs as tasks in the factory's queue when `JOB_KINDS` (a
+Worker var, comma-separated kinds) lists the kind: the cron creates them
+on schedule, a maintainer queues one by hand, and a **project worker**
+pulls and runs them:
 
 ```bash
 # on any machine with podman/docker, python3, curl, git (the health and ABI
@@ -161,14 +162,12 @@ maintainer promotes it: `POST /factory/workers/<id>/trust {"trust":"project"}`
 with a maintainer's contributor token; maintainers are named by
 `factory/MAINTAINERS.toml` (docs/GOVERNANCE.md), nowhere else. Every task
 runs with a per-job token the pool issues at claim time (SECURITY.md);
-the worker's own token only claims. Kinds not listed in `JOB_KINDS` would
-run as GitHub workflows, dispatched by the same scheduler; today `sync`,
-`promote`, `health`, `security` and `gc` are all jobs (their workflows keep
-only `workflow_dispatch`, for manual runs) and `metrics` is the brain's own
-snapshot — no pipeline step runs on GitHub any more. When no project
-worker is idle, the scheduler starts one on a GitHub-hosted runner
-(`pool-worker.yml`) — the fallback fleet. Worker secrets:
-`JOB_TOKEN_SECRET` (any random string) signs the job tokens.
+the worker's own token only claims. No pipeline step runs on GitHub any
+more: the workflows that did are gone, and a run by hand is a job. When
+pool jobs wait and no project worker is idle, the scheduler starts one on
+a GitHub-hosted runner (`pool-worker.yml`, a registered project worker per
+architecture) — the fallback fleet, never for a package build. Worker
+secret: `JOB_TOKEN_SECRET` (any random string) signs the job tokens.
 
 ## Maintainers: reviewing contributed builds
 
@@ -343,7 +342,7 @@ mirrors takes a few hours.
 cd worker
 npx wrangler d1 execute omarchy-repo --remote --command "DELETE FROM release_artifacts; DELETE FROM ring_heads; DELETE FROM release_packages; DELETE FROM releases; DELETE FROM package_files; DELETE FROM package_requires; DELETE FROM package_provides; DELETE FROM package_file_lists; DELETE FROM packages; DELETE FROM events; DELETE FROM sqlite_sequence;"
 # optionally empty the bucket (objects are re-uploaded by the next sync, or kept and re-indexed)
-gh workflow run sync.yml -f limit=0
+pkg-repo job sync --param arch=x86_64 && pkg-repo job sync --param arch=aarch64
 ```
 
 ## Rotate the signing key
@@ -372,22 +371,16 @@ verify against the old public key until each package is rebuilt (a
 
 ## Add a source or an architecture
 
-A source is one row in the `SOURCES` table of `sync.yml`: id, source name, arch,
-**ring** (`edge` for anything promotion should carry forward; the OPR's own
-channels go straight into the matching ring), the directory holding the `.db`,
-the db name, the keyring `tests/fetch-keyrings.sh` produces, and the sources it
-defers to (`chaotic` defers to `core,extra,multilib,packages`: a name one of
-them serves is never imported from chaotic-aur). Add the same source to
-`EXPECTED_SOURCES` in `worker/src/meta.ts` (with `optional: true` for a repo
-users opt into on *Get started*) and to the sources table on *How it works*.
-
-Add a line to the `SOURCES` table in `.github/workflows/sync.yml` (id, source,
-arch, directory URL, db name, keyring). If it is a new upstream project, add its
-keyring to `tests/fetch-keyrings.sh`. New architectures also need a health image
-in `tests/health-check.sh` and a runner in `health.yml`.
-
-## Budget
-
-R2 storage is the only cost that grows (~$0.015/GB-month; the full x86_64 Arch
-set is ~110 GB). Retention keeps it bounded to what the last three releases per
-ring reference. Workers Paid ($5/month) covers D1 and the worker.
+A source is one row of `SYNC_SOURCES` in `worker/src/scheduler.ts`: source
+name, arch, **ring** (`edge` for anything promotion should carry forward;
+the OPR's own channels go straight into the matching ring), the directory
+holding the `.db`, the db name, the keyring `tests/fetch-keyrings.sh`
+produces, and the sources it defers to (`chaotic` defers to
+`core,extra,multilib,packages,factory`: a name one of them serves is never
+imported from chaotic-aur). Add the same source to `EXPECTED_SOURCES` in
+`worker/src/meta.ts` (with `optional: true` for a repo users opt into on
+*Get started*) and to the sources table on *How it works*. If it is a new
+upstream project, add its keyring to `tests/fetch-keyrings.sh`. A new
+architecture also needs an image in `tests/images.env`, a worker of that
+architecture and the arch lists in `scheduler.ts` (`jobsOf`) and
+`jobs.ts`.

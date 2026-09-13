@@ -239,7 +239,7 @@ enum Command {
         #[arg(long)]
         shared: bool,
         /// Job kinds to pull (repeatable).
-        #[arg(long = "kind", default_values_t = ["build".to_owned(), "sync".to_owned(), "render".to_owned(), "promote".to_owned(), "health".to_owned(), "security".to_owned(), "enqueue".to_owned(), "gc".to_owned()])]
+        #[arg(long = "kind", default_values_t = ["build".to_owned(), "sync".to_owned(), "render".to_owned(), "promote".to_owned(), "health".to_owned(), "security".to_owned(), "enqueue".to_owned(), "rollback".to_owned(), "gc".to_owned()])]
         kinds: Vec<String>,
         /// Free JSON shown on the Factory page, e.g. {"where":"droplet-1"}.
         #[arg(long, default_value = "{}")]

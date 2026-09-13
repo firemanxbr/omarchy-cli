@@ -5,8 +5,8 @@ const at = (iso: string) => new Date(iso);
 const run = (created_at: string, status = "completed", event = "schedule", display_title = "") => ({ created_at, status, event, display_title });
 
 describe("scheduler rules", () => {
-  const sync = RULES.find((r) => r.workflow === "sync.yml")!;
-  const stable = RULES.find((r) => r.workflow === "promote.yml" && r.inputs?.to === "stable")!;
+  const sync = RULES.find((r) => r.workflow === "sync")!;
+  const stable = RULES.find((r) => r.workflow === "promote" && r.inputs?.to === "stable")!;
 
   it("dispatches an interval workflow only once it is overdue and idle", () => {
     const now = at("2026-09-12T16:00:00Z");
@@ -24,7 +24,7 @@ describe("scheduler rules", () => {
   });
 
   it("only runs the weekly slot on its weekday", () => {
-    const gc = RULES.find((r) => r.workflow === "gc.yml")!;
+    const gc = RULES.find((r) => r.workflow === "gc")!;
     expect(isDue(gc, [], at("2026-09-12T05:00:00Z")).due).toBe(false); // Saturday
     expect(isDue(gc, [], at("2026-09-13T05:00:00Z")).due).toBe(true); // Sunday
   });

@@ -7,7 +7,7 @@ import type { RunningVersion } from "../meta";
 
 const BODY = String.raw`
   <h1>Arch, Arch Linux ARM and Omarchy packages, tested before they reach you</h1>
-  <p class="lede">One repository for Omarchy on x86_64 and aarch64. Every upstream package is verified against its project's signing key, stored once, and served in three rings: <code>edge</code> follows upstream hourly, <code>rc</code> is what passed a real pacman and an ABI check on both architectures, <code>stable</code> is what stayed healthy in <code>rc</code> for a day — and rolls back by itself if it stops being. One <code>Server =</code> line instead of a repository per project. <a href="/get-started">Get started →</a></p>
+  <p class="lede">One repository for Omarchy on x86_64 and aarch64. Every upstream package is verified against its project's signing key, stored once, and served in three rings: <code>edge</code> follows upstream within three hours, <code>rc</code> is what passed a real pacman and an ABI check on both architectures, <code>stable</code> is what stayed healthy in <code>rc</code> for a day — and rolls back by itself if it stops being. One <code>Server =</code> line instead of a repository per project. <a href="/get-started">Get started →</a></p>
 
   <div class="tiles" id="tiles"></div>
 
@@ -206,7 +206,7 @@ const CHARTS = String.raw`  // ---- tiny SVG charts (no library; the page has no
       ["Jobs running now", a ? num(a.running) : "—", a ? "pool jobs leased or queued" + (w ? " · " + num(w.alive) + " worker(s) alive, " + num(w.busy) + " busy" : "") : "no metrics snapshot yet"],
       ["Jobs, 7 days", a ? num(a.runs) : "—", a ? num(a.failures) + " failed · " + num(a.runs - a.failures - a.running) + " succeeded" : ""],
       ["Worker minutes, 7 days", a ? num(a.minutes) : "—", "on the project's workers, both architectures"],
-      ["Sources", synced + " / " + expected, lastSyncEv ? "last sync " + ago(lastSyncEv.created_at) + " · every hour" : "no sync yet"],
+      ["Sources", synced + " / " + expected, lastSyncEv ? "last sync " + ago(lastSyncEv.created_at) + " · every 3 hours" : "no sync yet"],
       ["Next promotion", "edge → rc in " + fmtH(nextRc), "rc → stable in " + fmtH(nextStable) + " · 06:00 and 09:00 UTC daily"],
       ["Security data", sec.updated_at ? ago(sec.updated_at) : "never", num(sec.advisories) + " advisories · Arch + Debian trackers, KEV, EPSS · every 3 h" + (secEv && secEv.status !== "ok" ? " · last run " + secEv.status : "")],
       ["Stored once", bytes(pool.bytes), num(pool.objects) + " objects, one per sha256"],

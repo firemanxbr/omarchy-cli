@@ -93,6 +93,9 @@ export function scopesFor(kind: string, id: number, trust: string, params: Recor
     case "promote":
       s.push(`release:${String(params.to ?? "rc")}`, `artifacts:*:${String(params.to ?? "rc")}`);
       break;
+    case "rollback":
+      s.push(`release:${ring}`, `artifacts:*:${ring}`);
+      break;
     case "render":
       s.push(`artifacts:*:${ring}`);
       break;
