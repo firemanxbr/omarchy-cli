@@ -67,6 +67,17 @@ request (see [CONTRIBUTING.md](CONTRIBUTING.md)), and keep
 
 ## Larger (needs a design conversation first)
 
+- [ ] **Reputation, per group.** An abstract score for contributors (packages
+      that reached the pool, bumps built, reviews received) and for maintainers
+      (approvals, rollbacks avoided) per area of interest — games, kernel, … —
+      so that profiles say "good in this area". Later; the record it would be
+      computed from (approvals, bump events, role lines) already exists.
+- [ ] **A maintainer-side agent audit.** Before approval, a project worker
+      with the maintainer's own agent key reviews the staged PKGBUILD and
+      log (security, packaging practice, licence) and attaches a report to
+      the evidence — the "second agent" of the zero-trust relationship,
+      today only true when the project worker's owner sets one.
+
 - [ ] **Production keys and hosting.** The staging database key is throwaway and
       the pool lives on a personal account; moving to omarchy.org means a key in
       the team's custody (one Worker secret, `SIGNING_KEY`, RUNBOOK *Rotate the

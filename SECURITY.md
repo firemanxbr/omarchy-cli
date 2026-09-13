@@ -14,7 +14,10 @@ please do not file a public issue for it.
    pool's signed databases; every package it serves was either verified
    against its upstream project's key at import or built by a worker the
    project trusts and signed by the pool. No contributor's bytes reach a
-   user before a maintainer approves them and the project rebuilds them.
+   user, ever: a maintainer approves the *recipe* on the evidence of the
+   contributor's build, and the project rebuilds it. Zero trust between
+   people, shared knowledge between them — we do not use what a contributor
+   built, we learn from it (docs/GOVERNANCE.md).
 2. **The signing key never travels.** It signs inside the pool's own
    service; builders produce bytes and evidence, never signatures.
 3. **A credential is worth exactly one job.** Nothing holds a token that

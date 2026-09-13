@@ -9,7 +9,7 @@ import type { RunningVersion } from "../meta";
 
 const BODY = String.raw`
   <h1>Review</h1>
-  <p class="lede">What contributors built, waiting for a maintainer. Each row is one build in a contributor's staging workspace: read the PKGBUILD and the log, then <b>approve</b> — the project rebuilds the same PKGBUILD on a trusted worker, signs it and publishes it into <code>edge</code>, where it takes the usual 48-hour path to <code>stable</code> — or <b>reject</b> with a note the contributor sees. Approvals are recorded with your name.</p>
+  <p class="lede">What contributors built, waiting for a maintainer. Each row is one build in a contributor's staging workspace — evidence, not a package: you do not ship their bytes, you learn from them. Read the PKGBUILD, the log and the manifest, then <b>approve</b> — the project rebuilds the same recipe on a trusted worker, signs it and publishes it into <code>edge</code>, where it takes the usual 48-hour path to <code>stable</code> — or <b>reject</b> with a note the contributor sees. Approvals are recorded with your name: every package users get was checked by two different people.</p>
   <p class="sub" id="who"></p>
 
   <section>
@@ -31,11 +31,13 @@ const BODY = String.raw`
 `;
 
 const SCRIPT = String.raw`
-  var API = "/api/v1/factory", token = null, login = null;
+  var API = "/api/v1/factory", token = null, login = null, signedIn = false;
   try { token = localStorage.getItem("omc_token"); login = localStorage.getItem("omc_login"); } catch (e) {}
-  function headers() { var h = { "content-type": "application/json" }; if (token) h["authorization"] = "Bearer " + token; return h; }
+  // The sign-in cookie authenticates same-origin calls by itself; a token
+  // from the fallback form travels as a bearer header instead.
+  function headers() { var h = { "content-type": "application/json" }; if (token && !signedIn) h["authorization"] = "Bearer " + token; return h; }
   $("#who").innerHTML = 'Read-only until you <a href="/auth/github?next=/review">sign in with GitHub</a>; approving and rejecting need the maintainer role.';
-  whoami(function (me) { if (me) { login = me.login; token = token || "cookie"; $("#who").innerHTML = 'Signed in as <b>' + esc(me.login) + '</b> (' + esc(me.role) + (me.areas && me.areas.length ? ' of ' + esc(me.areas.join(", ")) : '') + ')' + (me.role === "contributor" ? ' — approving needs the maintainer role.' : '.'); load(); } });
+  whoami(function (me) { if (me) { login = me.login; signedIn = true; $("#who").innerHTML = 'Signed in as <b>' + esc(me.login) + '</b> (' + esc(me.role) + (me.areas && me.areas.length ? ' of ' + esc(me.areas.join(", ")) : '') + ')' + (me.role === "contributor" ? ' — approving needs the maintainer role.' : '.'); load(); } });
   function decide(id, what) {
     var note = what === "reject" ? prompt("Why? The contributor sees this.") : (prompt("Note for the record (optional)") || "");
     if (what === "reject" && !note) return;
@@ -53,7 +55,7 @@ const SCRIPT = String.raw`
           '<td>' + (t.url ? '<a href="' + esc(t.url) + '">' + esc(t.url.replace(/^https?:\/\/(www\.)?github\.com\//, "")) + '</a>' : '—') + '</td><td>' + esc([det.build_system, det.license, det.latest_tag].filter(Boolean).join(" · ")) + '</td>' +
           '<td>' + esc(t.owner || "") + ' <span class="muted">' + (t.duration_ms ? Math.round(t.duration_ms / 1000) + " s" : "") + '</span></td>' +
           '<td><a class="run" href="' + t.evidence.pkgbuild + '">PKGBUILD</a> <a class="run" href="' + t.evidence.log + '">log</a> <a class="run" href="' + t.evidence.pkginfo + '">PKGINFO</a> <span class="mono muted">' + esc((t.result_sha256 || "").slice(0, 12)) + '</span></td>' +
-          '<td>' + (token ? '<button type="button" data-approve="' + t.id + '">Approve</button> <button type="button" data-reject="' + t.id + '">Reject</button>' : '<span class="muted">sign in</span>') + '</td></tr>';
+          '<td>' + (token || signedIn ? '<button type="button" data-approve="' + t.id + '">Approve</button> <button type="button" data-reject="' + t.id + '">Reject</button>' : '<span class="muted">sign in</span>') + '</td></tr>';
       }, { empty: 'nothing waiting for review' });
       endSkeleton();
     }).catch(function () { endSkeleton(); });

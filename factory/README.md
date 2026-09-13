@@ -9,6 +9,12 @@ repository for now; it is designed to move out (see *The contract* and
 The pool is the brain. GitHub holds PKGBUILDs and runs CI; it orchestrates
 nothing. Workers are ephemeral, live anywhere, and pull.
 
+Contributors and maintainers use the same tools; maintainers never ship a
+contributor's bytes — *we do not use what you built, we learn from it*
+([docs/GOVERNANCE.md](../docs/GOVERNANCE.md)). A contributor's build is
+evidence: the recipe, the log, the manifest that let a maintainer rebuild,
+verify and attest the package faster and approve it with more confidence.
+
 ```
 PKGBUILD reviewed and merged ──▶ pool: build_requests / build_tasks (D1)
                                      ▲            │ claim (lease 30 min)

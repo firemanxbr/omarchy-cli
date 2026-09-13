@@ -10,7 +10,7 @@ import { REPO_URL } from "../meta";
 
 const BODY = String.raw`
   <h1>Contribute a package</h1>
-  <p class="lede">You have something to package for Omarchy. Register it here — no permission needed, nothing spent by the project — then run the project's signed worker image on your own machine: it builds your package and puts the result in your staging workspace, where a maintainer of the group approves it. After that, new upstream releases are built without you. <a href="/how-it-works#factory">How the factory works →</a></p>
+  <p class="lede">You have something to package for Omarchy. Register it here — no permission needed, nothing spent by the project — then run the project's signed worker image on your own machine — the same tools a maintainer uses, with your own agent if you want one — and the build, its PKGBUILD, log and manifest land in your staging workspace as evidence. A maintainer of the group does not use what you built: they rebuild it from your recipe on a worker the project trusts, and approve it knowing it already works. Nobody knows better than you how your software should be compiled and packaged; the maintainer learns it from you. New upstream releases come back to your worker the same way. <a href="/governance">Contributors and maintainers →</a> · <a href="/how-it-works#factory">How the factory works →</a></p>
 
   <section id="signin">
     <h2>1. Who you are</h2>
