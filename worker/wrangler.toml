@@ -34,6 +34,14 @@ migrations_dir = "migrations"
 binding = "PACKAGES"
 bucket_name = "omarchy-packages"
 
+# Factory staging: what contributors' workers build, in their own workspace
+# (staging/<login>/<package>/<task>/…), waiting for a maintainer. Never
+# served to users; objects expire after 30 days (lifecycle rule, RUNBOOK).
+# Create with `wrangler r2 bucket create omarchy-factory-staging`.
+[[r2_buckets]]
+binding = "STAGING"
+bucket_name = "omarchy-factory-staging"
+
 [vars]
 DEFAULT_RING = "stable"
 # Static origin for packages and databases (the R2 bucket's custom domain).

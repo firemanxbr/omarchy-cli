@@ -52,6 +52,7 @@ const BODY = String.raw`
 `;
 
 const SCRIPT = String.raw`
+  skeletonTiles("#tiles", 6); skeletonRows("#coverage", 9, 5); skeletonRows("#workflows", 7, 4); skeletonRows("#events", 7, 6); skeletonRows("#releases", 8, 4);
 __CHARTS__
   var RING_INFO = {
     stable: { title: "Recommended for daily use", text: "What <b>rc</b> served for a day without a failed check. About two days behind Arch; health-checked on both architectures after every promotion and rolled back automatically if that fails." },

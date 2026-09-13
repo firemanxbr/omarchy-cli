@@ -117,6 +117,19 @@ const CSS = String.raw`
   pre { margin: 0; background: var(--bg-deep); border: 1px solid var(--line); padding: 10px 12px; font-size: 12.5px; overflow-x: auto; color: var(--muted); }
   pre b { color: var(--green); font-weight: 500; }
 
+  /* Loading: a thin bar at the top while any request is in flight, and
+     skeleton rows/tiles so a page never looks frozen or jumps in from nothing. */
+  #progress { position: fixed; top: 0; left: 0; height: 2px; width: 0; background: var(--green); z-index: 50; opacity: 0; transition: opacity .2s; }
+  #progress.on { opacity: 1; animation: progress 1.6s ease-in-out infinite; }
+  @keyframes progress { 0% { width: 0; margin-left: 0 } 50% { width: 60%; margin-left: 20% } 100% { width: 0; margin-left: 100% } }
+  .sk { display: inline-block; height: 12px; width: 70%; border-radius: 2px; background: linear-gradient(90deg, var(--line) 25%, var(--panel-2) 50%, var(--line) 75%); background-size: 200% 100%; animation: shimmer 1.2s linear infinite; vertical-align: middle; }
+  tr.sk td:nth-child(2n) .sk { width: 45%; } tr.sk td:nth-child(3n) .sk { width: 30%; }
+  .tile.sk .v .sk { height: 26px; width: 55%; } .tile.sk .s .sk { width: 80%; }
+  @keyframes shimmer { 0% { background-position: 200% 0 } 100% { background-position: -200% 0 } }
+  .empty.loading { color: var(--dim); }
+  .empty.loading::after { content: "…"; animation: dots 1.2s steps(4, end) infinite; }
+  @keyframes dots { 0% { content: "" } 25% { content: "." } 50% { content: ".." } 75% { content: "..." } }
+
   table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
   th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
   th { font-size: 11.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--dim); font-weight: 500; }
@@ -211,12 +224,29 @@ const HELPERS = String.raw`
     el.className = "pill " + (why.length ? "warn" : "ok");
     el.textContent = why.length ? "pipeline behind: " + why.join(" · ") : "pipeline keeping up";
   }
+  // Every fetch a page starts goes through busy(): the bar at the top stays
+  // on while at least one is in flight.
+  function busy(p) {
+    var el = $("#progress"); busy.n = (busy.n || 0) + 1; if (el) el.classList.add("on");
+    return p.finally(function () { busy.n = Math.max(0, (busy.n || 1) - 1); if (!busy.n && el) el.classList.remove("on"); });
+  }
+  // Placeholders until the first data arrives: rows for a table, cells for tiles.
+  function skeletonRows(tableSel, cols, rows) {
+    var tb = document.querySelector(tableSel + " tbody"); if (!tb || tb.children.length) return;
+    var row = '<tr class="sk">' + new Array(cols + 1).join('<td><span class="sk"></span></td>') + '</tr>';
+    tb.innerHTML = new Array((rows || 4) + 1).join(row);
+  }
+  function skeletonTiles(sel, n) {
+    var el = $(sel); if (!el || el.children.length) return;
+    el.innerHTML = new Array((n || 4) + 1).join('<div class="tile sk"><div class="k"><span class="sk"></span></div><div class="v"><span class="sk"></span></div><div class="s"><span class="sk"></span></div></div>');
+  }
+  function skeletonText(sel) { var el = $(sel); if (el && !el.textContent.trim()) { el.className = (el.className + " empty loading").trim(); el.textContent = "Loading"; } }
   // Numbers that change between refreshes flash briefly, so the page reads as live.
   function setTile(el, html) { if (el.innerHTML !== html) { el.innerHTML = html; el.classList.remove("bump"); void el.offsetWidth; el.classList.add("bump"); } }
   function liveStats(render, everyMs) {
     function load() {
       serviceStatus();
-      fetch("/api/v1/stats").then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+      busy(fetch("/api/v1/stats")).then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
         .then(function (d) { pipelineFrom(d); render(d); })
         .catch(function () {});
     }
@@ -271,6 +301,7 @@ export function page(o: PageOptions): string {
 <style>${CSS}</style>
 </head>
 <body>
+<div id="progress"></div>
 <header>
   <a class="brand" href="/"><span class="mark">▣</span> omarchy-pool</a>
   ${chip}

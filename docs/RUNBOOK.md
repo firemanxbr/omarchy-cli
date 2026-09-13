@@ -161,6 +161,14 @@ tasks from the pool ([factory/README.md](../factory/README.md)). Day to day:
   the build. It relies on two repository settings: *Actions may create pull
   requests* (`can_approve_pull_request_reviews`) and *allow auto-merge*.
   Packages without a GitHub `url=` (vi) are skipped and bumped by hand.
+- **Contributors' builds** land in the `omarchy-factory-staging` bucket
+  (`staging/<login>/<package>/<task>/`, lifecycle rule: 30 days), listed on
+  the Factory page with their PKGBUILD and log; the packages themselves are
+  readable with the publish token (`GET /api/v1/factory/tasks/:id/artifacts/<file>`).
+  Quotas per contributor: 10 tasks queued or building, 2 GB staged. A
+  contributor token (`omc_…`) or worker token (`omw_…`) is a random secret
+  hashed in D1; revoke a worker with `DELETE /factory/workers/<id>` as its
+  owner, or set `revoked_at` in `build_workers` by hand.
 - **Tokens**: `FACTORY_TOKEN` (worker secret + GitHub secret) authenticates
   workers only; rotate it with `npx wrangler secret put FACTORY_TOKEN` and
   `gh secret set FACTORY_TOKEN`, then restart workers.

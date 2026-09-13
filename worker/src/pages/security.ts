@@ -45,8 +45,9 @@ const SCRIPT = String.raw`
   function sync() { history.replaceState(null, "", "?ring=" + ring + "&arch=" + arch + "&conf=" + encodeURIComponent(conf)); }
   function load() {
     draw();
-    $("#updated").textContent = "Loading " + ring + " · " + arch + "…";
-    fetch("/api/v1/security?ring=" + ring + "&arch=" + arch).then(function (r) { return r.json(); }).then(function (d) {
+    $("#updated").textContent = "Loading " + ring + " · " + arch + " — the report covers every package the ring serves, this takes a few seconds…";
+    skeletonTiles("#tiles", 5); skeletonRows("#vuln", 7, 6);
+    busy(fetch("/api/v1/security?ring=" + ring + "&arch=" + arch)).then(function (r) { return r.json(); }).then(function (d) {
       var rows = (d.vulnerable || []).map(function (v) {
         var advs = v.advisories.filter(function (a) { return confOk(a.match); });
         if (!advs.length) return null;

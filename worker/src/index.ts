@@ -45,7 +45,12 @@ import {
   handleApproveRequest, handleCancelTask, handleClaim, handleComplete, handleCreateRequest, handleEnqueue, handleFactory, handleFail,
   handleHeartbeat, handleRejectRequest, handleTask, handleBuilt, handleUpdateRequest,
 } from "./routes/factory";
-import { requireFactoryAuth } from "./auth";
+import { requireFactoryAuth, isProjectFactoryToken, requireAuthOk } from "./auth";
+import {
+  contributorOf, workerOf, handleRegister, handleMe, handleRegisterPackage, handleDeletePackage, handleBuildPackage, handleRegisterWorker,
+  handleRevokeWorker, handleListPackages, handleStagingPut, handleStagingMultipart, handleStagingList, handleStagingGet,
+} from "./routes/contributors";
+import type { Actor } from "./routes/factory";
 import { handleGetEvents, handlePostEvent } from "./routes/events";
 import { handleServiceStatus, handleStats } from "./routes/stats";
 import { handleGc, handleUnreferenced } from "./routes/gc";
@@ -65,6 +70,8 @@ import { runScheduler } from "./scheduler";
 export interface Env {
   DB: D1Database;
   PACKAGES: R2Bucket;
+  /** Contributors' build results, per workspace; a maintainer's approval moves them on. */
+  STAGING: R2Bucket;
   DEFAULT_RING: string;
   POOL_URL: string;
   PUBLISH_TOKEN: string;
@@ -134,6 +141,48 @@ export default {
 } satisfies ExportedHandler<Env>;
 
 /**
+ * The factory's writes. Three kinds of caller: the project (publish token —
+ * maintainers, the pipeline), a registered worker (its own token) or a
+ * project worker (FACTORY_TOKEN), and a contributor (their token).
+ */
+async function factoryRoutes(method: string, path: string, url: URL, request: Request, env: Env): Promise<Response | null> {
+  let m: RegExpMatchArray | null;
+  // Contributors.
+  if (method === "POST" && path === "/factory/register") return handleRegister(request, env);
+  if (path === "/factory/packages" || path.startsWith("/factory/packages/") || path === "/factory/workers" || path.startsWith("/factory/workers/")) {
+    const c = await contributorOf(request, env);
+    if (!c) return json({ error: "a contributor token is required (POST /factory/register with a GitHub token)" }, 401);
+    if (method === "POST" && path === "/factory/packages") return handleRegisterPackage(c, request, env);
+    if ((m = path.match(/^\/factory\/packages\/([a-z0-9@._+-]+)\/build$/)) && method === "POST") return handleBuildPackage(c, m[1], request, env);
+    if ((m = path.match(/^\/factory\/packages\/([a-z0-9@._+-]+)$/)) && method === "DELETE") return handleDeletePackage(c, m[1], env);
+    if (method === "POST" && path === "/factory/workers") return handleRegisterWorker(c, request, env);
+    if ((m = path.match(/^\/factory\/workers\/([A-Za-z0-9_.-]+)$/)) && method === "DELETE") return handleRevokeWorker(c, m[1], env);
+    return null;
+  }
+  // Workers: the project's (shared secret) or a registered one (own token).
+  const workerActor = async (): Promise<Actor | Response> => {
+    if (isProjectFactoryToken(request, env)) return { kind: "project" };
+    const w = await workerOf(request, env);
+    return w ? { kind: "worker", w } : json({ error: "unauthorized: a worker token (POST /factory/workers) or the project's FACTORY_TOKEN" }, 401);
+  };
+  if (method === "POST" && path === "/factory/claim") { const a = await workerActor(); return a instanceof Response ? a : handleClaim(request, env, a); }
+  if ((m = path.match(/^\/factory\/tasks\/(\d+)\/heartbeat$/)) && method === "POST") { const a = await workerActor(); return a instanceof Response ? a : handleHeartbeat(Number(m[1]), request, env, a); }
+  if ((m = path.match(/^\/factory\/tasks\/(\d+)\/complete$/)) && method === "POST") { const a = await workerActor(); return a instanceof Response ? a : handleComplete(Number(m[1]), request, env, a); }
+  if ((m = path.match(/^\/factory\/tasks\/(\d+)\/fail$/)) && method === "POST") { const a = await workerActor(); return a instanceof Response ? a : handleFail(Number(m[1]), request, env, a); }
+  if ((m = path.match(/^\/factory\/tasks\/(\d+)\/artifacts\/([A-Za-z0-9][A-Za-z0-9._:+-]{0,200})$/)) && method === "PUT") {
+    const w = await workerOf(request, env);
+    if (!w) return json({ error: "a registered worker token is required" }, 401);
+    return handleStagingPut(Number(m[1]), m[2], request, env, w);
+  }
+  if ((m = path.match(/^\/factory\/tasks\/(\d+)\/artifacts\/([A-Za-z0-9][A-Za-z0-9._:+-]{0,200})\/multipart$/)) && method === "POST") {
+    const w = await workerOf(request, env);
+    if (!w) return json({ error: "a registered worker token is required" }, 401);
+    return handleStagingMultipart(Number(m[1]), m[2], url, request, env, w);
+  }
+  return null;
+}
+
+/**
  * GET responses that declare `cache-control: public, max-age=N` are kept in
  * the edge cache for that long, so a hundred dashboards polling cost one D1
  * round of queries per colo, not a hundred. Everything else goes straight
@@ -188,11 +237,18 @@ async function api(method: string, path: string, url: URL, request: Request, env
   if (method === "GET" && path === "/security") return handleSecurity(url, env);
   if (method === "GET" && path === "/factory") return handleFactory(env);
   if (method === "GET" && path === "/factory/built") return handleBuilt(env);
+  if (method === "GET" && path === "/factory/packages") return handleListPackages(env);
+  if (method === "GET" && path === "/factory/me") {
+    const c = await contributorOf(request, env);
+    return c ? handleMe(c, env) : json({ error: "a contributor token is required (POST /factory/register)" }, 401);
+  }
+  if ((m = path.match(/^\/factory\/tasks\/(\d+)\/artifacts$/)) && method === "GET") return handleStagingList(Number(m[1]), env);
+  if ((m = path.match(/^\/factory\/tasks\/(\d+)\/artifacts\/([A-Za-z0-9][A-Za-z0-9._:+-]{0,200})$/)) && method === "GET") return handleStagingGet(Number(m[1]), m[2], env, requireAuthOk(request, env));
   if ((m = path.match(/^\/factory\/tasks\/(\d+)$/)) && method === "GET") return handleTask(Number(m[1]), env);
-  if (method === "POST" && path === "/factory/claim") return requireFactoryAuth(request, env) ?? handleClaim(request, env);
-  if ((m = path.match(/^\/factory\/tasks\/(\d+)\/heartbeat$/)) && method === "POST") return requireFactoryAuth(request, env) ?? handleHeartbeat(Number(m[1]), request, env);
-  if ((m = path.match(/^\/factory\/tasks\/(\d+)\/complete$/)) && method === "POST") return requireFactoryAuth(request, env) ?? handleComplete(Number(m[1]), request, env);
-  if ((m = path.match(/^\/factory\/tasks\/(\d+)\/fail$/)) && method === "POST") return requireFactoryAuth(request, env) ?? handleFail(Number(m[1]), request, env);
+  if (path.startsWith("/factory/") && (method === "POST" || method === "PUT" || method === "DELETE")) {
+    const r = await factoryRoutes(method, path, url, request, env);
+    if (r) return r;
+  }
   if ((m = path.match(/^\/factory\/tasks\/(\d+)\/cancel$/)) && method === "POST") return requireAuth(request, env) ?? handleCancelTask(Number(m[1]), env);
   if (method === "POST" && path === "/factory/requests") return requireAuth(request, env) ?? handleCreateRequest(request, env);
   if ((m = path.match(/^\/factory\/requests\/(\d+)\/approve$/)) && method === "POST") return requireAuth(request, env) ?? handleApproveRequest(Number(m[1]), request, env);
