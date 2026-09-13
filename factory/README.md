@@ -31,7 +31,7 @@ PKGBUILD reviewed and merged ──▶ pool: build_requests / build_tasks (D1)
 
 1. **Someone brings it.** A contributor signs in, registers the package
    (the project's URL; a `PKGBUILD` in that repository if there is one) and
-   runs their own worker: the signed `omarchy-packaging` image, on their
+   runs their own worker: the signed `omarchy-worker` image, on their
    machine, with their agent key if they want the PKGBUILD drafted and
    corrected for them. Someone without a worker files a
    [package request issue](../../../issues/new?template=package-request.yml)
@@ -119,7 +119,7 @@ curl -s -X POST $API/factory/packages/project/build -H "authorization: Bearer $O
 WORKER_ID=you-laptop-ab12 OMARCHY_WORKER_TOKEN=omw_… ANTHROPIC_API_KEY=sk-… \
   podman compose -f factory/image/compose.yml up -d        # or docker compose
 #    or, one task by hand:
-podman run --rm -e WORKER_ID=you-laptop-ab12 -e OMARCHY_WORKER_TOKEN=omw_… ghcr.io/firemanxbr/omarchy-packaging:latest
+podman run -d --name omarchy-worker --restart unless-stopped -e OMARCHY_WORKER_TOKEN=omw_… ghcr.io/firemanxbr/omarchy-worker:latest
 
 # 6. Follow it.
 curl -s $API/factory/me -H "authorization: Bearer $OMC"       # your packages, workers, tasks, staging quota
@@ -144,7 +144,7 @@ page.
 Limits: 10 tasks queued or building and 2 GB of staging per contributor;
 staging objects expire after 30 days. A worker token is revocable
 (`DELETE /factory/workers/<id>`); registering again replaces your contributor
-token. `cosign verify ghcr.io/firemanxbr/omarchy-packaging:latest
+token. `cosign verify ghcr.io/firemanxbr/omarchy-worker:latest
 --certificate-identity-regexp github.com/firemanxbr/omarchy-pool
 --certificate-oidc-issuer https://token.actions.githubusercontent.com` checks
 the image is the project's.
@@ -173,13 +173,13 @@ process on the host holds only its own token, publishes the result and the
 pool signs it — no key ever sits on a worker. A host builds its own
 architecture natively and the other one emulated (`--arch`).
 
-The easiest way is the container image
-`ghcr.io/firemanxbr/omarchy-pool-worker` (both architectures, signed, tagged
-with the pool's release; `factory/image/Containerfile.pool-worker`), which
-holds `pkg-repo work` and starts each build as a sibling container through
-the runtime's socket — the dashboard's *Run a worker* page has the exact
-commands for Docker Desktop and Podman. Without a container, the release
-binaries do the same:
+The easiest way is the same container image every worker runs,
+`ghcr.io/firemanxbr/omarchy-worker` (both architectures, signed, tagged with
+the pool's release; `factory/image/Containerfile`): given a token whose
+registration a maintainer trusted, it runs `pkg-repo work` and starts each
+build as a sibling container through the runtime's socket — the dashboard's
+*Run a worker* page has the exact commands for Docker Desktop and Podman.
+Without a container, the release binaries do the same:
 
 ```bash
 # once: the pool's publisher (from the releases, or cargo build --release -p pkg-repo)
@@ -219,7 +219,7 @@ The factory touches the pool through four things, all versioned in the API:
 Nothing in the pool knows how a package is built, where a worker runs or what a
 PKGBUILD looks like; nothing in the factory knows how rings, rendering or
 promotion work. Moving the factory to its own repository means moving
-`factory/`, `factory-update.yml`, `factory-image.yml` and the issue form, and
+`factory/`, `factory-update.yml`, the `worker-image` jobs of `release.yml` and the issue form, and
 pointing the repository name in the worker script, `reconcile.rs`,
 `governance.ts` and `requests.ts` at the new home; the pool keeps
 `worker/src/routes/factory.ts` (the queue) and the `factory` source.
@@ -251,12 +251,11 @@ factory/
                                   `--container` (the contributor's one-task-per-container mode)
   MAINTAINERS.toml                the governance file: groups and their maintainers (docs/GOVERNANCE.md)
   bin/check-governance            validates it and generates .github/CODEOWNERS from it
-  image/Containerfile             the Omarchy Packaging image — a contributor's worker (signed, both architectures); image/compose.yml runs it
-  image/Containerfile.pool-worker the Omarchy Pool Worker image — a project worker, built by the release workflow
+  image/Containerfile             the one worker image (Arch, both architectures, signed, built by the release workflow); image/entrypoint.sh
+                                  reads the registration and runs the contributor's or the project's half; image/compose.yml runs it
   bin/pkgbuild-meta               PKGBUILD → arches and version, without executing it as you
   pkgbuilds/<group>/<name>/       reviewed PKGBUILDs; CODEOWNERS per group
 .github/workflows/factory-update.yml    daily: pull requests bumping the project's own recipes (reviewed, never auto-merged)
-.github/workflows/factory-image.yml     builds and signs the Omarchy Packaging image
 .github/ISSUE_TEMPLATE/package-request.yml   the request form the brain reads every ten minutes
   bin/draft-pkgbuild              project URL → PKGBUILD (Claude, or a template), checksums left to updpkgsums
   prompts/pkgbuild.md             the packaging rules the drafter follows

@@ -1,28 +1,50 @@
-# Omarchy Packaging — the contributor's build worker.
+# omarchy-worker — the one image every worker runs, contributor or maintainer.
 #
-# One container, one task: it asks the pool for a build of the contributor's
-# package, builds it here with makepkg as an unprivileged user, uploads the
-# result to the contributor's staging workspace and exits. The image carries
-# no key and no pool credential; whoever runs it brings only a worker token
-# (POST /api/v1/factory/workers) and, if they want an agent to draft and fix
-# PKGBUILDs, their own ANTHROPIC_API_KEY.
+# What it does is decided by the registration behind the token it is given
+# (entrypoint.sh): a contributor's worker builds their packages right here,
+# one task per container, into their staging workspace; a project worker —
+# a registration a maintainer trusted — runs `pkg-repo work`: the pool's
+# jobs and the rebuild of approved packages, each in a fresh sibling
+# container through the runtime's socket the operator mounts.
 #
-# Built for both architectures by .github/workflows/factory-image.yml and
-# signed with cosign (keyless, GitHub OIDC): verify with
-#   cosign verify ghcr.io/firemanxbr/omarchy-packaging:latest \
+# The image carries no key and no pool credential: the pool signs, and a
+# worker's token only claims; each task runs with the per-job token the
+# claim issues. Whoever runs it brings the token and, for an agent that
+# drafts and corrects PKGBUILDs, their own ANTHROPIC_API_KEY.
+#
+# Arch Linux, both architectures, built by the release workflow from the
+# binaries it just published (the tag is the pool's release) and signed
+# keyless with cosign (GitHub OIDC):
+#   cosign verify ghcr.io/firemanxbr/omarchy-worker:latest \
 #     --certificate-identity-regexp 'github.com/firemanxbr/omarchy-pool' \
 #     --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ARG BASE=docker.io/library/archlinux:base-devel
 FROM ${BASE}
+ARG ARCH=x86_64
+ARG POOL_RELEASE
+ARG DOCKER_CLI=27.5.1
 LABEL org.opencontainers.image.source="https://github.com/firemanxbr/omarchy-pool" \
-      org.opencontainers.image.description="Omarchy Packaging: a factory worker that builds a contributor's package into staging" \
+      org.opencontainers.image.description="Omarchy Worker: builds for the Omarchy pool — a contributor's packages, or the project's jobs and approved rebuilds" \
       org.opencontainers.image.licenses="MIT"
-# The worker script and the drafter; pacman runs at first start (fresh
-# mirrors every time, this image only pins the tooling).
+# pacman's download sandbox needs privileges a container build does not have.
+RUN sed -i '0,/^\[options\]/s//[options]\nDisableSandboxSyscalls\nDisableSandboxFilesystem/' /etc/pacman.conf \
+ && pacman -Syu --noconfirm --needed git curl jq python libarchive gnupg bash ca-certificates sudo namcap pacman-contrib && pacman -Scc --noconfirm
+# The docker CLI, static: it talks to whatever Docker-compatible socket is mounted at /var/run/docker.sock (project mode).
+RUN curl -fsSL "https://download.docker.com/linux/static/stable/${ARCH}/docker-${DOCKER_CLI}.tgz" | tar -xz --strip-components=1 -C /usr/local/bin docker/docker
+# The pool's tools, from the release this image is tagged with (project mode).
+RUN set -eu; name="omarchy-pool-${POOL_RELEASE}-${ARCH}-linux"; \
+    curl -fsSL -o /tmp/tools.tgz "https://github.com/firemanxbr/omarchy-pool/releases/download/${POOL_RELEASE}/${name}.tar.gz"; \
+    curl -fsSL -o /tmp/tools.tgz.sha256 "https://github.com/firemanxbr/omarchy-pool/releases/download/${POOL_RELEASE}/${name}.tar.gz.sha256"; \
+    cd /tmp && echo "$(cut -d' ' -f1 tools.tgz.sha256)  tools.tgz" | sha256sum -c -; \
+    tar -xzf /tmp/tools.tgz -C /tmp && install -m 755 "/tmp/${name}"/pkg-repo "/tmp/${name}"/omarchy-cli "/tmp/${name}"/pkg-extract /usr/local/bin/ && rm -rf /tmp/tools.tgz* "/tmp/${name}"
+# The build half and the drafter (community mode); pacman runs at first start of a build.
 COPY factory/worker/omarchy-build-worker.sh /usr/local/bin/omarchy-build-worker
+COPY factory/image/entrypoint.sh /usr/local/bin/omarchy-worker
 COPY factory/bin/draft-pkgbuild factory/bin/pkgbuild-meta /usr/local/lib/omarchy-factory/bin/
 COPY factory/prompts/pkgbuild.md /usr/local/lib/omarchy-factory/prompts/pkgbuild.md
-RUN chmod 755 /usr/local/bin/omarchy-build-worker /usr/local/lib/omarchy-factory/bin/* && mkdir -p /build /task
-ENV OMARCHY_API=https://pkgs.firemanxbr.org OMARCHY_POOL=https://pool.firemanxbr.org
+RUN chmod 755 /usr/local/bin/omarchy-build-worker /usr/local/bin/omarchy-worker /usr/local/lib/omarchy-factory/bin/* && mkdir -p /build /task /var/lib/omarchy-worker
+ENV OMARCHY_API=https://pkgs.firemanxbr.org OMARCHY_POOL=https://pool.firemanxbr.org \
+    OMARCHY_WORK_DIR=/var/lib/omarchy-worker DOCKER_HOST=unix:///var/run/docker.sock
+VOLUME /var/lib/omarchy-worker
 WORKDIR /build
-ENTRYPOINT ["omarchy-build-worker", "--container"]
+ENTRYPOINT ["omarchy-worker"]

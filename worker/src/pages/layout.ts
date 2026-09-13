@@ -347,7 +347,7 @@ export type DocKey = "index" | "get-started" | "workers" | "how-it-works" | "gov
 /** The documentation's chapters, in reading order; every docs page carries this bar. */
 export const DOCS: { key: DocKey; href: string; label: string; blurb: string }[] = [
   { key: "get-started", href: "/docs/get-started", label: "Get started", blurb: "Point pacman at a ring: the key, the Server line, the upgrade." },
-  { key: "workers", href: "/docs/workers", label: "Run a worker", blurb: "The container images on GitHub Packages, with Docker Desktop or Podman: your own packages, donated compute, the project's builds." },
+  { key: "workers", href: "/docs/workers", label: "Run a worker", blurb: "One image on GitHub Packages, with Docker Desktop or Podman: your own packages, donated compute, the project's builds — the registration decides." },
   { key: "how-it-works", href: "/docs/how-it-works", label: "How it works", blurb: "The pool, the rings, promotion by evidence, the factory, signing." },
   { key: "governance", href: "/docs/governance", label: "Governance", blurb: "Contributors and maintainers, groups, and how a pull request is the only way to become a maintainer." },
   { key: "api", href: "/api", label: "API", blurb: "Every endpoint the dashboard and the tools use." },

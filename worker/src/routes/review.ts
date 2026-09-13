@@ -1,5 +1,6 @@
 import { json, type Env } from "../index";
 import { maintains, type Contributor } from "./contributors";
+import { groupsOf } from "../governance";
 
 /**
  * Review: what maintainers do with staged builds.
@@ -62,6 +63,15 @@ export async function handleApprove(c: Contributor, id: number, request: Request
   if (!t) return json({ error: "no such task" }, 404);
   if (t.status !== "staged") return json({ error: `task ${id} is ${t.status}, not staged` }, 409);
   if (!canReview(c, t.group)) return json({ error: `a maintainer of ${t.group} is required` }, 403);
+  // Conflict of interest: nobody approves their own package. While a group
+  // has a single maintainer there is nobody else — the bootstrap exception,
+  // recorded as such on the approval (docs/GOVERNANCE.md).
+  let bootstrap = false;
+  if (t.owner === c.login) {
+    const g = (await groupsOf(env)).find((x) => x.name === t.group);
+    if ((g?.maintainers.length ?? 0) > 1) return json({ error: `${c.login} brought ${t.name}; another maintainer of ${t.group} must approve it` }, 403);
+    bootstrap = true;
+  }
   const already = await env.DB.prepare("SELECT id FROM approvals WHERE task_id = ? AND decision = 'approved'").bind(id).first();
   if (already) return json({ error: "already approved" }, 409);
   // The project rebuilds the same PKGBUILD: the staged one, fetched by the
@@ -71,8 +81,9 @@ export async function handleApprove(c: Contributor, id: number, request: Request
   )
     .bind(t.name, t.group, t.arch, t.version, `staging:${id}`, `approved by ${c.login}`, t.owner)
     .first<{ id: number }>();
+  const note = [bootstrap ? `bootstrap: ${c.login} is the sole maintainer of ${t.group} and approved their own package` : "", b.note ?? ""].filter(Boolean).join(" — ") || null;
   await env.DB.prepare(`INSERT INTO approvals (task_id, name, "group", arch, version, decision, by, note, rebuild_task) VALUES (?, ?, ?, ?, ?, 'approved', ?, ?, ?)`)
-    .bind(id, t.name, t.group, t.arch, t.version, c.login, b.note ?? null, rebuild?.id ?? null)
+    .bind(id, t.name, t.group, t.arch, t.version, c.login, note, rebuild?.id ?? null)
     .run();
   await env.DB.prepare("UPDATE factory_packages SET status = 'approved', detail = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE name = ?")
     .bind(`${t.version ?? ""} for ${t.arch} approved by ${c.login}; the project is rebuilding it`, t.name)

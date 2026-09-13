@@ -30,7 +30,7 @@ const BODY = String.raw`
     <h2>What each role does</h2>
     <div class="steps">
       <div class="step"><h3>Contributor</h3><p>Signs in with GitHub — nothing else is asked. Registers packages, runs workers on their own machines, follows their builds. A contributor's worker builds <em>their</em> packages; the result is evidence in their staging workspace, never a package users receive.</p></div>
-      <div class="step"><h3>Maintainer of a group</h3><p>A contributor listed under that group. Approves or rejects the staged builds of the group with the evidence in front of them (an approval queues the project's own rebuild, which is what users get); reviews changes to <code>factory/pkgbuilds/&lt;group&gt;/</code>; trusts workers as project workers; reviews governance pull requests.</p></div>
+      <div class="step"><h3>Maintainer of a group</h3><p>A contributor listed under that group. Approves or rejects the staged builds of the group with the evidence in front of them (an approval queues the project's own rebuild, which is what users get) — <b>never their own package</b>: another maintainer of the group approves what a maintainer brought (a group with a single maintainer is the bootstrap exception, recorded on the approval). Reviews changes to <code>factory/pkgbuilds/&lt;group&gt;/</code>; trusts workers as project workers; reviews governance pull requests.</p></div>
       <div class="step"><h3>The project's workers</h3><p>Machines maintainers trust. They only do what a maintainer would: the pool's jobs (sync, promote, health, security, gc) and the rebuild of a package a maintainer approved. They never pull a new package that has no evidence and no review yet.</p></div>
     </div>
   </section>
@@ -48,6 +48,7 @@ const BODY = String.raw`
   <section>
     <h2>Workers, compute and agents</h2>
     <div class="steps">
+      <div class="step"><h3>One image, the registration decides</h3><p>Contributors and maintainers run the same container, <code>ghcr.io/firemanxbr/omarchy-worker</code>; what it does follows the trust a maintainer gave the registration behind its token — a contributor's builds inside the container, or the project's jobs and approved rebuilds in fresh sibling containers. <a href="/docs/workers">Run a worker →</a></p></div>
       <div class="step"><h3>Yours by default</h3><p>A registered worker builds only its owner's packages. Donating it to anyone's builds is a choice made where it runs — <code>WORKER_SHARED=1</code> on the container, <code>--shared</code> on <code>pkg-repo work</code> — so nobody's laptop ends up busy with strangers' packages by accident.</p></div>
       <div class="step"><h3>Agent keys stay with the worker's owner</h3><p>If a worker drafts or corrects PKGBUILDs with an agent, the key is its owner's: <code>ANTHROPIC_API_KEY</code> in the container's environment when it starts, for community and project workers alike. The pool holds no agent key and GitHub runs no agent; what an agent produces is evidence like any other build, reviewed by a maintainer before it reaches anyone.</p></div>
       <div class="step"><h3>Package requests</h3><p>A request opened as a GitHub issue becomes a task for a <em>shared</em> community worker whose owner runs an agent. No such worker, no draft: the request waits, visibly, on the Factory page.</p></div>

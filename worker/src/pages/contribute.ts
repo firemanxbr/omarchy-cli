@@ -57,7 +57,7 @@ const BODY = String.raw`
       <div id="w-new" hidden>
         <p class="sub">Your worker token, shown once. Run one of these wherever the worker lives (podman or docker):</p>
         <pre id="w-cmd"></pre>
-        <p class="sub">Each container is one task; <code>restart: unless-stopped</code> (or a loop) gives you the next. Add <code>-e ANTHROPIC_API_KEY=…</code> for an agent-drafted PKGBUILD. Verify the image: <code>cosign verify ghcr.io/firemanxbr/omarchy-packaging:latest --certificate-identity-regexp github.com/firemanxbr/omarchy-pool --certificate-oidc-issuer https://token.actions.githubusercontent.com</code></p>
+        <p class="sub">Each container is one task; <code>restart: unless-stopped</code> (or a loop) gives you the next. Add <code>-e ANTHROPIC_API_KEY=…</code> for an agent-drafted PKGBUILD. The same image serves maintainers: the registration decides what it does (<a href="/docs/workers">Run a worker</a>). Verify it: <code>cosign verify ghcr.io/firemanxbr/omarchy-worker:latest --certificate-identity-regexp github.com/firemanxbr/omarchy-pool --certificate-oidc-issuer https://token.actions.githubusercontent.com</code></p>
       </div>
       <div class="table-wrap"><table id="my-workers"><thead><tr><th>Worker</th><th>Arch</th><th>Mode</th><th>Last seen</th><th>Building</th><th>Done / failed</th><th></th></tr></thead><tbody></tbody></table></div>
     </section>
@@ -157,11 +157,11 @@ const SCRIPT = String.raw`
       if (d.error) { $("#pkg-state").textContent = d.error; return; }
       $("#w-new").hidden = false;
       $("#w-cmd").textContent =
-        "# one task, then exit (repeat to build the next)\n" +
-        "podman run --rm -e WORKER_ID=" + d.worker + " -e OMARCHY_WORKER_TOKEN=" + d.token + " \\\n  ghcr.io/firemanxbr/omarchy-packaging:" + d.arch + "\n\n" +
-        "# or keep it running with compose (" + REPO + "/blob/main/factory/image/compose.yml)\n" +
-        "WORKER_ID=" + d.worker + " OMARCHY_WORKER_TOKEN=" + d.token + " podman compose -f compose.yml up -d\n\n" +
-        "# add WORKER_SHARED=1 to build anyone's packages, ANTHROPIC_API_KEY=… (your key) for agent-drafted PKGBUILDs";
+        "# keep it running: one task per container, the restart brings the next (docker works the same)\n" +
+        "podman run -d --name omarchy-worker --restart unless-stopped -e OMARCHY_WORKER_TOKEN=" + d.token + " \\\n  ghcr.io/firemanxbr/omarchy-worker:latest\n\n" +
+        "# or with compose (" + REPO + "/blob/main/factory/image/compose.yml)\n" +
+        "OMARCHY_WORKER_TOKEN=" + d.token + " podman compose -f compose.yml up -d\n\n" +
+        "# add -e WORKER_SHARED=1 to build anyone's packages, -e ANTHROPIC_API_KEY=… (your key) for agent-drafted PKGBUILDs";
       $("#worker-form").reset(); refresh();
     }).catch(function (e) { $("#w-btn").disabled = false; $("#pkg-state").textContent = "failed: " + e; });
     return false;
