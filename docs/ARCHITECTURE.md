@@ -228,18 +228,28 @@ The client drives pacman rather than replacing it. What it adds:
   reads `/var/lib/pacman/local`, and refuses when a required soname or symbol
   version is not present on the system — the case that today produces a broken
   partial upgrade;
+* **hook preview**: `check` and `install` list the libalpm hooks pacman
+  would run for the transaction (`mkinitcpio`, `glib-compile-schemas`, …) —
+  the `.hook` files of the system (`/usr/share/libalpm/hooks`,
+  `/etc/pacman.d/hooks`, the latter overriding by name) matched against the
+  planned packages by name and by the files they ship, fetched from the
+  ring. Read-only: pacman runs them; `poc/crates/pkg-hooks` parses and
+  matches;
 * mirror discovery and release notifications come from the index, not from
   `pacman -Sy` polling;
 * exposes package and release information locally (MCP, later).
 
 `vercmp` is a byte-for-byte port of `alpm_pkg_vercmp` so the client and pacman
-always agree on ordering.
+always agree on ordering. Settings live in `/etc/omarchy-cli/config.toml`
+([`docs/omarchy-cli.config.toml`](omarchy-cli.config.toml) is the annotated
+example); the ring and the architecture are checked before any request.
 
 ## Not on the product path
 
 `poc/crates/pkg-store` (a redb state store plus a journaled, crash-safe filesystem
 transaction — the engine that would let the client stop shelling out to pacman)
-and `poc/crates/pkg-hooks` (libalpm `.hook` types) are built and tested but not
-wired in: the thin client did not need them. They stay in the workspace so they
-keep compiling; see [`poc/README.md`](../poc/README.md). Open work is in
-[`TODO.md`](../TODO.md).
+is built and tested but not wired in: the thin client did not need it.
+(`poc/crates/pkg-hooks`, once only the types, now parses and matches `.hook`
+files for the client's hook preview; running them stays with pacman.) They
+stay in the workspace so they keep compiling; see
+[`poc/README.md`](../poc/README.md). Open work is in [`TODO.md`](../TODO.md).

@@ -83,9 +83,9 @@ export_rootfs() { # image dest
   local cid
   cid="$("$RUNTIME" create --platform linux/amd64 "$1" true)"
   if tar --version 2>/dev/null | grep -q GNU; then
-    "$RUNTIME" export "$cid" | tar -x -C "$2" --wildcards 'var/lib/pacman/local/*' 'usr/lib/lib*.so*' 2>/dev/null || true
+    "$RUNTIME" export "$cid" | tar -x -C "$2" --wildcards 'var/lib/pacman/local/*' 'usr/lib/lib*.so*' 'usr/share/libalpm/hooks/*' 2>/dev/null || true
   else
-    "$RUNTIME" export "$cid" | tar -x -C "$2" --include 'var/lib/pacman/local/*' --include 'usr/lib/lib*.so*' 2>/dev/null || true
+    "$RUNTIME" export "$cid" | tar -x -C "$2" --include 'var/lib/pacman/local/*' --include 'usr/lib/lib*.so*' --include 'usr/share/libalpm/hooks/*' 2>/dev/null || true
   fi
   "$RUNTIME" rm "$cid" >/dev/null
 }
@@ -100,10 +100,25 @@ export_rootfs "$CURRENT" "$ROOT/target/rootfs-current"
 export_rootfs "$OLD" "$ROOT/target/rootfs-2021"
 echo "current glibc: $(grep -A1 '%VERSION%' "$ROOT"/target/rootfs-current/var/lib/pacman/local/glibc-*/desc | tail -1)"
 echo "2021 glibc:    $(grep -A1 '%VERSION%' "$ROOT"/target/rootfs-2021/var/lib/pacman/local/glibc-*/desc | tail -1)"
+# Every .hook the current image ships parses (pkg-hooks' real-hooks test).
+OMARCHY_HOOKS_ROOT="$ROOT/target/rootfs-current" cargo test -q -p pkg-hooks --test real_hooks
 
 step "status / check on the current system (expected: safe)"
 "$CLI" "${CLI_ARGS[@]}" --root "$ROOT/target/rootfs-current" status
 "$CLI" "${CLI_ARGS[@]}" --root "$ROOT/target/rootfs-current" check xz
+# The hook preview: a hook of the system that the plan triggers by name, one
+# by a file the package ships (fetched from the ring), one it does not.
+mkdir -p "$ROOT/target/rootfs-current/usr/share/libalpm/hooks" "$ROOT/target/rootfs-current/etc/pacman.d/hooks"
+printf '[Trigger]\nType = Package\nOperation = Install\nOperation = Upgrade\nTarget = xz\n[Action]\nDescription = By name\nWhen = PostTransaction\nExec = /usr/bin/true\n' > "$ROOT/target/rootfs-current/usr/share/libalpm/hooks/10-by-name.hook"
+printf '[Trigger]\nType = Path\nOperation = Install\nOperation = Upgrade\nTarget = usr/bin/xz\n[Action]\nDescription = By path\nWhen = PreTransaction\nExec = /usr/bin/true\n' > "$ROOT/target/rootfs-current/etc/pacman.d/hooks/20-by-path.hook"
+printf '[Trigger]\nType = Package\nOperation = Remove\nTarget = xz\n[Action]\nWhen = PostTransaction\nExec = /usr/bin/true\n' > "$ROOT/target/rootfs-current/etc/pacman.d/hooks/30-not-this.hook"
+hooks_json="$("$CLI" "${CLI_ARGS[@]}" --root "$ROOT/target/rootfs-current" --json check xz)"
+python3 -c 'import json,sys; h={x["hook"]: x for x in json.load(sys.stdin)["hooks"]}; assert {"10-by-name.hook","20-by-path.hook"} <= set(h) and "30-not-this.hook" not in h, h; assert h["10-by-name.hook"]["matched"]=="package" and h["20-by-path.hook"]["matched"]=="path" and h["20-by-path.hook"]["when"]=="pre", h' <<<"$hooks_json" || { echo "hook preview is off: $hooks_json"; exit 1; }
+text_check="$("$CLI" "${CLI_ARGS[@]}" --root "$ROOT/target/rootfs-current" check xz)"
+grep -q "Hooks pacman would run" <<<"$text_check" || { echo "hook preview missing from the text output: $text_check"; exit 1; }
+# A typo in the ring is refused before any request.
+bad_ring="$("$CLI" "${CLI_ARGS[@]}" --root "$ROOT/target/rootfs-current" --ring stabel status 2>&1 || true)"
+grep -q "ring must be edge, rc or stable" <<<"$bad_ring" || { echo "a bad ring must be refused: $bad_ring"; exit 1; }
 "$CLI" "${CLI_ARGS[@]}" --root "$ROOT/target/rootfs-current" install xz --dry-run | grep -q '^Would run: pacman -U' || { echo "dry-run did not produce a pacman -U command"; exit 1; }
 
 step "check on the January 2021 system (expected: BLOCKED, exit 2)"

@@ -1,0 +1,27 @@
+# /etc/omarchy-cli/config.toml — the thin client's settings. Every key is
+# optional; what is missing takes the default shown. Command-line flags
+# (--ring, --api, --pool, --arch, --root) override the file for one run.
+
+# The index API the client asks about releases, dependency graphs and
+# advisories, and the static origin pacman downloads packages from
+# (the pool's custom domain). Both move to omarchy.org with the project.
+api = "https://pkgs.firemanxbr.org"
+pool = "https://pool.firemanxbr.org"
+
+# The ring this machine follows: edge (upstream within hours, nothing
+# checked yet), rc (a day later, after a real pacman and an ABI check
+# on both architectures), stable (what stayed healthy in rc for another
+# day). The client refuses anything else.
+ring = "stable"
+
+# The repository name as written in pacman.conf ([omarchy-…-<ring>]).
+repo = "omarchy"
+
+# The architecture this machine installs; defaults to the one the binary
+# runs on. x86_64 or aarch64.
+# arch = "x86_64"
+
+# The filesystem root. Only for checking an exported rootfs (its
+# /var/lib/pacman/local, its libraries, its libalpm hooks) instead of the
+# running system.
+# root = "/"
