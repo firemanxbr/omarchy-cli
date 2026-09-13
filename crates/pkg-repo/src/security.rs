@@ -27,6 +27,9 @@ pub struct SecurityOptions {
     pub debian: Option<PathBuf>,
     pub kev: Option<PathBuf>,
     pub epss: Option<PathBuf>,
+    /// Ask OSV about what the served packages embed (Go modules, crates);
+    /// the directory caches vulnerability records. `None` skips OSV.
+    pub osv_cache: Option<PathBuf>,
     pub rings: Vec<String>,
     pub dry_run: bool,
 }
@@ -36,6 +39,7 @@ pub struct SecurityReport {
     pub objects: usize,
     pub arch_advisories: usize,
     pub debian_advisories: usize,
+    pub osv_advisories: usize,
     pub matches_vulnerable: usize,
     pub matches_fixed: usize,
     pub cves: usize,
@@ -429,6 +433,25 @@ pub fn run(api: &Api, opts: &SecurityOptions) -> Result<SecurityReport, RepoErro
         advisories.extend(adv);
         matches.extend(m);
     }
+    // What the packages embed: OSV names Go modules and crates, the pool
+    // names the Arch packages that ship them.
+    if let Some(cache) = &opts.osv_cache {
+        let components = crate::osv::served_components(api)?;
+        let by_sha: BTreeMap<String, (String, String)> = objects
+            .iter()
+            .map(|o| (o.sha256.clone(), (o.name.clone(), o.version.clone())))
+            .collect();
+        let (adv, m) = crate::osv::match_osv(
+            &components,
+            &by_sha,
+            |chunk| crate::osv::query_batch(api, chunk),
+            |id| crate::osv::vuln_details(api, cache, id),
+        )?;
+        tracing::info!(components = components.len(), advisories = adv.len(), "osv");
+        report.osv_advisories = adv.len();
+        advisories.extend(adv);
+        matches.extend(m);
+    }
     report.matches_vulnerable = matches.iter().filter(|m| m.status == "vulnerable").count();
     report.matches_fixed = matches.iter().filter(|m| m.status == "fixed").count();
 
@@ -437,8 +460,8 @@ pub fn run(api: &Api, opts: &SecurityOptions) -> Result<SecurityReport, RepoErro
     report.kev = cves.iter().filter(|c| c.kev).count();
 
     println!(
-        "{} objects · {} Arch + {} Debian advisories · {} vulnerable / {} fixed matches · {} CVEs, {} exploited in the wild",
-        report.objects, report.arch_advisories, report.debian_advisories, report.matches_vulnerable, report.matches_fixed, report.cves, report.kev
+        "{} objects · {} Arch + {} Debian + {} OSV advisories · {} vulnerable / {} fixed matches · {} CVEs, {} exploited in the wild",
+        report.objects, report.arch_advisories, report.debian_advisories, report.osv_advisories, report.matches_vulnerable, report.matches_fixed, report.cves, report.kev
     );
     if opts.dry_run {
         print_dry_run(&objects, &advisories, &matches);
@@ -461,11 +484,11 @@ pub fn run(api: &Api, opts: &SecurityOptions) -> Result<SecurityReport, RepoErro
         "status": "ok",
         "summary": format!(
             "{} advisories matched: {} objects vulnerable ({} packages), {} CVEs exploited in the wild",
-            report.arch_advisories + report.debian_advisories, report.matches_vulnerable, vulnerable_names.len(), report.kev
+            report.arch_advisories + report.debian_advisories + report.osv_advisories, report.matches_vulnerable, vulnerable_names.len(), report.kev
         ),
         "duration_ms": u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
         "payload": {
-            "objects": report.objects, "arch_advisories": report.arch_advisories, "debian_advisories": report.debian_advisories,
+            "objects": report.objects, "arch_advisories": report.arch_advisories, "debian_advisories": report.debian_advisories, "osv_advisories": report.osv_advisories,
             "vulnerable_objects": report.matches_vulnerable, "vulnerable_packages": vulnerable_names.len(),
             "fixed_matches": report.matches_fixed, "cves": report.cves, "kev": report.kev, "run_at": run_at,
         }

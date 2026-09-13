@@ -231,6 +231,16 @@ checked. Runs in a few seconds; the `promote` job runs it for both architectures
 
 ## Security matching
 
+OSV: `cargo test -p pkg-repo osv` covers the matcher (a hit becomes an exact
+advisory against every Arch package that embeds the component, one per
+package; severities from the database's word, else a coarse reading of the
+CVSS v3/v4 vector; Go versions lose their `v`); `cargo test -p pkg-repo osv --
+--ignored` asks the real API about an old `golang.org/x/crypto` and caches
+the record. The worker test indexes a manifest with components and checks
+`GET /security/components` lists them once a ring serves the package.
+
+### Trackers
+
 ```bash
 curl -sfL https://security.archlinux.org/issues/all.json -o arch.json
 curl -sfL https://security-tracker.debian.org/tracker/data/json -o debian.json

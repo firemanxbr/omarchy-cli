@@ -8,7 +8,7 @@ import type { RunningVersion } from "../meta";
 
 const BODY = String.raw`
   <h1>Security</h1>
-  <p class="lede">Public advisories matched against what each ring serves — the <a href="https://security.archlinux.org">Arch Security Tracker</a> for exact matches on Arch's own versions, the <a href="https://security-tracker.debian.org">Debian Security Tracker</a> for the same upstream projects where Arch has no advisory yet, <a href="https://www.cisa.gov/known-exploited-vulnerabilities-catalog">CISA KEV</a> for what is exploited in the wild and <a href="https://www.first.org/epss/">EPSS</a> for how likely exploitation is. A package with an open advisory also <em>exposes</em> what depends on it — declared, or by loading one of its libraries. Fixes do not wait for the soak: when <code>edge</code> serves a clean newer version of a package with a confident advisory (medium or worse, or exploited in the wild), the fast-track pulls it into <code>rc</code> and <code>stable</code> with the usual health check and rollback; <code>omarchy-cli security</code> shows what applies to a machine.</p>
+  <p class="lede">Public advisories matched against what each ring serves — the <a href="https://security.archlinux.org">Arch Security Tracker</a> for exact matches on Arch's own versions, the <a href="https://security-tracker.debian.org">Debian Security Tracker</a> for the same upstream projects where Arch has no advisory yet, <a href="https://osv.dev">OSV</a> for the Go modules and crates.io crates a statically linked binary embeds (no soname reveals those; the package page lists them), <a href="https://www.cisa.gov/known-exploited-vulnerabilities-catalog">CISA KEV</a> for what is exploited in the wild and <a href="https://www.first.org/epss/">EPSS</a> for how likely exploitation is. A package with an open advisory also <em>exposes</em> what depends on it — declared, or by loading one of its libraries. Fixes do not wait for the soak: when <code>edge</code> serves a clean newer version of a package with a confident advisory (medium or worse, or exploited in the wild), the fast-track pulls it into <code>rc</code> and <code>stable</code> with the usual health check and rollback; <code>omarchy-cli security</code> shows what applies to a machine.</p>
   <form class="searchbar" onsubmit="return false">
     <div class="choice" id="pick-ring"></div>
     <div class="choice" id="pick-arch"></div>
@@ -20,7 +20,7 @@ const BODY = String.raw`
 
   <section>
     <h2>Packages with open advisories</h2>
-    <p class="sub"><b>exact</b>: the tracker knows this distribution's version. <b>name-version</b>: Debian fixed it in a version newer than ours. <b>name-only</b>: still open upstream, no version to compare — possibly affected. <b>Fixed in</b> lists rings already serving a version with no open advisory (the fast-track candidate).</p>
+    <p class="sub"><b>exact</b>: the tracker knows this distribution's version, or the build information names the embedded module's version. <b>name-version</b>: Debian fixed it in a version newer than ours. <b>name-only</b>: still open upstream, no version to compare — possibly affected. <b>Fixed in</b> lists rings already serving a version with no open advisory (the fast-track candidate).</p>
     <div class="table-wrap"><table id="vuln"><thead><tr><th>Severity</th><th>Package</th><th>Version</th><th>Advisories</th><th>Confidence</th><th>Exposes</th><th>Fixed in</th></tr></thead><tbody></tbody></table></div>
   </section>
 `;
@@ -68,7 +68,7 @@ const SCRIPT = String.raw`
         var v = r.v;
         return '<tr><td>' + sev(r.worst) + (r.kev ? ' <span class="pill error" title="in CISA KEV">exploited</span>' : '') + (r.epss >= 0.1 ? ' <span class="pill warn" title="EPSS ' + (r.epss * 100).toFixed(0) + '%">epss ' + (r.epss * 100).toFixed(0) + '%</span>' : '') + '</td>' +
           '<td><a href="/package/' + encodeURIComponent(v.name) + '?ring=' + ring + '&arch=' + arch + '"><b>' + esc(v.name) + '</b></a> <span class="src">' + esc(v.source) + '</span></td><td class="mono">' + esc(v.version) + '</td>' +
-          '<td>' + r.advs.map(function (a) { return '<a class="run" href="' + esc(a.url) + '">' + esc(a.id.replace(/^(arch|debian):/, "").replace(/:.*$/, "")) + '</a>' + (a.fixed ? ' <span class="muted">fixed in ' + esc(a.fixed) + '</span>' : ''); }).join("<br>") + '</td>' +
+          '<td>' + r.advs.map(function (a) { return '<a class="run" href="' + esc(a.url) + '">' + esc(a.id.replace(/^(arch|debian|osv):/, "").replace(/:[^:]*$/, "")) + '</a>' + (a.fixed ? ' <span class="muted">fixed in ' + esc(a.fixed) + '</span>' : ''); }).join("<br>") + '</td>' +
           '<td>' + [...new Set(r.advs.map(function (a) { return a.match; }))].join(", ") + '</td>' +
           '<td>' + (v.exposure.declared || v.exposure.loads ? num(v.exposure.declared) + ' declared · ' + num(v.exposure.loads) + ' load it' : '<span class="muted">nothing</span>') + '</td>' +
           '<td>' + (v.fixed_in.length ? v.fixed_in.map(function (f) { return '<a href="/package/' + encodeURIComponent(v.name) + '?ring=' + f.ring + '&arch=' + arch + '">' + f.ring + ' ' + esc(f.version) + '</a>'; }).join(", ") : '<span class="muted">—</span>') + '</td></tr>';
