@@ -52,6 +52,7 @@ Promoting a release copies and re-uploads most of that data, so a bump takes
 |---|---|
 | `packages` | immutable rows keyed by `sha256`; `manifest_json` holds the full manifest |
 | `package_provides` / `package_requires` / `package_files` | normalized graph for queries |
+| `package_components` | what a package's statically linked binaries embed — Go modules (`debug/buildinfo`), crates.io crates (`cargo-auditable`) — one row per module or crate, for advisory matching against language ecosystems |
 | `releases` | `(ring, seq)` with `created_at`, optional `parent_id`, a note, the stored summary (`package_count`, `bytes`, `sources`) and `checkpoint` |
 | `ring_packages` | `(ring, package_id)` — what each ring serves now; every read of a head |
 | `release_deltas` | `(release_id, package_id, op)` — what a release added or removed against its parent |
@@ -192,6 +193,16 @@ per `(soname, namespace)` since `GLIBC_2.34` subsumes `GLIBC_2.14`.
 The manifest carries everything `repo-add` puts in a `desc` file (`pkgbase`,
 `builddate`, `packager`, `makedepends`, `filename`, …) so databases can be rendered
 from the index alone.
+
+Statically linked binaries reveal nothing through sonames, so the extractor
+also reads what they embed (`components`): the Go modules a Go binary was
+built with (`debug/buildinfo`, present in every Go binary since 1.12 — the
+`modinfo` string between its sentinels, replacements applied) and the crates a
+Rust binary was built with when the packager used `cargo-auditable` (the
+`.dep-v0` ELF section, zlib-compressed JSON; Arch's own Rust packages do not
+carry it, the factory's recipes could). Named the way OSV names them (`Go`,
+`crates.io`), one index row per module or crate, shown on the package page as
+*Embedded libraries*.
 
 ## Database generation (`crates/pkg-repo`)
 

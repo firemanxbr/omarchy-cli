@@ -14,6 +14,13 @@
         "type": "string"
       }
     },
+    "components": {
+      "description": "What the package's statically linked binaries embed: the Go modules\n(`debug/buildinfo`) and the crates.io crates (`cargo-auditable`) they\nwere built with. No soname reveals a vendored library; advisories\nagainst these reach the package through this list.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Component"
+      }
+    },
     "conflicts": {
       "type": "array",
       "items": {
@@ -123,6 +130,30 @@
     "pkginfo"
   ],
   "$defs": {
+    "Component": {
+      "description": "A library a binary embeds, named the way its ecosystem's advisory feed does.",
+      "type": "object",
+      "properties": {
+        "ecosystem": {
+          "description": "`Go` or `crates.io` (OSV's ecosystem names).",
+          "type": "string"
+        },
+        "name": {
+          "description": "The module path (`golang.org/x/crypto`) or the crate name (`openssl`).",
+          "type": "string"
+        },
+        "version": {
+          "description": "As the ecosystem writes it: `v0.21.0` for Go, `0.10.64` for a crate.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "ecosystem",
+        "name",
+        "version"
+      ]
+    },
     "DependencyRule": {
       "description": "A single dependency or capability.\n\nThe optional `symbol_version` captures glibc-style symbol version needs\n(`libc.so.6(GLIBC_2.38)`) that come from the ELF `.gnu.version_r` section.",
       "type": "string"

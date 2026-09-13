@@ -28,6 +28,8 @@ zstd = "0.13"
 xz2 = "0.1"
 # ELF parsing
 goblin = { version = "0.10", default-features = false, features = ["elf32", "elf64", "endian_fd", "std"] }
+# cargo-auditable's .dep-v0 section is zlib-compressed JSON
+flate2 = "1"
 
 [lints]
 workspace = true

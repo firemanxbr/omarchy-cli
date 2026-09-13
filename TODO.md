@@ -16,10 +16,6 @@ request (see [CONTRIBUTING.md](CONTRIBUTING.md)), and keep
       trackers, KEV and EPSS. OSV.dev (GHSA, PyPI, crates.io, Go, npm) would add
       advisories for packages whose upstream is a language ecosystem — needs a
       package → ecosystem/name mapping (the `url` in `.PKGINFO` is a start).
-- [ ] **Statically linked binaries.** Go binaries embed their module list
-      (`debug/buildinfo`), Rust ones only with `cargo-auditable`; extract it in
-      `pkg-extract` so CVEs in vendored crates/modules are visible, since no
-      soname reveals them.
 
 - [ ] **ABI gate on real installations.** The gate checks the upgrades against the
       official base image; run it also against an exported Omarchy installation
@@ -102,7 +98,9 @@ stored as deltas with checkpoints every 24th · OPR provenance (Omarchy's own
 or AUR-synced, per package; the AUR count in stable on the overview) ·
 security regressions block a promotion · promotion and rollback per
 architecture · the client's hook preview, config example and ring check ·
-`any` packages stored twice, counted on the overview.
+`any` packages stored twice, counted on the overview · what statically linked
+binaries embed (Go modules, cargo-auditable crates) in the manifest and the
+index.
 
 ## Factory findings (2026-09-12)
 

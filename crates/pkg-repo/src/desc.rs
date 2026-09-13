@@ -103,6 +103,7 @@ mod tests {
                 "/.BUILDINFO".into(),
             ],
             backup: vec![],
+            components: vec![],
         }
     }
 

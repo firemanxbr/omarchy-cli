@@ -89,6 +89,12 @@ const PACKAGE_BODY = String.raw`
     <div class="chart"><h3>Provides</h3><div id="provides"></div></div>
   </div>
 
+  <section id="components-section" hidden>
+    <h2>Embedded libraries <span id="components-count" class="muted"></span></h2>
+    <p class="sub">What the package's statically linked binaries were built with — Go modules from the binary's build information, crates.io crates when the packager used <code>cargo-auditable</code>. No soname reveals these; the security layer matches advisories against them.</p>
+    <div class="table-wrap"><table id="components"><thead><tr><th>Ecosystem</th><th>Name</th><th>Version</th></tr></thead><tbody></tbody></table></div>
+  </section>
+
   <section>
     <h2>Files <button class="choice-btn" id="load-files">show</button></h2>
     <pre id="files" class="muted">not loaded</pre>
@@ -180,6 +186,7 @@ const PACKAGE_SCRIPT = String.raw`
     }).join("");
     graph(d);
     renderSecurity(d);
+    renderComponents(d);
     $("#deps").innerHTML = d.depends.length ? '<ul class="plain">' + d.depends.map(function (x) { return '<li>' + (x.provider ? link(x.provider.name) + ' <span class="muted">' + esc(x.provider.version) + '</span>' + (x.provider.name !== x.name ? ' <span class="muted">provides ' + esc(x.name) + '</span>' : '') : esc(x.name) + ' <span class="muted">not in this ring</span>') + '</li>'; }).join("") + '</ul>' : '<div class="empty">no declared dependencies</div>';
     $("#links").innerHTML = d.links.length ? '<ul class="plain">' + d.links.map(function (x) { return '<li><span class="mono">' + esc(x.soname) + '</span> <span class="muted">← ' + (x.provider ? link(x.provider.name) : "not in this ring") + '</span></li>'; }).join("") + '</ul>' : '<div class="empty">no ELF binaries, or nothing dynamically linked</div>';
     $("#rb-count").textContent = d.required_by.length + (d.required_by.length >= 400 ? "+" : "");
@@ -203,6 +210,15 @@ const PACKAGE_SCRIPT = String.raw`
     }).join("") + '</ul>' : '<div class="empty">nothing it depends on or loads has an open advisory</div>';
   }
 
+  function renderComponents(d) {
+    var c = (d.manifest && d.manifest.components) || []; if (!c.length) return;
+    $("#components-section").hidden = false;
+    $("#components-count").textContent = "(" + c.length + ")";
+    pager("#components", c, function (x) {
+      var href = x.ecosystem === "Go" ? "https://pkg.go.dev/" + x.name + "@" + x.version : x.ecosystem === "crates.io" ? "https://crates.io/crates/" + x.name + "/" + x.version : "";
+      return '<tr><td>' + esc(x.ecosystem) + '</td><td>' + (href ? '<a href="' + esc(href) + '">' + esc(x.name) + '</a>' : esc(x.name)) + '</td><td class="mono">' + esc(x.version) + '</td></tr>';
+    }, { n: 25 });
+  }
   $("#load-files").onclick = function () {
     $("#files").textContent = "loading…";
     busy(fetch("/api/v1/package/" + encodeURIComponent(name) + "/files?ring=" + ring + "&arch=" + arch)).then(function (r) { return r.json(); }).then(function (d) {

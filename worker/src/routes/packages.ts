@@ -25,6 +25,8 @@ interface Manifest {
   files?: string[];
   /** The `.PKGINFO` fields as written by makepkg; `provides` there is what pacman resolves through. */
   pkginfo?: { provides?: string[] };
+  /** Go modules and crates.io crates the binaries embed (statically linked). */
+  components?: { ecosystem: string; name: string; version: string }[];
 }
 
 const OPS = [">=", "<=", "=", ">", "<"];
@@ -111,9 +113,15 @@ export async function handlePostPackage(url: URL, request: Request, env: Env): P
       stmts.push(req.bind(id, r.name, r.constraint ? r.constraint.op + r.constraint.version : null, r.symbol_version, kind));
     }
   }
+  // What the binaries embed, one row per module or crate (the security
+  // layer's OSV matching reads this; the manifest keeps the list too).
+  const comp = env.DB.prepare("INSERT OR IGNORE INTO package_components (package_id, ecosystem, name, version) VALUES (?, ?, ?, ?)");
+  for (const c of m.components ?? []) {
+    if (typeof c?.ecosystem === "string" && typeof c.name === "string" && typeof c.version === "string") stmts.push(comp.bind(id, c.ecosystem, c.name, c.version));
+  }
   for (let i = 0; i < stmts.length; i += 100) await env.DB.batch(stmts.slice(i, i + 100));
 
-  return json({ id, sha256: m.sha256, status: "indexed" }, 201);
+  return json({ id, sha256: m.sha256, status: "indexed", components: (m.components ?? []).length }, 201);
 }
 
 export async function handleGetPackage(sha256: string, env: Env): Promise<Response> {

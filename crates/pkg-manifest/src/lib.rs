@@ -15,7 +15,7 @@ pub mod manifest;
 pub mod vercmp;
 
 pub use dependency::{DependencyRule, VersionConstraint, VersionOp};
-pub use manifest::{PackageManifest, PkgInfoFields, RepoIndex, MANIFEST_SCHEMA_VERSION};
+pub use manifest::{Component, PackageManifest, PkgInfoFields, RepoIndex, MANIFEST_SCHEMA_VERSION};
 pub use vercmp::{vercmp, Version};
 
 /// The release this binary belongs to: the tag the Release workflow passes as
