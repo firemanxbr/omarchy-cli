@@ -1,7 +1,7 @@
 import { signingEnabled, detachedSignature } from "../signing";
 import { isRing, json, type Env, type Ring } from "../index";
 import { artifactKey, isRepoArch, REPO_ARCHES, SHORT } from "../r2";
-import { releaseManifests, releaseSummary, releaseSources, ringHead, type ManifestDetail, type ReleaseRow } from "../db";
+import { releaseManifests, releaseSummary, releaseSources, ringHead, ringMembers, releaseMembers, ensureCheckpoint, CHECKPOINT_EVERY, type ManifestDetail, type ReleaseRow } from "../db";
 
 interface CreateRelease {
   ring: string;
@@ -64,6 +64,19 @@ export async function handleCreateRelease(request: Request, env: Env): Promise<R
     .first<{ seq: number }>();
   const seq = seqRow!.seq;
 
+  // Where the selection starts: the ring's own live rows (a sync, a
+  // publish), another ring's (a promotion), or an older release's
+  // checkpoint rows (a rollback — materialised first if it has none).
+  let baseSql = "(SELECT package_id FROM ring_packages WHERE ring = '__none__')";
+  if (source && !(parent && source.id === parent.id)) {
+    const asHead = await env.DB.prepare("SELECT ring FROM ring_heads WHERE release_id = ?").bind(source.id).first<{ ring: Ring }>();
+    if (asHead) baseSql = ringMembers(asHead.ring);
+    else {
+      await ensureCheckpoint(env, source.id);
+      baseSql = `(SELECT package_id FROM release_packages WHERE release_id = ${source.id})`;
+    }
+  } else if (parent) baseSql = ringMembers(ring);
+
   const created = await env.DB.prepare(
     "INSERT INTO releases (ring, seq, parent_id, source_id, note) VALUES (?, ?, ?, ?, ?) RETURNING id",
   )
@@ -71,40 +84,36 @@ export async function handleCreateRelease(request: Request, env: Env): Promise<R
     .first<{ id: number }>();
   const id = created!.id;
 
-  // 1. The added objects go in first, in a few statements (json_each over a
-  //    couple of thousand ids each keeps every statement well under D1's
-  //    size limit). 2. Then the base selection is copied minus names being
-  //    removed (within remove_arch) and minus (name, repo_arch) pairs the new
-  //    release already holds — a NOT EXISTS resolved through the
-  //    (name, repo_arch) index and the release_packages primary key, so a
-  //    15k-package base with a 13k-package add stays linear. The old form
-  //    re-evaluated a json_each over every added id per base row.
-  const stmts: D1PreparedStatement[] = [];
-  for (let i = 0; i < added.length; i += 2000) {
-    stmts.push(
-      env.DB.prepare("INSERT OR IGNORE INTO release_packages (release_id, package_id) SELECT ?, value FROM json_each(?)").bind(id, JSON.stringify(added.slice(i, i + 2000))),
-    );
-  }
-  if (base) {
-    stmts.push(
-      env.DB.prepare(
-        `INSERT OR IGNORE INTO release_packages (release_id, package_id)
-         SELECT ?1, rp.package_id FROM release_packages rp JOIN packages p ON p.id = rp.package_id
-          WHERE rp.release_id = ?2
-            AND NOT (p.name IN (SELECT value FROM json_each(?3)) AND (?4 IS NULL OR p.repo_arch = ?4))
-            AND NOT EXISTS (
-              SELECT 1 FROM packages q JOIN release_packages n ON n.package_id = q.id AND n.release_id = ?1
-               WHERE q.name = p.name AND q.repo_arch = p.repo_arch)`,
-      ).bind(id, base.id, JSON.stringify(body.remove ?? []), removeArch),
-    );
-  }
-  stmts.push(
+  // The target selection: the base minus the names being removed (within
+  // remove_arch) minus any (name, repo_arch) an added package replaces,
+  // plus the adds. The delta is the target against what the ring serves
+  // now, both ways — the only rows a release writes (migration 0017) —
+  // and the ring's live rows move by exactly that delta.
+  const own = ringMembers(ring);
+  const target = `SELECT b.package_id FROM ${baseSql} b JOIN packages p ON p.id = b.package_id
+     WHERE NOT (p.name IN (SELECT value FROM json_each(?1)) AND (?2 IS NULL OR p.repo_arch = ?2))
+       AND NOT EXISTS (SELECT 1 FROM packages q WHERE q.id IN (SELECT value FROM json_each(?3)) AND q.name = p.name AND q.repo_arch = p.repo_arch)
+     UNION SELECT value FROM json_each(?3)`;
+  const args = [JSON.stringify(body.remove ?? []), removeArch, JSON.stringify(added)];
+  const stmts: D1PreparedStatement[] = [
+    env.DB.prepare(`INSERT INTO release_deltas (release_id, package_id, op) SELECT ?4, package_id, 'add' FROM (SELECT package_id FROM (${target}) EXCEPT SELECT package_id FROM ${own})`).bind(...args, id),
+    env.DB.prepare(`INSERT INTO release_deltas (release_id, package_id, op) SELECT ?4, package_id, 'remove' FROM (SELECT package_id FROM ${own} EXCEPT SELECT package_id FROM (${target}))`).bind(...args, id),
+    env.DB.prepare("DELETE FROM ring_packages WHERE ring = ?1 AND package_id IN (SELECT package_id FROM release_deltas WHERE release_id = ?2 AND op = 'remove')").bind(ring, id),
+    env.DB.prepare("INSERT OR IGNORE INTO ring_packages (ring, package_id) SELECT ?1, package_id FROM release_deltas WHERE release_id = ?2 AND op = 'add'").bind(ring, id),
     env.DB.prepare(
       "INSERT INTO ring_heads (ring, release_id) VALUES (?, ?) ON CONFLICT(ring) DO UPDATE SET release_id = excluded.release_id",
     ).bind(ring, id),
-  );
+  ];
+  // A checkpoint — the full membership written out — for the first release
+  // of a ring and then every CHECKPOINT_EVERY: what bounds a reconstruction.
+  const lastCheckpoint = await env.DB.prepare("SELECT COALESCE(MAX(seq), 0) AS seq FROM releases WHERE ring = ? AND checkpoint = 1").bind(ring).first<{ seq: number }>();
+  const checkpoint = !parent || seq - (lastCheckpoint?.seq ?? 0) >= CHECKPOINT_EVERY;
+  if (checkpoint) {
+    stmts.push(env.DB.prepare("INSERT OR IGNORE INTO release_packages (release_id, package_id) SELECT ?, package_id FROM ring_packages WHERE ring = ?").bind(id, ring));
+    stmts.push(env.DB.prepare("UPDATE releases SET checkpoint = 1 WHERE id = ?").bind(id));
+  }
   // The objects this release pins are "released" from now on (the overview
-  // counts them without touching release_packages again).
+  // counts them without touching the membership again).
   for (let i = 0; i < added.length; i += 2000) {
     stmts.push(env.DB.prepare("UPDATE packages SET released = 1 WHERE released = 0 AND id IN (SELECT value FROM json_each(?))").bind(JSON.stringify(added.slice(i, i + 2000))));
   }
@@ -148,19 +157,25 @@ export async function handleReleaseDiff(ring: string, url: URL, env: Env): Promi
   if (from && !fromRow) return json({ error: `release ${from} does not exist` }, 404);
   const arch = url.searchParams.get("arch");
   if (arch !== null && !isRepoArch(arch)) return json({ error: "unknown arch" }, 400);
-  // A release inside retention keeps its membership; one GC pruned has a
-  // package_count on its row but no rows to compare.
+  // A release inside retention is a head, a checkpoint or reconstructable
+  // from one; GC prunes the checkpoints and deltas of older ones, and such
+  // a release keeps its summary but has no list to compare.
+  const members: Record<number, string> = {};
   for (const r of [toRow, fromRow]) {
-    if (!r || !r.package_count) continue;
-    const n = await env.DB.prepare("SELECT COUNT(*) AS n FROM release_packages WHERE release_id = ?").bind(r.id).first<{ n: number }>();
-    if (!n?.n) return json({ error: `release ${r.id} is outside retention: its package list was pruned, only its summary remains` }, 410);
+    if (!r) continue;
+    try {
+      members[r.id] = await releaseMembers(env, r.id);
+    } catch {
+      return json({ error: `release ${r.id} is outside retention: its package list was pruned, only its summary remains` }, 410);
+    }
   }
+  type Side = { name: string; arch: string; version: string; sha256: string; source: string };
   const side = (id: number) =>
     env.DB.prepare(
-      `SELECT p.name, p.repo_arch AS arch, p.version, p.sha256, p.source FROM release_packages rp JOIN packages p ON p.id = rp.package_id
-        WHERE rp.release_id = ?1 AND (?2 IS NULL OR p.repo_arch = ?2)`,
-    ).bind(id, arch).all<{ name: string; arch: string; version: string; sha256: string; source: string }>();
-  const [a, b] = await Promise.all([fromRow ? side(fromRow.id) : Promise.resolve({ results: [] as { name: string; arch: string; version: string; sha256: string; source: string }[] }), side(toRow.id)]);
+      `SELECT p.name, p.repo_arch AS arch, p.version, p.sha256, p.source FROM ${members[id]} rp JOIN packages p ON p.id = rp.package_id
+        WHERE (?1 IS NULL OR p.repo_arch = ?1)`,
+    ).bind(arch).all<Side>();
+  const [a, b] = await Promise.all([fromRow ? side(fromRow.id) : Promise.resolve({ results: [] as Side[] }), side(toRow.id)]);
   const key = (p: { name: string; arch: string }) => `${p.name}\0${p.arch}`;
   const before = new Map(a.results.map((p) => [key(p), p]));
   const after = new Map(b.results.map((p) => [key(p), p]));
@@ -212,10 +227,10 @@ export async function handleGetRelease(ring: string, url: URL, env: Env): Promis
   if (!release) return json({ error: pinned ? `release ${pinned} is not a ${ring} release` : `ring ${ring} has no release yet` }, 404);
 
   const total = await env.DB.prepare(
-    `SELECT COUNT(*) AS n FROM release_packages rp JOIN packages p ON p.id = rp.package_id
-      WHERE rp.release_id = ?1 AND (?2 IS NULL OR p.repo_arch = ?2)`,
+    `SELECT COUNT(*) AS n FROM ${await releaseMembers(env, release.id)} rp JOIN packages p ON p.id = rp.package_id
+      WHERE (?1 IS NULL OR p.repo_arch = ?1)`,
   )
-    .bind(release.id, arch)
+    .bind(arch)
     .first<{ n: number }>();
   const limitParam = url.searchParams.get("limit");
   const limit = limitParam ? Math.min(Math.max(1, Number(limitParam)), MAX_PAGE) : 0;

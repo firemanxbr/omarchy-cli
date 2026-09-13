@@ -16,6 +16,79 @@ export interface ReleaseRow {
   bytes?: number | null;
 }
 
+/** Checkpoint every this many releases of a ring (migration 0017): a reconstruction walks at most this many deltas. */
+export const CHECKPOINT_EVERY = 24;
+
+/**
+ * The SQL that lists what a ring serves now — its head's selection, kept
+ * live in ring_packages. A derived table: `JOIN ${ringMembers(ring)} rp ON
+ * rp.package_id = p.id`. Ring names come from the `Ring` enum, so inlining
+ * them is safe.
+ */
+export function ringMembers(ring: Ring): string {
+  return `(SELECT package_id FROM ring_packages WHERE ring = '${ring}')`;
+}
+
+/**
+ * The SQL that lists a release's package ids: the ring's live selection
+ * when the release is a head (no rows written, nothing reconstructed),
+ * otherwise its checkpoint rows, materialised first when it has none.
+ */
+export async function releaseMembers(env: Env, releaseId: number): Promise<string> {
+  const head = await env.DB.prepare("SELECT ring FROM ring_heads WHERE release_id = ?").bind(releaseId).first<{ ring: Ring }>();
+  if (head) return ringMembers(head.ring);
+  await ensureCheckpoint(env, releaseId);
+  return `(SELECT package_id FROM release_packages WHERE release_id = ${Math.floor(releaseId)})`;
+}
+
+/**
+ * Reconstructs a release that is not a checkpoint — the nearest checkpoint
+ * behind it, then each delta up to it — and writes its membership into
+ * release_packages so the SQL that reads a release by id works on it. A
+ * one-off cost the size of the selection, paid only when an older release
+ * is actually read (a pinned page, a diff, a rollback target).
+ */
+export async function ensureCheckpoint(env: Env, releaseId: number): Promise<void> {
+  type Row = { id: number; parent_id: number | null; checkpoint: number };
+  const start = await env.DB.prepare("SELECT id, parent_id, checkpoint FROM releases WHERE id = ?").bind(releaseId).first<Row>();
+  if (!start) throw new Error(`release ${releaseId} does not exist`);
+  if (start.checkpoint) return;
+  // A head that is not a checkpoint: its rows are the ring's live ones.
+  const head = await env.DB.prepare("SELECT ring FROM ring_heads WHERE release_id = ?").bind(releaseId).first<{ ring: Ring }>();
+  const chain: Row[] = [start];
+  let cur = start;
+  while (!cur.checkpoint && !head) {
+    if (cur.parent_id === null) throw new Error(`release ${releaseId} cannot be reconstructed: no checkpoint behind it`);
+    const parent = await env.DB.prepare("SELECT id, parent_id, checkpoint FROM releases WHERE id = ?").bind(cur.parent_id).first<Row>();
+    if (!parent) throw new Error(`release ${releaseId} cannot be reconstructed: release ${cur.parent_id} is gone`);
+    chain.push(parent);
+    cur = parent;
+    if (chain.length > CHECKPOINT_EVERY * 4) throw new Error(`release ${releaseId} cannot be reconstructed: no checkpoint within ${chain.length} releases`);
+  }
+  const ids = new Set<number>();
+  if (head) {
+    for (const r of (await env.DB.prepare("SELECT package_id FROM ring_packages WHERE ring = ?").bind(head.ring).all<{ package_id: number }>()).results) ids.add(r.package_id);
+  } else {
+    const base = chain[chain.length - 1];
+    for (const r of (await env.DB.prepare("SELECT package_id FROM release_packages WHERE release_id = ?").bind(base.id).all<{ package_id: number }>()).results) ids.add(r.package_id);
+    // Oldest first, the checkpoint itself excluded.
+    for (const r of chain.slice(0, -1).reverse()) {
+      const deltas = await env.DB.prepare("SELECT package_id, op FROM release_deltas WHERE release_id = ?").bind(r.id).all<{ package_id: number; op: string }>();
+      for (const d of deltas.results) {
+        if (d.op === "remove") ids.delete(d.package_id);
+        else ids.add(d.package_id);
+      }
+    }
+  }
+  const list = [...ids];
+  const stmts: D1PreparedStatement[] = [];
+  for (let i = 0; i < list.length; i += 2000) {
+    stmts.push(env.DB.prepare("INSERT OR IGNORE INTO release_packages (release_id, package_id) SELECT ?, value FROM json_each(?)").bind(releaseId, JSON.stringify(list.slice(i, i + 2000))));
+  }
+  stmts.push(env.DB.prepare("UPDATE releases SET checkpoint = 1 WHERE id = ?").bind(releaseId));
+  await env.DB.batch(stmts);
+}
+
 export async function ringHead(env: Env, ring: Ring): Promise<ReleaseRow | null> {
   return env.DB.prepare(
     "SELECT r.* FROM ring_heads h JOIN releases r ON r.id = h.release_id WHERE h.ring = ?",
@@ -51,24 +124,25 @@ export async function releaseManifests(
 ): Promise<unknown[]> {
   const arch = window.arch ?? null;
   const page = window.limit ? ` LIMIT ${Math.floor(window.limit)} OFFSET ${Math.floor(window.offset ?? 0)}` : "";
+  const members = await releaseMembers(env, releaseId);
   if (detail === "summary") {
     // Enough for status / list / search: ~100 bytes per package instead of ~800.
     const rows = await env.DB.prepare(
       `SELECT p.name, p.version, p.arch, p.repo_arch, p.filename, p.sha256, p.size_download, p.size_installed, p.source,
               json_extract(p.manifest_json, '$.description') AS description
-         FROM release_packages rp JOIN packages p ON p.id = rp.package_id
-        WHERE rp.release_id = ?1 AND (?2 IS NULL OR p.repo_arch = ?2) ORDER BY p.name, p.arch${page}`,
+         FROM ${members} rp JOIN packages p ON p.id = rp.package_id
+        WHERE (?1 IS NULL OR p.repo_arch = ?1) ORDER BY p.name, p.arch${page}`,
     )
-      .bind(releaseId, arch)
+      .bind(arch)
       .all();
     return rows.results;
   }
   const rows = await env.DB.prepare(
-    `SELECT p.id, p.manifest_json, p.source, p.repo_arch FROM release_packages rp
+    `SELECT p.id, p.manifest_json, p.source, p.repo_arch FROM ${members} rp
        JOIN packages p ON p.id = rp.package_id
-      WHERE rp.release_id = ?1 AND (?2 IS NULL OR p.repo_arch = ?2) ORDER BY p.name, p.arch${page}`,
+      WHERE (?1 IS NULL OR p.repo_arch = ?1) ORDER BY p.name, p.arch${page}`,
   )
-    .bind(releaseId, arch)
+    .bind(arch)
     .all<{ id: number; manifest_json: string; source: string; repo_arch: string }>();
   const out = rows.results.map((r) => {
     const m = JSON.parse(r.manifest_json) as { files?: unknown; source?: string; repo_arch?: string };
@@ -109,11 +183,8 @@ export async function releaseSummary(env: Env, releaseId: number): Promise<{ pac
   if (row && row.package_count !== null && row.bytes !== null) return { package_count: row.package_count, size_download: row.bytes };
   const fresh = await env.DB.prepare(
     `SELECT COUNT(*) AS package_count, COALESCE(SUM(p.size_download), 0) AS size_download
-       FROM release_packages rp JOIN packages p ON p.id = rp.package_id
-      WHERE rp.release_id = ?`,
-  )
-    .bind(releaseId)
-    .first<{ package_count: number; size_download: number }>();
+       FROM ${await releaseMembers(env, releaseId)} rp JOIN packages p ON p.id = rp.package_id`,
+  ).first<{ package_count: number; size_download: number }>();
   const out = fresh ?? { package_count: 0, size_download: 0 };
   await env.DB.prepare("UPDATE releases SET package_count = ?, bytes = ? WHERE id = ?").bind(out.package_count, out.size_download, releaseId).run();
   return out;
@@ -132,11 +203,9 @@ export async function releaseSources(env: Env, releaseId: number): Promise<Sourc
   if (row?.sources) return JSON.parse(row.sources) as SourceSlice[];
   const fresh = await env.DB.prepare(
     `SELECT p.source, p.repo_arch AS arch, COUNT(*) AS packages, COALESCE(SUM(p.size_download), 0) AS bytes
-       FROM release_packages rp JOIN packages p ON p.id = rp.package_id
-      WHERE rp.release_id = ? GROUP BY p.source, p.repo_arch ORDER BY p.repo_arch, p.source`,
-  )
-    .bind(releaseId)
-    .all<SourceSlice>();
+       FROM ${await releaseMembers(env, releaseId)} rp JOIN packages p ON p.id = rp.package_id
+      GROUP BY p.source, p.repo_arch ORDER BY p.repo_arch, p.source`,
+  ).all<SourceSlice>();
   await env.DB.prepare("UPDATE releases SET sources = ? WHERE id = ?").bind(JSON.stringify(fresh.results), releaseId).run();
   return fresh.results;
 }

@@ -1,5 +1,5 @@
 import { isRing, json, type Env } from "../index";
-import { ringHead } from "../db";
+import { ringHead, ringMembers } from "../db";
 import { REPO_ARCHES } from "../r2";
 
 const MAX_NODES = 2000;
@@ -31,8 +31,8 @@ export async function handleGraph(url: URL, env: Env): Promise<Response> {
        -- MATERIALIZED: the selection is referenced from the recursive step;
        -- without the hint SQLite re-evaluates it on every iteration, which
        -- took a 29k-package ring past 30 s.
-       sel(package_id) AS MATERIALIZED (SELECT rp.package_id FROM release_packages rp JOIN packages p ON p.id = rp.package_id
-                            WHERE rp.release_id = ?1 AND (?4 IS NULL OR p.repo_arch = ?4)),
+       sel(package_id) AS MATERIALIZED (SELECT rp.package_id FROM ${ringMembers(ring)} rp JOIN packages p ON p.id = rp.package_id
+                            WHERE (?3 IS NULL OR p.repo_arch = ?3)),
        -- The closure follows what pacman follows: declared dependencies
        -- (package names, or declared capabilities such as libcrypto.so=3-64)
        -- resolved through *declared* provides — never the sonames a binary
@@ -40,7 +40,7 @@ export async function handleGraph(url: URL, env: Env): Promise<Response> {
        -- count as a provider of libstdc++.so and pull half the ring in.
        closure(package_id) AS (
          SELECT p.id FROM packages p JOIN sel ON sel.package_id = p.id
-          WHERE p.name IN (SELECT value FROM json_each(?2))
+          WHERE p.name IN (SELECT value FROM json_each(?1))
          UNION
          SELECT pv.package_id FROM closure c
            JOIN package_requires rq ON rq.package_id = c.package_id AND rq.kind = 'depends'
@@ -49,9 +49,9 @@ export async function handleGraph(url: URL, env: Env): Promise<Response> {
            JOIN sel ON sel.package_id = pv.package_id
        )
      SELECT p.manifest_json FROM packages p WHERE p.id IN (SELECT package_id FROM closure)
-     ORDER BY p.name LIMIT ?3`,
+     ORDER BY p.name LIMIT ?2`,
   )
-    .bind(head.id, JSON.stringify(targets), MAX_NODES + 1, arch)
+    .bind(JSON.stringify(targets), MAX_NODES + 1, arch)
     .all<{ manifest_json: string }>();
 
   const packages = rows.results.slice(0, MAX_NODES).map((r) => JSON.parse(r.manifest_json));

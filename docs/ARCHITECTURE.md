@@ -29,7 +29,13 @@ Promoting a release copies and re-uploads most of that data, so a bump takes
 * **Releases** — a release is a pinned selection of package ids for one ring
   (`edge`, `rc`, `stable`). Promotion creates a new release for the target ring that
   points at the same selection: an index write, no bytes move. Rollback is the same
-  write pointing at an earlier selection; history is append-only.
+  write pointing at an earlier selection; history is append-only. Stored as
+  **deltas**: what a ring serves now lives in one table (`ring_packages`), a
+  release writes only what it changed against its parent (`release_deltas`), and
+  the full membership is written out for a *checkpoint* — the first release of a
+  ring, then every 24th, and any older release read by id (a pinned page, a diff,
+  a rollback target), reconstructed from the checkpoint behind it plus the deltas.
+  A release costs hundreds of rows, not thirty thousand (migration 0017).
 * **Generated pacman databases** — for each ring and source the publisher renders
   `omarchy-<source>-<ring>.db` and `.files` in `repo-add` format and uploads them;
   the Worker signs them with its own OpenPGP key (a secret that never leaves
@@ -46,8 +52,10 @@ Promoting a release copies and re-uploads most of that data, so a bump takes
 |---|---|
 | `packages` | immutable rows keyed by `sha256`; `manifest_json` holds the full manifest |
 | `package_provides` / `package_requires` / `package_files` | normalized graph for queries |
-| `releases` | `(ring, seq)` with `created_at`, optional `parent_id` and a note |
-| `release_packages` | `(release_id, package_id)` — the pinned selection |
+| `releases` | `(ring, seq)` with `created_at`, optional `parent_id`, a note, the stored summary (`package_count`, `bytes`, `sources`) and `checkpoint` |
+| `ring_packages` | `(ring, package_id)` — what each ring serves now; every read of a head |
+| `release_deltas` | `(release_id, package_id, op)` — what a release added or removed against its parent |
+| `release_packages` | `(release_id, package_id)` — the full selection of checkpoint releases only |
 | `ring_heads` | `ring → release_id` currently served |
 
 Migrations live in `worker/migrations/`.

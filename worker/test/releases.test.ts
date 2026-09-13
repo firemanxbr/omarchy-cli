@@ -173,9 +173,14 @@ describe("GET /releases/:ring/diff", () => {
     expect((await call("GET", "/releases/rc/diff?arch=mips")).status).toBe(400);
   });
 
-  it("answers 410 for a release whose membership GC pruned", async () => {
+  it("answers 410 for a release whose checkpoint GC pruned", async () => {
     const a = (await call("GET", "/releases/rc/history")).json.releases.at(-1);
-    await env.DB.prepare("DELETE FROM release_packages WHERE release_id = ?").bind(a.id).run();
+    // What GC does to a checkpoint nothing inside retention starts from.
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM release_packages WHERE release_id = ?").bind(a.id),
+      env.DB.prepare("DELETE FROM release_deltas WHERE release_id = ?").bind(a.id),
+      env.DB.prepare("UPDATE releases SET checkpoint = 0 WHERE id = ?").bind(a.id),
+    ]);
     const d = await call("GET", `/releases/rc/diff?from=${a.id}`);
     expect(d.status).toBe(410);
     expect(d.json.error).toMatch(/retention/);
@@ -252,5 +257,78 @@ describe("unchanged architectures", () => {
     const r2 = await call("POST", "/releases", { ring: "stable", remove: ["curl"] }, stable);
     expect(r2.json.unchanged_arches).toEqual([]);
     expect((await call("GET", "/releases/stable?fields=summary")).json.artifacts).toEqual([]);
+  });
+});
+
+describe("releases as deltas", () => {
+  it("writes only what changed, checkpoints every 24th release, and reconstructs any older one on demand", async () => {
+    const before = (await call("GET", "/releases/edge/history")).json.releases[0];
+    const deltas = async (id: number) => (await env.DB.prepare("SELECT op, COUNT(*) AS n FROM release_deltas WHERE release_id = ? GROUP BY op ORDER BY op").bind(id).all<{ op: string; n: number }>()).results;
+    const rows = async (id: number) => (await env.DB.prepare("SELECT COUNT(*) AS n FROM release_packages WHERE release_id = ?").bind(id).first<{ n: number }>())!.n;
+    // Take xz out of x86_64, put it back: two rows per release, never a copy of the selection.
+    const r1 = await call("POST", "/releases", { ring: "edge", remove: ["xz"], remove_arch: "x86_64" }, edge);
+    expect(r1.json.package_count).toBe(before.package_count - 1);
+    expect(await deltas(r1.json.release.id)).toEqual([{ op: "remove", n: 1 }]);
+    expect(await rows(r1.json.release.id)).toBe(0);
+    const xzNow = (await call("GET", "/releases/edge?fields=summary&arch=x86_64&release_id=" + before.id)).json.packages.find((p: any) => p.name === "xz");
+    const r2 = await call("POST", "/releases", { ring: "edge", add: [xzNow.sha256], remove_arch: "x86_64" }, edge);
+    expect(await deltas(r2.json.release.id)).toEqual([{ op: "add", n: 1 }]);
+    expect(r2.json.package_count).toBe(before.package_count);
+    // The ring's live rows are what the head serves.
+    const live = (await env.DB.prepare("SELECT COUNT(*) AS n FROM ring_packages WHERE ring = 'edge'").first<{ n: number }>())!.n;
+    expect(live).toBe(before.package_count);
+    // Reading `before` by id above reconstructed it: it is a checkpoint now, and it holds what it held.
+    const ck = await env.DB.prepare("SELECT checkpoint FROM releases WHERE id = ?").bind(before.id).first<{ checkpoint: number }>();
+    expect(ck!.checkpoint).toBe(1);
+    expect(await rows(before.id)).toBe(before.package_count);
+    // Twenty-odd more releases: the next checkpoint comes 24 after the last one (reads by id made some on demand above).
+    const ckBefore = (await env.DB.prepare("SELECT MAX(seq) AS seq FROM releases WHERE ring = 'edge' AND checkpoint = 1").first<{ seq: number }>())!.seq;
+    let last = r2.json.release;
+    for (let i = 0; i < 26; i++) {
+      const r = await call("POST", "/releases", { ring: "edge", remove: [i % 2 ? "xz" : "nothing"], remove_arch: "x86_64", ...(i % 2 ? {} : { add: [xzNow.sha256] }) }, edge);
+      expect(r.status).toBe(201);
+      last = r.json.release;
+    }
+    const hist = (await call("GET", "/releases/edge/history")).json.releases as { id: number; seq: number }[];
+    const cks = (await env.DB.prepare("SELECT seq FROM releases WHERE ring = 'edge' AND checkpoint = 1 ORDER BY seq").all<{ seq: number }>()).results.map((r) => r.seq);
+    expect(cks).toContain(1);
+    expect(cks).toContain(ckBefore + 24);
+    expect(cks).not.toContain(ckBefore + 23);
+    expect(cks).not.toContain(ckBefore + 25);
+    // An old, non-checkpoint release paged by id is reconstructed from the checkpoint behind it plus the deltas.
+    const mid = hist.find((r) => r.seq === ckBefore + 20)!;
+    const page = await call("GET", `/releases/edge?fields=summary&arch=x86_64&release_id=${mid.id}`);
+    expect(page.status).toBe(200);
+    // The loop alternates: even i puts xz back, odd i removes it; seq = r2.seq + 1 + i.
+    const i = mid.seq - r2.json.release.seq - 1;
+    expect(page.json.packages.some((p: any) => p.name === "xz")).toBe(i % 2 === 0);
+    expect(page.json.page.total).toBe((await call("GET", `/releases/edge/diff?to=${mid.id}&arch=x86_64`)).json.counts.after);
+    expect(last.seq).toBe(hist[0].seq);
+  });
+
+  it("retention keeps what a rollback inside it may need, and drops the rest", async () => {
+    // keep=3 protects the last three releases of each ring; the kept checkpoint is the newest at or before the oldest of them.
+    const un = await call("GET", "/pool/unreferenced?keep=3&grace_days=0");
+    expect(un.status).toBe(200);
+    const head = (await call("GET", "/releases/edge/history")).json.releases[0].seq as number;
+    const expected = (await env.DB.prepare("SELECT MAX(seq) AS seq FROM releases WHERE ring = 'edge' AND checkpoint = 1 AND seq <= ?").bind(head - 2).first<{ seq: number }>())!.seq;
+    const seqs = await env.DB.prepare("SELECT id, seq FROM releases WHERE ring = 'edge' AND id IN (SELECT value FROM json_each(?)) ORDER BY seq").bind(JSON.stringify(un.json.kept_checkpoints)).all<{ id: number; seq: number }>();
+    expect(seqs.results.map((r) => r.seq)).toContain(expected);
+    // Nothing a ring serves is ever listed.
+    const served = new Set((await env.DB.prepare("SELECT package_id FROM ring_packages").all<{ package_id: number }>()).results.map((r) => r.package_id));
+    for (const p of un.json.packages) expect(served.has(p.id)).toBe(false);
+    const gc = await call("POST", "/pool/gc?keep=3&grace_days=0", undefined, await job(["gc"]));
+    expect(gc.status).toBe(200);
+    expect(gc.json.kept_checkpoints).toEqual(un.json.kept_checkpoints);
+    // Deltas at or before the kept checkpoint are gone; the ones after it stay (a protected release reconstructs through them).
+    const old = await env.DB.prepare("SELECT COUNT(*) AS n FROM release_deltas d JOIN releases r ON r.id = d.release_id WHERE r.ring = 'edge' AND r.seq <= ?").bind(expected).first<{ n: number }>();
+    expect(old!.n).toBe(0);
+    const recent = await env.DB.prepare("SELECT COUNT(*) AS n FROM release_deltas d JOIN releases r ON r.id = d.release_id WHERE r.ring = 'edge' AND r.seq > ?").bind(expected).first<{ n: number }>();
+    expect(recent!.n).toBeGreaterThan(0);
+    // The head still reads, an old protected release still reconstructs, a pruned one answers 410.
+    expect((await call("GET", "/releases/edge?fields=summary")).status).toBe(200);
+    const hist = (await call("GET", "/releases/edge/history")).json.releases as { id: number; seq: number }[];
+    expect((await call("GET", `/releases/edge/diff?to=${hist[1].id}`)).status).toBe(200);
+    expect((await call("GET", `/releases/edge/diff?from=${hist.find((r) => r.seq === expected - 3)!.id}`)).status).toBe(410);
   });
 });
