@@ -113,14 +113,22 @@ export async function handlePackage(name: string, url: URL, env: Env): Promise<R
   const providers = new Map<string, { name: string; version: string }>();
   for (let i = 0; i < wanted.length; i += 100) {
     const chunk = wanted.slice(i, i + 100);
+    // Two indexed lookups (by name, by provided capability) instead of one
+    // OR that scanned every package of the architecture: google-chrome's
+    // page went from 7.5 s to well under a second.
     const rows = await env.DB.prepare(
-      `SELECT DISTINCT cap.value AS capability, p.name, p.version
-         FROM json_each(?1) cap
-         JOIN packages p ON p.repo_arch = ?3
-         JOIN release_packages rp ON rp.package_id = p.id AND rp.release_id = ?2
-        WHERE p.name = cap.value
-           OR p.id IN (SELECT pv.package_id FROM package_provides pv WHERE pv.capability = cap.value
-                        AND (pv.declared = 1 OR cap.value GLOB '*.so.[0-9]*'))`,
+      `SELECT DISTINCT capability, name, version FROM (
+         SELECT cap.value AS capability, p.name, p.version
+           FROM json_each(?1) cap
+           JOIN packages p ON p.name = cap.value AND p.repo_arch = ?3
+           JOIN release_packages rp ON rp.package_id = p.id AND rp.release_id = ?2
+         UNION ALL
+         SELECT cap.value AS capability, p.name, p.version
+           FROM json_each(?1) cap
+           JOIN package_provides pv ON pv.capability = cap.value AND (pv.declared = 1 OR cap.value GLOB '*.so.[0-9]*')
+           JOIN packages p ON p.id = pv.package_id AND p.repo_arch = ?3
+           JOIN release_packages rp ON rp.package_id = p.id AND rp.release_id = ?2
+       )`,
     )
       .bind(JSON.stringify(chunk), head.id, s.arch)
       .all<{ capability: string; name: string; version: string }>();
