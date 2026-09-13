@@ -24,9 +24,9 @@ const BODY = String.raw`
     <h2>Workers</h2>
     <p class="sub">Every worker belongs to someone. <b>Omarchy workers</b> run for the project — trusted by a maintainer, or the hosted fallback for pool jobs — and take pool jobs and project builds; <b>community workers</b> are contributors' own and take their (or, if shared, anyone's) community builds. Alive means seen in the last ten minutes; an idle worker asks for work every 30 seconds. <label style="margin-left:8px"><input type="checkbox" id="all-workers"> show workers not seen recently</label></p>
     <h3 style="margin:14px 0 4px">Omarchy workers</h3>
-    <div class="table-wrap"><table id="workers"><thead><tr><th>Worker</th><th>Arch</th><th>Where</th><th>Trust</th><th>Building</th><th>Done / failed</th><th>Last seen</th></tr></thead><tbody></tbody></table></div>
+    <div class="table-wrap"><table id="workers"><thead><tr><th>Worker</th><th>Arch</th><th>Where</th><th>Trust</th><th>Agent</th><th>Building</th><th>Done / failed</th><th>Last seen</th></tr></thead><tbody></tbody></table></div>
     <h3 style="margin:18px 0 4px">Community workers</h3>
-    <div class="table-wrap"><table id="cworkers"><thead><tr><th>Worker</th><th>Owner</th><th>Arch</th><th>Mode</th><th>Building</th><th>Done / failed</th><th>Last seen</th></tr></thead><tbody></tbody></table></div>
+    <div class="table-wrap"><table id="cworkers"><thead><tr><th>Worker</th><th>Owner</th><th>Arch</th><th>Mode</th><th>Agent</th><th>Building</th><th>Done / failed</th><th>Last seen</th></tr></thead><tbody></tbody></table></div>
   </section>
 
   <section>
@@ -59,7 +59,7 @@ const SCRIPT = String.raw`
     return JSON.stringify(r).slice(0, 90);
   }
   function took(ms) { if (ms == null) return "—"; var s = Math.round(ms / 1000); return s < 60 ? s + " s" : Math.floor(s / 60) + " min " + (s % 60) + " s"; }
-  skeletonTiles("#tiles", 5); skeletonRows("#registry", 8, 2); skeletonRows("#workers", 6, 2); skeletonRows("#tasks", 8, 4); skeletonRows("#requests", 8, 2);
+  skeletonTiles("#tiles", 5); skeletonRows("#registry", 8, 2); skeletonRows("#workers", 7, 2); skeletonRows("#tasks", 8, 4); skeletonRows("#requests", 8, 2);
   function loadRegistry() {
     busy(fetch("/api/v1/factory/packages")).then(function (r) { return r.json(); }).then(function (d) {
       pager("#registry", d.packages || [], function (p) {
@@ -89,11 +89,11 @@ const SCRIPT = String.raw`
       pager("#workers", ws.filter(function (w) { return w.side === "omarchy"; }), function (w) {
         var where = w.labels && w.labels.where ? w.labels.where : (w.hostname || "—");
         return '<tr><td class="mono">' + esc(w.id) + (w.alive ? ' <span class="pill ok">alive</span>' : '') + '</td><td>' + esc(w.arch) + '</td><td>' + esc(where) + (w.version ? ' <span class="muted">pkg-repo ' + esc(w.version) + '</span>' : '') + '</td>' +
-          '<td>' + (w.trust === "project" ? 'project' + (w.trusted_by ? ' <span class="muted">by ' + esc(w.trusted_by) + '</span>' : '') : '<span class="muted">hosted fallback</span>') + '</td>' +
+          '<td>' + (w.trust === "project" ? 'project' + (w.trusted_by ? ' <span class="muted">by ' + esc(w.trusted_by) + '</span>' : '') : '<span class="muted">hosted fallback</span>') + '</td><td>' + agentCell(w) + '</td>' +
           '<td>' + (w.current_task ? '#' + w.current_task : '<span class="muted">idle</span>') + '</td><td>' + num(w.builds_done) + ' / ' + num(w.builds_failed) + '</td><td>' + ago(w.last_seen) + '</td></tr>';
       }, { empty: showAll ? "no Omarchy worker registered" : "no Omarchy worker alive — the project's machines are off; pool jobs wait (or a hosted fallback starts for them)", text: function (w) { return w.id + " " + w.arch + " " + (w.trusted_by || "") + " " + JSON.stringify(w.labels || {}); } });
       pager("#cworkers", ws.filter(function (w) { return w.side === "community"; }), function (w) {
-        return '<tr><td class="mono">' + esc(w.id) + (w.alive ? ' <span class="pill ok">alive</span>' : '') + '</td><td>' + esc(w.owner || "") + '</td><td>' + esc(w.arch) + '</td><td>' + esc(w.mode) + (w.packages && w.packages.length ? ' <span class="muted">' + esc(w.packages.join(", ")) + '</span>' : '') + '</td>' +
+        return '<tr><td class="mono">' + esc(w.id) + (w.alive ? ' <span class="pill ok">alive</span>' : '') + '</td><td>' + esc(w.owner || "") + '</td><td>' + esc(w.arch) + '</td><td>' + esc(w.mode) + (w.packages && w.packages.length ? ' <span class="muted">' + esc(w.packages.join(", ")) + '</span>' : '') + '</td><td>' + agentCell(w) + '</td>' +
           '<td>' + (w.current_task ? '#' + w.current_task : '<span class="muted">idle</span>') + '</td><td>' + num(w.builds_done) + ' / ' + num(w.builds_failed) + '</td><td>' + ago(w.last_seen) + '</td></tr>';
       }, { empty: showAll ? "no community worker registered yet" : "no community worker alive right now", text: function (w) { return w.id + " " + (w.owner || "") + " " + w.arch + " " + w.mode; } });
       pager("#tasks", d.tasks, function (t) {

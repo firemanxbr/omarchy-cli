@@ -8,7 +8,7 @@ import { issueJobToken, scopesFor, type JobClaims } from "../jobtoken";
  * requests and build tasks; build workers are ephemeral, live anywhere, and
  * *pull* work:
  *
- *   POST /factory/claim                 {arch, hostname?, labels?, version?, kinds?} → a task with a lease and its job token, or 204
+ *   POST /factory/claim                 {arch, hostname?, labels?, version?, kinds?, agent?} → a task with a lease and its job token, or 204
  *   POST /factory/tasks/:id/heartbeat                                  extend the lease (a fresh job token)
  *   POST /factory/tasks/:id/complete    {sha256, filename, version, duration_ms?, log_tail?} · {result, summary} for jobs
  *   POST /factory/tasks/:id/fail        {error, duration_ms?, log_tail?}   → requeued, or failed after max_attempts
@@ -239,13 +239,18 @@ export async function handleCancelTask(id: number, env: Env): Promise<Response> 
 
 // ---------- workers ----------
 
-async function touchWorker(env: Env, w: { worker: string; arch: string; hostname?: string; labels?: unknown; version?: string; mode?: string }, currentTask: number | null): Promise<void> {
+async function touchWorker(env: Env, w: { worker: string; arch: string; hostname?: string; labels?: unknown; version?: string; mode?: string; agent?: string | null }, currentTask: number | null): Promise<void> {
+  // The agent is what the worker says it runs ("<provider>/<model>"): a
+  // worker that reports none ("" or null) clears it, one that says nothing
+  // (an older client) keeps what it last reported.
+  const agent = w.agent === undefined ? undefined : typeof w.agent === "string" && /^[a-z0-9]+\/[A-Za-z0-9._:-]{1,60}$/.test(w.agent) ? w.agent : null;
   await env.DB.prepare(
-    `INSERT INTO build_workers (id, arch, hostname, labels, version, last_seen, current_task) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO build_workers (id, arch, hostname, labels, version, last_seen, current_task, agent) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (id) DO UPDATE SET arch = excluded.arch, hostname = COALESCE(excluded.hostname, hostname), labels = COALESCE(excluded.labels, labels),
-       version = COALESCE(excluded.version, version), last_seen = excluded.last_seen, current_task = excluded.current_task, mode = COALESCE(?, mode)`,
+       version = COALESCE(excluded.version, version), last_seen = excluded.last_seen, current_task = excluded.current_task, mode = COALESCE(?, mode),
+       agent = CASE WHEN ? THEN excluded.agent ELSE agent END`,
   )
-    .bind(w.worker, w.arch, w.hostname ?? null, w.labels ? JSON.stringify(w.labels) : null, w.version ?? null, now(), currentTask, w.mode ?? null)
+    .bind(w.worker, w.arch, w.hostname ?? null, w.labels ? JSON.stringify(w.labels) : null, w.version ?? null, now(), currentTask, agent ?? null, w.mode ?? null, agent === undefined ? 0 : 1)
     .run();
 }
 
@@ -254,7 +259,7 @@ const ALL_KINDS = ["build", "sync", "promote", "rollback", "render", "health", "
 const ANY_ARCH_KINDS = "'metrics', 'gc', 'security', 'promote', 'audit'";
 
 export async function handleClaim(request: Request, env: Env, actor: Actor): Promise<Response> {
-  const b = (await request.json()) as { arch?: string; hostname?: string; labels?: unknown; version?: string; kinds?: unknown; shared?: unknown };
+  const b = (await request.json()) as { arch?: string; hostname?: string; labels?: unknown; version?: string; kinds?: unknown; shared?: unknown; agent?: unknown };
   if (!b.arch || !isRepoArch(b.arch)) return json({ error: "arch (x86_64|aarch64) is required" }, 400);
   if (actor.kind === "job") return json({ error: "a job token cannot claim; use the worker token" }, 403);
   // A worker is its registration: id, owner, trust and what it may build.
@@ -297,7 +302,7 @@ export async function handleClaim(request: Request, env: Env, actor: Actor): Pro
   )
     .bind(workerId, plusMinutes(LEASE_MINUTES), now(), b.arch, ...binds)
     .first<TaskRow>();
-  await touchWorker(env, { worker: workerId, arch: b.arch, hostname: b.hostname, labels: b.labels, version: b.version, mode: trust === "community" ? (shared ? "shared" : "dedicated") : undefined }, task?.id ?? null);
+  await touchWorker(env, { worker: workerId, arch: b.arch, hostname: b.hostname, labels: b.labels, version: b.version, mode: trust === "community" ? (shared ? "shared" : "dedicated") : undefined, agent: b.agent === undefined ? undefined : typeof b.agent === "string" ? b.agent : null }, task?.id ?? null);
   if (!task) return new Response(null, { status: 204 });
   if (task.trust === "community" && task.kind === "build") {
     await env.DB.prepare("UPDATE factory_packages SET status = 'building', detail = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE name = ?").bind(`building on ${workerId} (${task.arch})`, task.name).run();

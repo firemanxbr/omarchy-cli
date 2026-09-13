@@ -23,7 +23,8 @@
  *   GET  /api/v1/security?ring=&arch=             open advisories in a ring and what they expose
  *   PUT  /api/v1/security/advisories|matches       vulnerability data from the Security workflow
  *   POST /api/v1/security/prune?before=
- *   GET  /api/v1/factory · POST /factory/{claim,requests,enqueue} · /factory/tasks/:id/{heartbeat,complete,fail,cancel}
+ *   GET  /api/v1/factory · POST /factory/{claim,requests,enqueue,jobs} · /factory/tasks/:id/{heartbeat,complete,fail,cancel,approve,reject,artifacts/<file>}
+ *   GET  /api/v1/factory/{packages,built,review,approvals,groups,trust,workers/self,me} · GET /api/v1/users/:login · GET /api/v1/cost
  *                                                  the factory's brain: requests, build tasks, pull-based workers
  *   GET  /api/v1/graph?targets=a,b&ring=stable
  *   POST /api/v1/events   GET /api/v1/events       activity log

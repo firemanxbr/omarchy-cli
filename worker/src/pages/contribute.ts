@@ -57,9 +57,9 @@ const BODY = String.raw`
       <div id="w-new" hidden>
         <p class="sub">Your worker token, shown once. Run one of these wherever the worker lives (podman or docker):</p>
         <pre id="w-cmd"></pre>
-        <p class="sub">Each container is one task; <code>restart: unless-stopped</code> (or a loop) gives you the next. Add <code>-e ANTHROPIC_API_KEY=…</code> for an agent-drafted PKGBUILD. The same image serves maintainers: the registration decides what it does (<a href="/docs/workers">Run a worker</a>). Verify it: <code>cosign verify ghcr.io/firemanxbr/omarchy-worker:latest --certificate-identity-regexp github.com/firemanxbr/omarchy-pool --certificate-oidc-issuer https://token.actions.githubusercontent.com</code></p>
+        <p class="sub">Each container is one task; <code>restart: unless-stopped</code> (or a loop) gives you the next. Add your agent key — <code>-e ANTHROPIC_API_KEY=…</code>, <code>OPENAI_API_KEY</code>, <code>GEMINI_API_KEY</code> or <code>XAI_API_KEY</code> — for an agent-drafted PKGBUILD; the <em>Agent</em> column below shows what the worker reported it runs. The same image serves maintainers: the registration decides what it does (<a href="/docs/workers">Run a worker</a>). Verify it: <code>cosign verify ghcr.io/firemanxbr/omarchy-worker:latest --certificate-identity-regexp github.com/firemanxbr/omarchy-pool --certificate-oidc-issuer https://token.actions.githubusercontent.com</code></p>
       </div>
-      <div class="table-wrap"><table id="my-workers"><thead><tr><th>Worker</th><th>Arch</th><th>Mode</th><th>Last seen</th><th>Building</th><th>Done / failed</th><th></th></tr></thead><tbody></tbody></table></div>
+      <div class="table-wrap"><table id="my-workers"><thead><tr><th>Worker</th><th>Arch</th><th>Mode</th><th>Agent</th><th>Last seen</th><th>Building</th><th>Done / failed</th><th></th></tr></thead><tbody></tbody></table></div>
     </section>
 
     <section>
@@ -109,7 +109,7 @@ const SCRIPT = String.raw`
     return false;
   };
   function refresh() {
-    skeletonRows("#my-packages", 7, 2); skeletonRows("#my-workers", 7, 1); skeletonRows("#my-tasks", 8, 2);
+    skeletonRows("#my-packages", 7, 2); skeletonRows("#my-workers", 8, 1); skeletonRows("#my-tasks", 8, 2);
     call("GET", "/me").then(function (d) {
       if (d.contributor && d.contributor.role && d.contributor.role !== role) { role = d.contributor.role; areas = d.contributor.areas || []; showSigned(); return; }
       if (d.__status === 401) { $("#signin-state").textContent = "Your contributor token is no longer valid; sign in again."; $("#signin-form").hidden = false; $("#signed").hidden = true; endSkeleton(); return; }
@@ -121,7 +121,7 @@ const SCRIPT = String.raw`
       }, { empty: 'no package registered yet' });
       pager("#my-workers", (d.workers || []), function (w) {
         var alive = w.last_seen && (Date.now() - Date.parse(w.last_seen)) < 600000;
-        return '<tr><td class="mono">' + esc(w.id) + (w.revoked_at ? ' <span class="pill none">revoked</span>' : alive ? ' <span class="pill ok">alive</span>' : '') + '</td><td>' + esc(w.arch) + '</td><td>' + esc(w.mode) + (w.packages && w.packages.length ? ' <span class="muted">' + esc(w.packages.join(", ")) + '</span>' : '') + '</td><td>' + ago(w.last_seen) + '</td>' +
+        return '<tr><td class="mono">' + esc(w.id) + (w.revoked_at ? ' <span class="pill none">revoked</span>' : alive ? ' <span class="pill ok">alive</span>' : '') + '</td><td>' + esc(w.arch) + '</td><td>' + esc(w.mode) + (w.packages && w.packages.length ? ' <span class="muted">' + esc(w.packages.join(", ")) + '</span>' : '') + '</td><td>' + agentCell(w) + '</td><td>' + ago(w.last_seen) + '</td>' +
           '<td>' + (w.current_task ? '#' + w.current_task : '<span class="muted">idle</span>') + '</td><td>' + num(w.builds_done) + ' / ' + num(w.builds_failed) + '</td><td>' + (w.revoked_at ? '' : '<button type="button" data-revoke="' + esc(w.id) + '">Revoke</button>') + '</td></tr>';
       }, { empty: 'no worker yet — register one above' });
       pager("#my-tasks", (d.tasks || []), function (t) {
@@ -161,7 +161,7 @@ const SCRIPT = String.raw`
         "podman run -d --name omarchy-worker --restart unless-stopped -e OMARCHY_WORKER_TOKEN=" + d.token + " \\\n  ghcr.io/firemanxbr/omarchy-worker:latest\n\n" +
         "# or with compose (" + REPO + "/blob/main/factory/image/compose.yml)\n" +
         "OMARCHY_WORKER_TOKEN=" + d.token + " podman compose -f compose.yml up -d\n\n" +
-        "# add -e WORKER_SHARED=1 to build anyone's packages, -e ANTHROPIC_API_KEY=… (your key) for agent-drafted PKGBUILDs";
+        "# add -e WORKER_SHARED=1 to build anyone's packages; -e ANTHROPIC_API_KEY=… (or OPENAI_API_KEY, GEMINI_API_KEY, XAI_API_KEY: your key) for agent-drafted PKGBUILDs";
       $("#worker-form").reset(); refresh();
     }).catch(function (e) { $("#w-btn").disabled = false; $("#pkg-state").textContent = "failed: " + e; });
     return false;

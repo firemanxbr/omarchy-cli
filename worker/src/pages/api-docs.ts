@@ -25,6 +25,22 @@ const BODY = String.raw`
       <tr><td><code>GET /security?ring=&amp;arch=</code></td><td>Packages in the ring with an open advisory: severity, confidence (exact / name-version / name-only), CVEs, exploited-in-the-wild and EPSS, rings already serving a clean version, how many packages it exposes. <code>GET /package/:name</code> carries the same per package plus what it is exposed through.</td></tr>
       <tr><td><code>GET /events?kind=&amp;limit=</code></td><td>The journal: sync, gate, promote, render, health, abi, rollback, deploy, gc, metrics.</td></tr>
       <tr><td><code>GET /pool/unreferenced?keep=3</code></td><td>What retention would delete now.</td></tr>
+      <tr><td><code>GET /cost</code></td><td>The month's estimated bill, line by line (D1, R2, Workers), the projection and the guard's state. Estimated daily at 06:30 UTC.</td></tr>
+    </tbody></table></div>
+  </section>
+
+  <section>
+    <h2>The factory (read)</h2>
+    <p class="sub">What the Factory, Contributors, Review and profile pages show. Public, cached briefly.</p>
+    <div class="table-wrap"><table><thead><tr><th>Endpoint</th><th>What it returns</th></tr></thead><tbody>
+      <tr><td><code>GET /factory?limit=</code></td><td>Workers the pool has heard from (owner, trust, mode, the agent each reported, current task), the queue (every kind: builds, pool jobs, audits), package requests, counts.</td></tr>
+      <tr><td><code>GET /factory/packages</code> · <code>/built</code> · <code>/tasks/:id</code></td><td>The registry of packages people brought; what the factory built; one task with its log tail.</td></tr>
+      <tr><td><code>GET /factory/review</code></td><td>Staged community builds waiting for a maintainer, each with links to its evidence (PKGBUILD, log, .PKGINFO, the audit) and the second agent's verdict (<code>ok</code> / <code>warn</code> / <code>block</code>, or <em>queued</em> / <em>failed</em>).</td></tr>
+      <tr><td><code>GET /factory/tasks/:id/artifacts/&lt;file&gt;</code></td><td>A staged build's evidence: <code>PKGBUILD</code>, <code>build.log</code>, <code>PKGINFO</code>, <code>audit.md</code>, <code>audit.json</code> are public; the package itself is for maintainers.</td></tr>
+      <tr><td><code>GET /factory/approvals</code> · <code>/groups</code> · <code>/trust</code></td><td>The record: every decision with who signed it; the groups and their maintainers (from <code>factory/MAINTAINERS.toml</code>); project-trusted workers.</td></tr>
+      <tr><td><code>GET /users/:login</code></td><td>A contributor's or maintainer's public profile: packages, builds, approvals, workers, and the <em>track record</em> per group (<a href="/docs/governance">Governance</a>).</td></tr>
+      <tr><td><code>GET /factory/workers/self</code></td><td>With a worker token: what that registration is (id, arch, trust, owner, mode) — how the image decides its mode.</td></tr>
+      <tr><td><code>GET /factory/me</code></td><td>With a contributor token or the browser session: who you are, your packages, tasks, workers and staging quota.</td></tr>
     </tbody></table></div>
   </section>
 
@@ -58,6 +74,20 @@ curl -s  https://pool.firemanxbr.org/x86_64/omarchy-core-stable.db | tar -tz | h
       <tr><td><code>POST /releases</code></td><td>Create, promote or roll back a release (an index write).</td></tr>
       <tr><td><code>PUT /releases/:id/artifacts/:kind?repo=&amp;arch=</code></td><td>Publish a rendered database beside the packages; the pool signs it as it stores it.</td></tr>
       <tr><td><code>POST /events</code> · <code>POST /pool/gc</code></td><td>Record a journal entry; run retention.</td></tr>
+      <tr><td><code>PUT /factory/tasks/:id/artifacts/&lt;file&gt;</code></td><td>A community build's token uploads its evidence to its own staging workspace; an audit's token adds <code>audit.json</code> / <code>audit.md</code> to a staged build, and nothing else.</td></tr>
+    </tbody></table></div>
+  </section>
+
+  <section>
+    <h2>Write (people)</h2>
+    <p class="sub">Bearer <code>omc_…</code> (a contributor token from your profile) or the browser session after <em>Sign in with GitHub</em>. Nothing here touches the pool directly: maintainers queue jobs and approve builds; workers do the work with per-job tokens.</p>
+    <div class="table-wrap"><table><thead><tr><th>Endpoint</th><th>Who</th><th>What it does</th></tr></thead><tbody>
+      <tr><td><code>POST /factory/packages</code> · <code>/packages/:name/build</code> · <code>DELETE /packages/:name</code></td><td>contributor</td><td>Register a package (the project's URL), ask for a build on your worker, remove the registration.</td></tr>
+      <tr><td><code>POST /factory/workers</code> · <code>DELETE /workers/:id</code></td><td>contributor</td><td>Register a worker (the token is shown once), revoke it.</td></tr>
+      <tr><td><code>POST /factory/tasks/:id/approve</code> · <code>/reject</code></td><td>maintainer of the group</td><td>Approve a staged build (the project rebuilds it) or send it back with a note. Never your own package.</td></tr>
+      <tr><td><code>POST /factory/jobs</code></td><td>maintainer</td><td>Queue a pool job by hand (sync, promote, rollback, render, health, security, gc, enqueue) — what <code>pkg-repo job</code> calls.</td></tr>
+      <tr><td><code>POST /factory/workers/:id/trust</code></td><td>maintainer</td><td>Promote a registration to project trust, or back.</td></tr>
+      <tr><td><code>GET /auth/github</code> · <code>/auth/me</code> · <code>/auth/logout</code></td><td>anyone</td><td>Sign in with GitHub (a session cookie for the dashboard); who is signed in; sign out — the session stops working on the server, the CLI token is untouched.</td></tr>
     </tbody></table></div>
   </section>
 `;

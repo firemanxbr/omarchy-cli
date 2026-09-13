@@ -58,7 +58,7 @@ secret). Everything travels in the `Authorization` header over TLS only.
 | Community worker | community builds of its owner's packages; anyone's only when started with `--shared` / `WORKER_SHARED=1`; results go to a separate staging bucket in the owner's workspace | registered by its owner |
 | Project worker | pool jobs (sync, render, promote, health, security, gc) and the rebuild of approved packages — never a build without evidence and review | a maintainer sets `trust = project` on the worker (`POST /factory/workers/:id/trust`) |
 | Maintainer | approve staged builds of their groups, promote workers, review governance | listed in `factory/MAINTAINERS.toml`, merged with another maintainer's review |
-| Agent key | drafts and corrects PKGBUILDs on a community worker; audits staged builds on a project worker | the worker owner's own `ANTHROPIC_API_KEY`, set in the container's environment; the pool and GitHub hold none — an audit's report is evidence a maintainer reads, never something the pool acts on |
+| Agent key | drafts and corrects PKGBUILDs on a community worker; audits staged builds on a project worker | the worker owner's own key — `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` or `XAI_API_KEY` — set in the container's environment; the pool and GitHub hold none. The worker reports only the provider and model name (`anthropic/claude-sonnet-5`) for the Factory page. An audit's report is evidence a maintainer reads, never something the pool acts on |
 
 ## Isolation
 

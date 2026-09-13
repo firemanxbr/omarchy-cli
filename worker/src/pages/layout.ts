@@ -279,6 +279,12 @@ const HELPERS = String.raw`
     }
     draw();
   }
+  // The agent a worker reports ("<provider>/<model>"), or a dash: the key never leaves the worker, only its name does.
+  function agentCell(w) {
+    if (!w.agent) return '<span class="muted">—</span>';
+    var i = w.agent.indexOf("/");
+    return '<span class="mono" title="' + esc(w.agent) + '">' + esc(i > 0 ? w.agent.slice(i + 1) : w.agent) + '</span>' + (i > 0 ? ' <span class="muted">' + esc(w.agent.slice(0, i)) + '</span>' : '');
+  }
   // Who is signed in (the omc cookie): the header shows the login and role.
   var ME = null;
   function whoami(cb) {

@@ -240,7 +240,8 @@ enum Command {
         shared: bool,
         /// Job kinds to pull (repeatable). Default: every pool job and the
         /// project builds; `audit` (the second agent's review of a staged
-        /// build) joins them when `ANTHROPIC_API_KEY` is set — the worker
+        /// build) joins them when an agent key is set (`ANTHROPIC_API_KEY`,
+        /// `OPENAI_API_KEY`, `GEMINI_API_KEY`, `XAI_API_KEY`) — the worker
         /// owner's key, never the pool's.
         #[arg(long = "kind")]
         kinds: Vec<String>,
