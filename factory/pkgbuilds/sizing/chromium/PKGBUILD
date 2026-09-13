@@ -188,7 +188,9 @@ depends+=(${_system_libs[@]})
 # Starting with Chromium 89 (2021-03-02) the OAuth2 credentials have been left
 # out: https://archlinux.org/news/chromium-losing-sync-support-in-early-march/
 #  - Arch Linux ARM has obtained permission to use the Arch Linux keys.
-_google_api_key=AIzaSyDwr302FpOSkGRpLlUpPThNTDPbXcIn_FM
+# No API key in this repository (GitHub flags it): builders may pass one
+# through the environment; the sizing dry run needs none.
+_google_api_key="${CHROMIUM_GOOGLE_API_KEY:-}"
 
 prepare() {
   # rustup install nightly
