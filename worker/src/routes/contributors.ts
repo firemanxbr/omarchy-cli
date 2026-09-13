@@ -1,6 +1,7 @@
 import { json, type Env } from "../index";
 import { isRepoArch } from "../r2";
 import { providedBy } from "./factory";
+import { cookieOf } from "./auth";
 
 /**
  * Contributors: anyone with a GitHub identity. No permission needed to
@@ -47,9 +48,10 @@ export interface Contributor {
   areas: string[];
 }
 
-/** The contributor behind a `omc_…` token, or null. */
+/** The contributor behind a `omc_…` token — the bearer header, or the sign-in cookie — or null. */
 export async function contributorOf(request: Request, env: Env): Promise<Contributor | null> {
-  const token = bearer(request);
+  let token = bearer(request);
+  if (!token) token = cookieOf(request, "omc") ?? "";
   if (!token.startsWith("omc_")) return null;
   const row = await env.DB.prepare("SELECT login, name, avatar_url, role, areas FROM contributors WHERE token_hash = ?").bind(await sha256Hex(token)).first<{ login: string; name: string | null; avatar_url: string | null; role: string; areas: string | null }>();
   if (!row) return null;

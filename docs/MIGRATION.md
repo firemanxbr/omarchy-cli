@@ -237,6 +237,10 @@ Until then, moving the pool moves them too:
   `wrangler.toml`). The worker image lives at
   `ghcr.io/<owner>/omarchy-packaging` (`factory-image.yml`, `IMAGE` env);
   the compose file and the README name it.
+- Sign in with GitHub: a GitHub OAuth App on the new organisation
+  (callback `https://<dashboard>/auth/github/callback`): client id in
+  `wrangler.toml` (`GITHUB_OAUTH_CLIENT_ID`), secret with
+  `npx wrangler secret put GITHUB_OAUTH_CLIENT_SECRET`.
 - Secrets: `FACTORY_TOKEN` on the worker (`npx wrangler secret put
   FACTORY_TOKEN`, any random string) and, for hosted runners, the same value as
   the GitHub secret `FACTORY_TOKEN` (A3). Workers you run elsewhere get it by

@@ -33,11 +33,13 @@ const BODY = String.raw`
 const SCRIPT = String.raw`
   var API = "/api/v1/factory", token = null, login = null;
   try { token = localStorage.getItem("omc_token"); login = localStorage.getItem("omc_login"); } catch (e) {}
-  $("#who").innerHTML = token ? 'Signed in as <b>' + esc(login) + '</b> (the token from <a href="/contribute">Contribute</a>). Approve and reject need the maintainer role.' : 'Read-only. <a href="/contribute">Sign in</a> with a maintainer account to approve.';
+  function headers() { var h = { "content-type": "application/json" }; if (token) h["authorization"] = "Bearer " + token; return h; }
+  $("#who").innerHTML = 'Read-only until you <a href="/auth/github?next=/review">sign in with GitHub</a>; approving and rejecting need the maintainer role.';
+  whoami(function (me) { if (me) { login = me.login; token = token || "cookie"; $("#who").innerHTML = 'Signed in as <b>' + esc(me.login) + '</b> (' + esc(me.role) + (me.areas && me.areas.length ? ' of ' + esc(me.areas.join(", ")) : '') + ')' + (me.role === "contributor" ? ' — approving needs the maintainer role.' : '.'); load(); } });
   function decide(id, what) {
     var note = what === "reject" ? prompt("Why? The contributor sees this.") : (prompt("Note for the record (optional)") || "");
     if (what === "reject" && !note) return;
-    busy(fetch(API + "/tasks/" + id + "/" + what, { method: "POST", headers: { "authorization": "Bearer " + token, "content-type": "application/json" }, body: JSON.stringify({ note: note }) })).then(function (r) { return r.json(); }).then(function (d) {
+    busy(fetch(API + "/tasks/" + id + "/" + what, { method: "POST", headers: headers(), body: JSON.stringify({ note: note }) })).then(function (r) { return r.json(); }).then(function (d) {
       alert(d.error ? d.error : (what === "approve" ? "Approved — project rebuild queued as task #" + d.rebuild_task : "Rejected"));
       load();
     });

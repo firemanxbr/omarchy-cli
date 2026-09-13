@@ -33,6 +33,9 @@ const CSS = String.raw`
   header nav a { color: var(--muted); text-decoration: none; padding-bottom: 2px; border-bottom: 1px solid transparent; }
   header nav a:hover { color: var(--text); }
   header nav a.active { color: var(--text); border-bottom-color: var(--green); }
+  header .account { font-size: 13px; color: var(--text); text-decoration: none; border: 1px solid var(--line); padding: 5px 11px; white-space: nowrap; }
+  header .account:hover { border-color: var(--green); }
+  header .account .who { color: var(--muted); }
   .gh { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); text-decoration: none; font-size: 13.5px; }
   .gh:hover { color: var(--text); }
   .gh svg { width: 18px; height: 18px; fill: currentColor; }
@@ -139,6 +142,8 @@ const CSS = String.raw`
   .form button:hover, .searchbar button:hover, table button:hover { border-color: var(--green); }
   table button { padding: 3px 9px; font-size: 12.5px; }
 
+  a.button { display: inline-block; border: 1px solid var(--green); padding: 8px 14px; text-decoration: none; color: var(--text); }
+  a.button:hover { background: var(--panel-2); }
   .pager { display: flex; gap: 10px; align-items: center; margin: 10px 0 6px; font-size: 12.5px; color: var(--dim); flex-wrap: wrap; }
   .pager input { background: var(--bg-deep); border: 1px solid var(--line); color: var(--text); padding: 5px 9px; font: inherit; font-size: 12.5px; min-width: 200px; }
   .pager select { background: var(--bg-deep); border: 1px solid var(--line); color: var(--text); padding: 5px 6px; font: inherit; font-size: 12.5px; }
@@ -174,11 +179,11 @@ const CSS = String.raw`
   a.run:hover { color: var(--text); }
   #graph { overflow-x: auto; } #graph svg { min-width: 720px; }
   @media (max-width: 720px) {
-    header { display: grid; grid-template-columns: 1fr auto; grid-template-areas: "brand chip" "nav nav" "status status"; gap: 10px 12px; padding: 12px 16px; align-items: center; }
+    header { display: grid; grid-template-columns: 1fr auto; grid-template-areas: "brand chip" "nav nav" "status account"; gap: 10px 12px; padding: 12px 16px; align-items: center; }
     header .brand { grid-area: brand; } header .ver { grid-area: chip; justify-self: end; } header .spacer { display: none; }
     header nav { grid-area: nav; display: flex; gap: 18px; overflow-x: auto; white-space: nowrap; padding-bottom: 4px; margin: 0 -16px; padding-left: 16px; padding-right: 16px; scrollbar-width: none; }
     header nav::-webkit-scrollbar { display: none; }
-    header #status { grid-area: status; }
+    header #status { grid-area: status; } header .account { grid-area: account; justify-self: end; }
     main { padding: 20px 16px 40px; }
     h1 { font-size: 22px; line-height: 1.25; } h2 { font-size: 19px; }
     .lede { font-size: 14px; }
@@ -263,6 +268,16 @@ const HELPERS = String.raw`
     }
     draw();
   }
+  // Who is signed in (the omc cookie): the header shows the login and role.
+  var ME = null;
+  function whoami(cb) {
+    fetch("/auth/me", { cache: "no-store" }).then(function (r) { return r.ok ? r.json() : null; }).then(function (me) {
+      ME = me; var a = $("#account"); if (!a) return;
+      if (me) { a.innerHTML = '<b>' + esc(me.login) + '</b> <span class="who">' + esc(me.role) + '</span> · sign out'; a.href = "/auth/logout"; a.title = "signed in with GitHub as " + me.login + (me.areas && me.areas.length ? " (" + me.areas.join(", ") + ")" : ""); }
+      if (cb) cb(me);
+    }).catch(function () { if (cb) cb(null); });
+  }
+  whoami();
   // Every fetch a page starts goes through busy(): the bar at the top stays
   // on while at least one is in flight.
   function busy(p) {
@@ -352,6 +367,7 @@ export function page(o: PageOptions): string {
   </nav>
   <span class="spacer"></span>
   <a id="status" class="status" href="/status" title="checking"><i class="led"></i><span>checking</span></a>
+  <a id="account" class="account" href="/auth/github?next=${escapeHtml(o.active === "review" ? "/review" : "/contribute")}" title="contributors and maintainers sign in with GitHub">Sign in</a>
 </header>
 
 <main>

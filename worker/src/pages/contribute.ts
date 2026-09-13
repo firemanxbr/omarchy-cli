@@ -14,11 +14,14 @@ const BODY = String.raw`
 
   <section id="signin">
     <h2>1. Who you are</h2>
-    <p class="sub">A GitHub account is your identity. Paste a <a href="https://github.com/settings/personal-access-tokens/new">fine-grained token</a> with <b>no permissions</b> (or the output of <code>gh auth token</code>): the pool uses it once, to read your login, and never stores it. You get a contributor token back, kept in this browser.</p>
-    <form class="searchbar" id="signin-form" onsubmit="return false">
-      <input type="password" id="gh-token" placeholder="github_pat_… or gho_…" autocomplete="off" style="flex:1;min-width:280px">
-      <button type="submit" id="signin-btn">Sign in with GitHub</button>
-    </form>
+    <p class="sub">A GitHub account is your identity — nothing else is asked. <a class="button" id="oauth-link" href="/auth/github?next=/contribute"><b>Sign in with GitHub →</b></a></p>
+    <details id="token-alt"><summary class="sub">Without a browser sign-in (scripts, CI): a GitHub token, used once</summary>
+      <p class="sub">Paste a <a href="https://github.com/settings/personal-access-tokens/new">fine-grained token</a> with <b>no permissions</b> (or the output of <code>gh auth token</code>): the pool reads your login with it and never stores it; you get a contributor token for the API, kept in this browser.</p>
+      <form class="searchbar" id="signin-form" onsubmit="return false">
+        <input type="password" id="gh-token" placeholder="github_pat_… or gho_…" autocomplete="off" style="flex:1;min-width:280px">
+        <button type="submit" id="signin-btn">Sign in with a token</button>
+      </form>
+    </details>
     <p class="sub" id="signin-state"></p>
   </section>
 
@@ -72,7 +75,9 @@ const SCRIPT = String.raw`
   var API = "/api/v1/factory", REPO = "${REPO_URL}";
   var token = null, login = null;
   try { token = localStorage.getItem("omc_token"); login = localStorage.getItem("omc_login"); } catch (e) {}
-  function auth() { return { "authorization": "Bearer " + token, "content-type": "application/json" }; }
+  // The cookie from "Sign in with GitHub" authenticates same-origin calls; a
+  // token from the fallback form is sent as a bearer header.
+  function auth() { var h = { "content-type": "application/json" }; if (token) h["authorization"] = "Bearer " + token; return h; }
   function call(method, path, body) {
     return busy(fetch(API + path, { method: method, headers: auth(), body: body ? JSON.stringify(body) : undefined })).then(function (r) { return r.json().then(function (d) { d.__status = r.status; return d; }); });
   }
@@ -82,9 +87,9 @@ const SCRIPT = String.raw`
   }
   function took(ms) { if (ms == null) return "—"; var s = Math.round(ms / 1000); return s < 60 ? s + " s" : Math.floor(s / 60) + " min " + (s % 60) + " s"; }
   function showSigned() {
-    $("#signin-state").innerHTML = 'Signed in as <b>' + esc(login) + '</b> · <a href="#" id="signout">sign out of this browser</a>';
-    $("#signin-form").hidden = true; $("#signed").hidden = false;
-    $("#signout").onclick = function () { try { localStorage.removeItem("omc_token"); localStorage.removeItem("omc_login"); } catch (e) {} location.reload(); return false; };
+    $("#signin-state").innerHTML = 'Signed in as <b>' + esc(login) + '</b> · <a href="#" id="signout">sign out</a>';
+    $("#oauth-link").hidden = true; $("#token-alt").hidden = true; $("#signed").hidden = false;
+    $("#signout").onclick = function () { try { localStorage.removeItem("omc_token"); localStorage.removeItem("omc_login"); } catch (e) {} location.href = "/auth/logout"; return false; };
     refresh();
   }
   $("#signin-form").onsubmit = function () {
@@ -161,6 +166,7 @@ const SCRIPT = String.raw`
     else if (b.hasAttribute("data-revoke")) { call("DELETE", "/workers/" + encodeURIComponent(b.getAttribute("data-revoke"))).then(refresh); }
   });
   if (token && login) showSigned();
+  else whoami(function (me) { if (me) { login = me.login; showSigned(); } });
   liveStats(function () {}, 120000);
 `;
 
