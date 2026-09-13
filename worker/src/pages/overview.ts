@@ -7,7 +7,7 @@ import type { RunningVersion } from "../meta";
 
 const BODY = String.raw`
   <h1>Arch, Arch Linux ARM and Omarchy packages, tested before they reach you</h1>
-  <p class="lede">One repository for Omarchy on x86_64 and aarch64. Every upstream package is verified against its project's signing key, stored once, and served in three rings: <code>edge</code> follows upstream within three hours, <code>rc</code> is what passed a real pacman and an ABI check on both architectures, <code>stable</code> is what stayed healthy in <code>rc</code> for a day — and rolls back by itself if it stops being. One <code>Server =</code> line instead of a repository per project. <a href="/get-started">Get started →</a></p>
+  <p class="lede">One repository for Omarchy on x86_64 and aarch64. Every upstream package is verified against its project's signing key, stored once, and served in three rings: <code>edge</code> follows upstream within three hours, <code>rc</code> is what passed a real pacman and an ABI check on both architectures, <code>stable</code> is what stayed healthy in <code>rc</code> for a day — and rolls back by itself if it stops being. One <code>Server =</code> line instead of a repository per project. <a href="/docs/get-started">Get started →</a></p>
 
   <div class="tiles" id="tiles"></div>
 
@@ -95,7 +95,7 @@ __CHARTS__
         '<div class="desc"><b>' + info.title + '.</b> ' + info.text + '</div>' +
         (rel ? '<div class="rel">release <b>#' + rel.seq + '</b> · ' + ago(rel.created_at) + (rel.note ? ' · ' + esc(rel.note) : '') + '</div>' : '<div class="rel">no release yet</div>') +
         (archBlocks || '<div class="muted">empty</div>') +
-        '<div class="cta"><a href="/get-started?ring=' + name + '">Use ' + name + ' →</a></div>' +
+        '<div class="cta"><a href="/docs/get-started?ring=' + name + '">Use ' + name + ' →</a></div>' +
       '</div>';
     }).join("");
 

@@ -68,6 +68,14 @@ const CSS = String.raw`
   .searchbar input:focus { outline: none; border-color: var(--green); }
   .searchbar .choice { margin: 0; }
   .crumbs { color: var(--dim); font-size: 13px; margin: 0 0 6px; } .crumbs a { color: var(--muted); text-decoration: none; }
+  .docs-bar { display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: 13.5px; margin: -8px 0 22px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+  .docs-bar a { color: var(--muted); text-decoration: none; padding: 2px 0; border-bottom: 1px solid transparent; }
+  .docs-bar a:hover { color: var(--text); } .docs-bar a.on { color: var(--text); border-bottom-color: var(--green); }
+  .docs-bar a:first-child { color: var(--dim); } .docs-bar a:first-child::after { content: " ›"; }
+  .doc-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 16px; }
+  .doc-cards a { display: block; border: 1px solid var(--line); background: var(--panel); padding: 18px 20px; text-decoration: none; color: var(--text); }
+  .doc-cards a:hover { border-color: var(--green); } .doc-cards h3 { margin: 0 0 6px; } .doc-cards p { color: var(--muted); font-size: 14px; margin: 0; }
+  .shot { border: 1px solid var(--line); background: var(--panel-2); padding: 14px 16px; color: var(--dim); font-size: 13px; margin: 8px 0 14px; }
   .meta { display: flex; flex-wrap: wrap; gap: 6px 10px; font-size: 13px; color: var(--muted); margin: 10px 0 36px; }
   .meta .sep { color: var(--line); }
   ul.plain { list-style: none; margin: 0; padding: 0; font-size: 13.5px; line-height: 1.8; }
@@ -316,7 +324,9 @@ export interface PageOptions {
   title: string;
   description: string;
   /** Which nav entry is highlighted. */
-  active: "overview" | "packages" | "security" | "factory" | "contribute" | "review" | "get-started" | "pipeline" | "how-it-works" | "governance";
+  active: "overview" | "packages" | "security" | "factory" | "contribute" | "review" | "docs" | "pipeline";
+  /** Documentation pages: which chapter, for the section's own navigation. */
+  doc?: DocKey;
   body: string;
   script?: string;
   poolUrl: string;
@@ -329,9 +339,27 @@ export const NAV: { key: PageOptions["active"]; href: string; label: string }[] 
   { key: "factory", href: "/factory", label: "Factory" },
   { key: "contribute", href: "/contribute", label: "Contributors" },
   { key: "review", href: "/review", label: "Review" },
-  { key: "get-started", href: "/get-started", label: "Get started" },
-  { key: "how-it-works", href: "/how-it-works", label: "How it works" },
+  { key: "docs", href: "/docs", label: "Documentation" },
 ];
+
+export type DocKey = "index" | "get-started" | "workers" | "how-it-works" | "governance" | "api";
+
+/** The documentation's chapters, in reading order; every docs page carries this bar. */
+export const DOCS: { key: DocKey; href: string; label: string; blurb: string }[] = [
+  { key: "get-started", href: "/docs/get-started", label: "Get started", blurb: "Point pacman at a ring: the key, the Server line, the upgrade." },
+  { key: "workers", href: "/docs/workers", label: "Run a worker", blurb: "The container images on GitHub Packages, with Docker Desktop or Podman: your own packages, donated compute, the project's builds." },
+  { key: "how-it-works", href: "/docs/how-it-works", label: "How it works", blurb: "The pool, the rings, promotion by evidence, the factory, signing." },
+  { key: "governance", href: "/docs/governance", label: "Governance", blurb: "Contributors and maintainers, groups, and how a pull request is the only way to become a maintainer." },
+  { key: "api", href: "/api", label: "API", blurb: "Every endpoint the dashboard and the tools use." },
+];
+
+function docsBar(current: DocKey | undefined): string {
+  if (!current) return "";
+  const items = [{ key: "index" as DocKey, href: "/docs", label: "Documentation" }, ...DOCS].map(
+    (d) => `<a href="${d.href}"${d.key === current ? ' class="on"' : ""}>${d.label}</a>`,
+  );
+  return `<nav class="docs-bar" aria-label="Documentation">${items.join("")}</nav>`;
+}
 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c] ?? c);
@@ -344,6 +372,7 @@ export function page(o: PageOptions): string {
     ? `<a class="ver" href="${escapeHtml(v.release_url)}" title="running release">${tag}</a>`
     : `<span class="ver" title="local build">${tag}</span>`;
   const nav = NAV.map((n) => `<a href="${n.href}"${n.key === o.active ? ' class="active"' : ""}>${n.label}</a>`).join("\n    ");
+  const docs = docsBar(o.doc);
   const pool = o.poolUrl.replace(/\/$/, "");
   return `<!doctype html>
 <html lang="en">
@@ -371,6 +400,7 @@ export function page(o: PageOptions): string {
 </header>
 
 <main>
+${docs}
 ${o.body}
 </main>
 
@@ -378,7 +408,7 @@ ${o.body}
   <span>omarchy-pool</span><span class="sep">·</span>
   <a href="https://github.com/firemanxbr/omarchy-pool/blob/main/LICENSE">MIT license</a><span class="sep">·</span>
   <a class="gh" href="https://github.com/firemanxbr/omarchy-pool">${GITHUB_ICON} GitHub</a><span class="sep">·</span>
-  <a href="/governance">Governance</a><span class="sep">·</span>
+  <a href="/docs">Documentation</a><span class="sep">·</span>
   <a href="/api">API</a><span class="sep">·</span>
   <a href="/status">Status</a><span class="sep">·</span>
   <span>running ${v.release_url ? `<a href="${escapeHtml(v.release_url)}">${tag}</a>` : tag}${v.commit && v.commit_url ? ` · <a href="${escapeHtml(v.commit_url)}">${escapeHtml(v.commit.slice(0, 7))}</a>` : ""}</span>

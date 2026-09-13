@@ -66,7 +66,8 @@ export function apiDocsHtml(poolUrl: string, version: RunningVersion): string {
   return page({
     title: "API · omarchy-pool",
     description: "The omarchy-pool JSON API: rings, releases, packages, dependency graph, journal.",
-    active: "overview",
+    active: "docs",
+    doc: "api",
     body: BODY,
     script: "liveStats(function () {}, 120000);",
     poolUrl,

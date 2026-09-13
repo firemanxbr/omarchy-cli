@@ -102,7 +102,8 @@ export function getStartedHtml(poolUrl: string, version: RunningVersion): string
   return page({
     title: "Get started · omarchy-pool",
     description: "Point pacman at the omarchy-pool: the database key, the repository sections for a ring, and the optional omarchy-cli.",
-    active: "get-started",
+    active: "docs",
+    doc: "get-started",
     body: BODY,
     script: SCRIPT,
     poolUrl,
