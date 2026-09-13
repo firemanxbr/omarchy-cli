@@ -131,6 +131,11 @@ This is the local proof for POC questions 1 and 2: pool objects are uploaded onc
 (re-publishing is a no-op), promotion is an index write measured in milliseconds,
 and pacman consumes the generated database exactly as it would a `repo-add` one.
 
+The run also verifies what the local pool serves: `pkg-repo verify` finds
+the fixtures clean, then a signature of other bytes planted beside zlib —
+found, and without an upstream channel serving those bytes, reported for a
+replacement rather than kept.
+
 The same run exercises the factory against seeded workers and contributors:
 claims with worker and job tokens, a community build staged through the
 job token and its evidence served, the audit it queues (a community worker

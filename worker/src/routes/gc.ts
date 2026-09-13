@@ -92,8 +92,15 @@ export async function handleGc(url: URL, env: Env): Promise<Response> {
   }
   const victims = packages.slice(0, limit);
   let bytes = 0;
+  let objectsKept = 0;
   for (const p of victims) {
-    await env.PACKAGES.delete([packageKey(p.repo_arch, p.filename), signatureKey(p.repo_arch, p.filename)]);
+    // One object per <arch>/<filename>: an upstream rebuild of the same
+    // version with different bytes (the OPR, per channel) can leave two
+    // index rows behind one key. The row goes; the object only when no
+    // other row — served or not — still names it.
+    const shared = await env.DB.prepare("SELECT COUNT(*) AS n FROM packages WHERE filename = ? AND repo_arch = ? AND id != ?").bind(p.filename, p.repo_arch, p.id).first<{ n: number }>();
+    if (shared?.n) objectsKept++;
+    else await env.PACKAGES.delete([packageKey(p.repo_arch, p.filename), signatureKey(p.repo_arch, p.filename)]);
     await env.DB.batch([
       env.DB.prepare("DELETE FROM package_provides WHERE package_id = ?").bind(p.id),
       env.DB.prepare("DELETE FROM package_requires WHERE package_id = ?").bind(p.id),
@@ -112,5 +119,5 @@ export async function handleGc(url: URL, env: Env): Promise<Response> {
     `DELETE FROM cve_meta WHERE updated_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-90 days')
        AND NOT EXISTS (SELECT 1 FROM advisories a, json_each(a.cves) j WHERE j.value = cve_meta.cve)`,
   ).run();
-  return json({ keep, deleted: victims.length, bytes, remaining: packages.length - victims.length, protected_releases: protectedReleases, kept_checkpoints: keptCheckpoints, membership_rows_pruned: pruned.meta.changes ?? 0, delta_rows_pruned: deltasPruned, cve_meta_pruned: cves.meta.changes ?? 0 });
+  return json({ keep, deleted: victims.length, objects_kept_for_another_row: objectsKept, bytes, remaining: packages.length - victims.length, protected_releases: protectedReleases, kept_checkpoints: keptCheckpoints, membership_rows_pruned: pruned.meta.changes ?? 0, delta_rows_pruned: deltasPruned, cve_meta_pruned: cves.meta.changes ?? 0 });
 }
