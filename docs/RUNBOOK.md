@@ -177,6 +177,15 @@ role — approves or rejects:
 - **Reject** needs a note; the package returns to *registered* with the
   note in its detail, the staged objects expire with the rest.
 
+**Sign in with GitHub** (the header's *Sign in*) is a GitHub OAuth App:
+create one at *GitHub → Settings → Developer settings → OAuth Apps* with
+the callback URL `https://omarchy-pool.firemanxbr.org/auth/github/callback`
+(and the dashboard as homepage), then set `GITHUB_OAUTH_CLIENT_ID` in
+`wrangler.toml` and `npx wrangler secret put GITHUB_OAUTH_CLIENT_SECRET`.
+The session is an HttpOnly cookie on the dashboard's origin; the pages call
+the API same-origin. Without the app, the Contributors page still accepts a
+GitHub token used once.
+
 Roles: an admin names maintainers and their areas —
 `PATCH /api/v1/factory/contributors/<login> {"role":"maintainer","areas":["community"]}`
 (the publish token also works during the transition). An empty `areas`

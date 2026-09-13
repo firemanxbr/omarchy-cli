@@ -54,6 +54,7 @@ import type { Actor } from "./routes/factory";
 import { jobOf } from "./jobtoken";
 import { handleTrustWorker, handleSetRole, handleTrustList } from "./routes/contributors";
 import { handleReviewList, handleApprove, handleReject, handleApprovals } from "./routes/review";
+import { handleAuthStart, handleAuthCallback, handleLogout } from "./routes/auth";
 import { reviewHtml } from "./pages/review";
 import { handleGetEvents, handlePostEvent } from "./routes/events";
 import { handleServiceStatus, handleStats } from "./routes/stats";
@@ -90,6 +91,9 @@ export interface Env {
   FACTORY_TOKEN?: string;
   /** Signs per-job tokens (jobtoken.ts); any random string. */
   JOB_TOKEN_SECRET?: string;
+  /** GitHub OAuth App for "Sign in with GitHub" (routes/auth.ts). */
+  GITHUB_OAUTH_CLIENT_ID?: string;
+  GITHUB_OAUTH_CLIENT_SECRET?: string;
   /** Task kinds the scheduler creates as pulled jobs instead of GitHub workflows (comma-separated). */
   JOB_KINDS?: string;
 }
@@ -128,6 +132,14 @@ export default {
         return await handleStatic(decodeURIComponent(path.slice("/pool/".length)), request, env);
       }
       if (path === "/" || path === "/index.html") return html(overviewHtml(env.POOL_URL, version(env)));
+      // Sign in with GitHub: cookie session for the dashboard's pages.
+      if (path === "/auth/github" && method === "GET") return handleAuthStart(url, env);
+      if (path === "/auth/github/callback" && method === "GET") return handleAuthCallback(url, request, env);
+      if (path === "/auth/logout") return handleLogout(url);
+      if (path === "/auth/me" && method === "GET") {
+        const c = await contributorOf(request, env);
+        return c ? json({ login: c.login, name: c.name, avatar_url: c.avatar_url, role: c.role, areas: c.areas }, 200, { "cache-control": "no-store" }) : json({ error: "not signed in" }, 401, { "cache-control": "no-store" });
+      }
       if (path === "/get-started") return html(getStartedHtml(env.POOL_URL, version(env)));
       if (path === "/how-it-works") return html(howItWorksHtml(env.POOL_URL, version(env)));
       if (path === "/status") return html(statusHtml(env.POOL_URL, version(env)));
