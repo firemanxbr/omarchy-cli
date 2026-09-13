@@ -22,6 +22,7 @@ const BODY = String.raw`
     <p class="sub">Every upstream repository the pool mirrors: what upstream serves, what <code>edge</code> already pins, what <code>stable</code> pins. The target is all of it, on both architectures; nothing is stored twice (superseded versions stay in the pool until retention runs, so the size can exceed the upstream's).</p>
     <div class="table-wrap"><table id="coverage"><thead><tr><th>Source</th><th>Arch</th><th class="num">Upstream</th><th class="num">In edge</th><th class="num">Missing</th><th class="num">In stable</th><th>Progress</th><th class="num">Size</th><th>Last sync</th></tr></thead><tbody></tbody></table></div>
     <p class="sub" id="provenance" hidden></p>
+    <p class="sub" id="any" hidden></p>
   </section>
 
   <section id="pipeline">
@@ -289,8 +290,15 @@ const CHARTS = String.raw`  // ---- tiny SVG charts (no library; the page has no
     el.hidden = false;
     el.innerHTML = '<b>OPR recipes in stable:</b> ' + num(pv.packages) + ' packages — ' + num(pv.local) + " Omarchy's own, <b>" + num(pv.aur) + ' still synced from the AUR</b>' + (pv.unknown ? ', ' + num(pv.unknown) + ' of unknown origin' : '') + ' (<a href="https://github.com/omacom/omarchy-pkgs/tree/master/pkgbuilds">omarchy-pkgs</a>, read daily; each package page says which). The AUR number is the one to drive to zero.';
   }
+  // Architecture-independent packages stored once per architecture: Arch Linux ARM rebuilds and re-signs them.
+  function renderAny(d) {
+    var a = d.any && d.any.stable; var el = $("#any"); if (!a || !el || !a.names) return;
+    el.hidden = false;
+    el.innerHTML = '<b>Architecture-independent packages in stable:</b> ' + num(a.names) + ' (' + num(a.objects) + ' objects, ' + bytes(a.bytes) + ') — ' + num(a.twice) + ' of them stored twice, once per architecture, because Arch Linux ARM rebuilds and re-signs <code>any</code> packages: ' + bytes(a.extra_bytes) + ' the pool would not need if one signed object served both.';
+  }
   function renderCoverage(d) {
     renderProvenance(d);
+    renderAny(d);
     var cov = (d.coverage || []).slice().sort(function (a, b) { return a.arch === b.arch ? (a.source < b.source ? -1 : 1) : (a.arch === "x86_64" ? -1 : 1); });
     var tot = cov.reduce(function (t, c) { t.up += c.upstream_total || 0; t.have += c.indexed; t.miss += c.missing || 0; t.bytes += c.bytes; t.pending += c.upstream_total == null ? 1 : 0; return t; }, { up: 0, have: 0, miss: 0, bytes: 0, pending: 0 });
     function pctOf(have, up) { if (!up) return 0; var p = 100 * have / up; return p >= 100 ? 100 : Math.floor(p); }
