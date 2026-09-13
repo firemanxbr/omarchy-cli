@@ -52,12 +52,14 @@ import {
 } from "./routes/contributors";
 import type { Actor } from "./routes/factory";
 import { jobOf } from "./jobtoken";
-import { handleTrustWorker, handleSetRole, handleTrustList } from "./routes/contributors";
+import { handleTrustWorker, handleTrustList, handleNewToken } from "./routes/contributors";
+import { groupsOf, GOVERNANCE_FILE } from "./governance";
 import { handleReviewList, handleApprove, handleReject, handleApprovals } from "./routes/review";
 import { handleAuthStart, handleAuthCallback, handleLogout } from "./routes/auth";
 import { handleSignPool } from "./routes/pool";
 import { signingEnabled, publicKey } from "./signing";
 import { reviewHtml } from "./pages/review";
+import { governanceHtml } from "./pages/governance";
 import { handleGetEvents, handlePostEvent } from "./routes/events";
 import { handleServiceStatus, handleStats } from "./routes/stats";
 import { handleGc, handleUnreferenced } from "./routes/gc";
@@ -152,6 +154,7 @@ export default {
       if (path === "/factory") return html(factoryHtml(env.POOL_URL, version(env)));
       if (path === "/contribute") return html(contributeHtml(env.POOL_URL, version(env)));
       if (path === "/review") return html(reviewHtml(env.POOL_URL, version(env)));
+      if (path === "/governance") return html(governanceHtml(env.POOL_URL, version(env)));
       if (path.startsWith("/package/")) return html(packageHtml(decodeURIComponent(path.slice("/package/".length)), env.POOL_URL, version(env)));
       return json({ error: "not found" }, 404);
     } catch (err) {
@@ -187,11 +190,11 @@ async function factoryRoutes(method: string, path: string, url: URL, request: Re
     if ((m = path.match(/^\/factory\/workers\/([A-Za-z0-9_.-]+)\/trust$/)) && method === "POST") return handleTrustWorker(c, m[1], request, env);
     return null;
   }
-  // Roles: an admin's token, or the publish token while the transition lasts.
-  if ((m = path.match(/^\/factory\/contributors\/([A-Za-z0-9-]+)$/)) && method === "PATCH") {
+  // Roles are not set here: factory/MAINTAINERS.toml on main names the
+  // maintainers (governance.ts); a signed-in contributor may mint a CLI token.
+  if (method === "POST" && path === "/factory/token") {
     const c = await contributorOf(request, env);
-    if (c && c.role === "admin") return handleSetRole(m[1], request, env, c.login);
-    return requireAuth(request, env) ?? handleSetRole(m[1], request, env, "publish-token");
+    return c ? handleNewToken(c, env) : json({ error: "sign in first" }, 401);
   }
   // Maintainers: approve or reject a staged build.
   if ((m = path.match(/^\/factory\/tasks\/(\d+)\/(approve|reject)$/)) && method === "POST") {
@@ -298,6 +301,10 @@ async function api(method: string, path: string, url: URL, request: Request, env
   if (method === "GET" && path === "/factory/built") return handleBuilt(env);
   if (method === "GET" && path === "/factory/packages") return handleListPackages(env);
   if (method === "GET" && path === "/factory/trust") return handleTrustList(env);
+  if (method === "GET" && path === "/factory/groups") {
+    const synced = await env.DB.prepare("SELECT updated_at FROM settings WHERE key = 'governance_sha256'").first<{ updated_at: string }>();
+    return json({ groups: await groupsOf(env), source: GOVERNANCE_FILE, synced_at: synced?.updated_at ?? null }, 200, { "cache-control": "public, max-age=60" });
+  }
   if (method === "GET" && path === "/factory/review") return handleReviewList(env);
   if (method === "GET" && path === "/factory/approvals") return handleApprovals(env);
   if (method === "GET" && path === "/factory/me") {

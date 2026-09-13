@@ -1,0 +1,72 @@
+#!/usr/bin/env python3
+"""Checks factory/MAINTAINERS.toml and keeps .github/CODEOWNERS derived from it.
+
+The file names the groups and their maintainers (see docs/GOVERNANCE.md).
+CODEOWNERS is what makes GitHub ask a maintainer for review: the file
+itself and CODEOWNERS are owned by every maintainer, each
+factory/pkgbuilds/<group>/ by that group's maintainers. CI runs this
+without --write and fails when the two disagree; a maintainer runs it with
+--write in the pull request that changes the file.
+"""
+import re
+import sys
+import tomllib
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+GOV = ROOT / "factory" / "MAINTAINERS.toml"
+CODEOWNERS = ROOT / ".github" / "CODEOWNERS"
+NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
+LOGIN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,38}$")
+
+
+def load():
+    doc = tomllib.loads(GOV.read_text())
+    groups = doc.get("groups")
+    if not isinstance(groups, dict) or not groups:
+        sys.exit(f"{GOV.name}: no [groups.<name>] tables")
+    out = {}
+    for name, g in groups.items():
+        if not NAME.match(name):
+            sys.exit(f"{GOV.name}: group name {name!r} is not [a-z0-9-]")
+        ms = g.get("maintainers")
+        if not isinstance(ms, list) or not ms or not all(isinstance(m, str) and LOGIN.match(m) for m in ms):
+            sys.exit(f"{GOV.name}: group {name!r} needs a non-empty list of GitHub logins")
+        if not (ROOT / "factory" / "pkgbuilds" / name).is_dir():
+            print(f"note: factory/pkgbuilds/{name}/ does not exist yet (fine for a group with registry packages only)")
+        out[name] = {"description": str(g.get("description", "")), "maintainers": list(dict.fromkeys(ms))}
+    return dict(sorted(out.items()))
+
+
+def expected(groups):
+    everyone = sorted({m for g in groups.values() for m in g["maintainers"]}, key=str.lower)
+    owners = lambda ms: " ".join("@" + m for m in ms)
+    lines = [
+        "# Generated from factory/MAINTAINERS.toml by factory/bin/check-governance --write;",
+        "# CI fails when the two disagree. Every maintainer owns the governance file and",
+        "# this one; each group's maintainers own its PKGBUILDs. With main requiring a",
+        "# code-owner review, a change here is a decision another maintainer approves.",
+        f"factory/MAINTAINERS.toml  {owners(everyone)}",
+        f".github/CODEOWNERS        {owners(everyone)}",
+        f"factory/pkgbuilds/sizing/ {owners(everyone)}",
+    ]
+    for name, g in groups.items():
+        lines.append(f"factory/pkgbuilds/{name}/ {owners(g['maintainers'])}")
+    return "\n".join(lines) + "\n"
+
+
+def main():
+    groups = load()
+    want = expected(groups)
+    have = CODEOWNERS.read_text() if CODEOWNERS.exists() else ""
+    if "--write" in sys.argv:
+        CODEOWNERS.write_text(want)
+        print(f"{CODEOWNERS.relative_to(ROOT)} written for {len(groups)} group(s)")
+        return
+    if have != want:
+        sys.exit(f"{CODEOWNERS.relative_to(ROOT)} does not match {GOV.relative_to(ROOT)}; run factory/bin/check-governance --write")
+    print(f"governance ok: {len(groups)} group(s), maintainers {sorted({m for g in groups.values() for m in g['maintainers']})}")
+
+
+if __name__ == "__main__":
+    main()

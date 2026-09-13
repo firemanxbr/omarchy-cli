@@ -1,4 +1,5 @@
 import { json, type Env } from "../index";
+import { roleFor } from "../governance";
 import { sha256Hex } from "./contributors";
 
 /**
@@ -68,12 +69,17 @@ export async function handleAuthCallback(url: URL, request: Request, env: Env): 
   // one (if any) stops working — the same as POST /factory/register.
   const b = new Uint8Array(24);
   crypto.getRandomValues(b);
-  const token = `omc_${[...b].map((x) => x.toString(16).padStart(2, "0")).join("")}`;
+  // A browser session (oms_): separate from the CLI / worker token (omc_),
+  // which signing in must not replace. A first sign-in registers the
+  // contributor with a token they can replace from the Contributors page.
+  const token = `oms_${[...b].map((x) => x.toString(16).padStart(2, "0")).join("")}`;
+  const { role, areas } = await roleFor(env, u.login);
   await env.DB.prepare(
-    `INSERT INTO contributors (login, name, avatar_url, token_hash) VALUES (?, ?, ?, ?)
-     ON CONFLICT (login) DO UPDATE SET name = excluded.name, avatar_url = excluded.avatar_url, token_hash = excluded.token_hash, last_seen = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`,
+    `INSERT INTO contributors (login, name, avatar_url, token_hash, session_hash, role, areas) VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT (login) DO UPDATE SET name = excluded.name, avatar_url = excluded.avatar_url, session_hash = excluded.session_hash,
+       role = excluded.role, areas = excluded.areas, last_seen = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`,
   )
-    .bind(u.login, u.name ?? null, u.avatar_url ?? null, await sha256Hex(token))
+    .bind(u.login, u.name ?? null, u.avatar_url ?? null, await sha256Hex(`unset:${crypto.randomUUID()}`), await sha256Hex(token), role, JSON.stringify(areas))
     .run();
   const headers = new Headers({ location: next });
   headers.append("set-cookie", cookie("omc", token, 30 * 86400, url.protocol === "https:"));

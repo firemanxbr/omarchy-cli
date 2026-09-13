@@ -1,4 +1,5 @@
 import { json, type Env } from "../index";
+import { groupsOf, roleFor, GOVERNANCE_FILE } from "../governance";
 import { isRepoArch } from "../r2";
 import { providedBy } from "./factory";
 import { cookieOf } from "./auth";
@@ -48,12 +49,20 @@ export interface Contributor {
   areas: string[];
 }
 
-/** The contributor behind a `omc_…` token — the bearer header, or the sign-in cookie — or null. */
+/**
+ * The contributor behind the request — a `omc_…` bearer token (the CLI /
+ * worker credential) or the sign-in cookie (a browser session, `oms_…`,
+ * separate so signing in never invalidates a running worker) — or null.
+ */
 export async function contributorOf(request: Request, env: Env): Promise<Contributor | null> {
-  let token = bearer(request);
-  if (!token) token = cookieOf(request, "omc") ?? "";
-  if (!token.startsWith("omc_")) return null;
-  const row = await env.DB.prepare("SELECT login, name, avatar_url, role, areas FROM contributors WHERE token_hash = ?").bind(await sha256Hex(token)).first<{ login: string; name: string | null; avatar_url: string | null; role: string; areas: string | null }>();
+  const token = bearer(request);
+  const session = token ? "" : (cookieOf(request, "omc") ?? "");
+  let row: { login: string; name: string | null; avatar_url: string | null; role: string; areas: string | null } | null = null;
+  if (token.startsWith("omc_")) {
+    row = await env.DB.prepare("SELECT login, name, avatar_url, role, areas FROM contributors WHERE token_hash = ?").bind(await sha256Hex(token)).first();
+  } else if (session.startsWith("oms_")) {
+    row = await env.DB.prepare("SELECT login, name, avatar_url, role, areas FROM contributors WHERE session_hash = ?").bind(await sha256Hex(session)).first();
+  }
   if (!row) return null;
   await env.DB.prepare("UPDATE contributors SET last_seen = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE login = ?").bind(row.login).run();
   return { ...row, areas: row.areas ? JSON.parse(row.areas) : [] };
@@ -89,13 +98,22 @@ export async function handleRegister(request: Request, env: Env): Promise<Respon
   const u = (await res.json()) as { login: string; name?: string; avatar_url?: string; type?: string };
   if (!u.login || u.type === "Bot") return json({ error: "a user account is required" }, 400);
   const token = newToken("omc");
+  const { role, areas } = await roleFor(env, u.login);
   await env.DB.prepare(
-    `INSERT INTO contributors (login, name, avatar_url, token_hash) VALUES (?, ?, ?, ?)
-     ON CONFLICT (login) DO UPDATE SET name = excluded.name, avatar_url = excluded.avatar_url, token_hash = excluded.token_hash, last_seen = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`,
+    `INSERT INTO contributors (login, name, avatar_url, token_hash, role, areas) VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT (login) DO UPDATE SET name = excluded.name, avatar_url = excluded.avatar_url, token_hash = excluded.token_hash,
+       role = excluded.role, areas = excluded.areas, last_seen = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`,
   )
-    .bind(u.login, u.name ?? null, u.avatar_url ?? null, await sha256Hex(token))
+    .bind(u.login, u.name ?? null, u.avatar_url ?? null, await sha256Hex(token), role, JSON.stringify(areas))
     .run();
-  return json({ login: u.login, token, note: "Keep this token; registering again replaces it. Use it as `Authorization: Bearer …` for /factory/packages and /factory/workers." }, 201);
+  return json({ login: u.login, role, areas, token, note: "Keep this token; registering again replaces it. Use it as `Authorization: Bearer …` for /factory/packages and /factory/workers." }, 201);
+}
+
+/** A signed-in contributor mints (or replaces) the CLI / worker token; the browser session stays. */
+export async function handleNewToken(c: Contributor, env: Env): Promise<Response> {
+  const token = newToken("omc");
+  await env.DB.prepare("UPDATE contributors SET token_hash = ? WHERE login = ?").bind(await sha256Hex(token), c.login).run();
+  return json({ login: c.login, token, note: "Shown once; it replaces any earlier token. Use it as `Authorization: Bearer …` on the command line and for workers." }, 201);
 }
 
 export async function handleMe(c: Contributor, env: Env): Promise<Response> {
@@ -164,7 +182,9 @@ export async function handleRegisterPackage(c: Contributor, request: Request, en
   const build = arches.filter((a) => !upstream.some((u) => u.arch === a));
   const detected = await detect(url, env);
   if (detected.error) return json({ error: String(detected.error) }, 400);
-  const group = b.group === "omarchy" ? "omarchy" : "community";
+  // The group decides who reviews: one of factory/MAINTAINERS.toml's.
+  const groups = (await groupsOf(env)).map((g) => g.name);
+  const group = b.group && groups.includes(b.group) ? b.group : groups.includes("community") ? "community" : (groups[0] ?? "community");
   const row = await env.DB.prepare(
     `INSERT INTO factory_packages (name, owner, url, "group", arches, release, pkgbuild_path, detected) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (name) DO UPDATE SET url = excluded.url, "group" = excluded."group", arches = excluded.arches, release = excluded.release,
@@ -216,20 +236,19 @@ export async function handleBuildPackage(c: Contributor, name: string, request: 
 }
 
 export async function handleRegisterWorker(c: Contributor, request: Request, env: Env): Promise<Response> {
-  const b = (await request.json()) as { name?: string; arch?: string; mode?: string; packages?: unknown; labels?: unknown };
+  const b = (await request.json()) as { name?: string; arch?: string; labels?: unknown };
   if (!b.arch || !isRepoArch(b.arch)) return json({ error: "arch (x86_64|aarch64) is required" }, 400);
-  const mode = b.mode === "shared" ? "shared" : "dedicated";
-  const packages = mode === "dedicated"
-    ? (Array.isArray(b.packages) && b.packages.length ? b.packages.filter((p): p is string => typeof p === "string") : (await env.DB.prepare("SELECT name FROM factory_packages WHERE owner = ?").bind(c.login).all<{ name: string }>()).results.map((r) => r.name))
-    : [];
+  // A worker builds its owner's packages. Donating it to anyone's is decided
+  // where it runs (--shared / WORKER_SHARED=1), never here, so a registration
+  // cannot quietly turn a laptop into everybody's build machine.
   const id = `${c.login}-${(b.name ?? b.arch).replace(/[^a-zA-Z0-9_.-]/g, "-")}-${Math.random().toString(36).slice(2, 6)}`;
   const token = newToken("omw");
   await env.DB.prepare(
-    `INSERT INTO build_workers (id, arch, hostname, labels, owner, token_hash, mode, packages, last_seen) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
+    `INSERT INTO build_workers (id, arch, hostname, labels, owner, token_hash, mode, packages, last_seen) VALUES (?, ?, NULL, ?, ?, ?, 'dedicated', '[]', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
   )
-    .bind(id, b.arch, b.labels ? JSON.stringify(b.labels) : null, c.login, await sha256Hex(token), mode, JSON.stringify(packages))
+    .bind(id, b.arch, b.labels ? JSON.stringify(b.labels) : null, c.login, await sha256Hex(token))
     .run();
-  return json({ worker: id, token, mode, arch: b.arch, packages, note: "Run the Omarchy Packaging image with WORKER_ID and OMARCHY_WORKER_TOKEN set to these; the token is shown once." }, 201);
+  return json({ worker: id, token, arch: b.arch, note: "Run the Omarchy Packaging image with WORKER_ID and OMARCHY_WORKER_TOKEN set to these; the token is shown once. It builds your packages; start it with WORKER_SHARED=1 to build anyone's." }, 201);
 }
 
 export async function handleRevokeWorker(c: Contributor, id: string, env: Env): Promise<Response> {
@@ -336,8 +355,14 @@ export async function handleStagingGet(taskId: number, filename: string, env: En
 
 // ---------- maintainers ----------
 
+/** Maintainers are named by factory/MAINTAINERS.toml (governance.ts); there is no other role above contributor. */
 export function isMaintainer(c: Contributor): boolean {
-  return c.role === "maintainer" || c.role === "admin";
+  return c.role === "maintainer";
+}
+
+/** May this contributor act for a group — approve its builds, review its packages? */
+export function maintains(c: Contributor, group: string): boolean {
+  return isMaintainer(c) && c.areas.includes(group);
 }
 
 /** A maintainer promotes a worker to project trust (or back): a recorded action, revocable. */
@@ -355,22 +380,9 @@ export async function handleTrustWorker(c: Contributor, id: string, request: Req
   return json({ worker: id, trust, by: c.login });
 }
 
-/** Roles: an admin (or, while the transition lasts, the publish token) names maintainers and their areas. */
-export async function handleSetRole(login: string, request: Request, env: Env, by: string): Promise<Response> {
-  const b = (await request.json()) as { role?: string; areas?: unknown };
-  const role = ["contributor", "maintainer", "admin"].includes(b.role ?? "") ? (b.role as string) : "contributor";
-  const areas = Array.isArray(b.areas) ? b.areas.filter((a): a is string => typeof a === "string") : [];
-  const res = await env.DB.prepare("UPDATE contributors SET role = ?, areas = ? WHERE login = ?").bind(role, JSON.stringify(areas), login).run();
-  if (!res.meta.changes) return json({ error: `${login} has not registered yet (POST /factory/register)` }, 404);
-  await env.DB.prepare("INSERT INTO events (kind, ring, source, status, summary, payload) VALUES ('role', NULL, 'factory', 'ok', ?, ?)")
-    .bind(`${login} is now ${role}${areas.length ? " of " + areas.join(", ") : ""} (by ${by})`, JSON.stringify({ login, role, areas, by }))
-    .run();
-  return json({ login, role, areas });
-}
-
 /** Workers the project trusts and the people who may approve: the dashboard's trust page. */
 export async function handleTrustList(env: Env): Promise<Response> {
   const workers = await env.DB.prepare("SELECT id, owner, arch, mode, trust, trusted_by, trusted_at, last_seen, revoked_at FROM build_workers WHERE trust = 'project' OR owner IS NULL ORDER BY trust DESC, last_seen DESC LIMIT 100").all();
-  const people = await env.DB.prepare("SELECT login, name, role, areas, last_seen FROM contributors WHERE role != 'contributor' ORDER BY role, login").all();
-  return json({ workers: workers.results, maintainers: people.results.map((p) => ({ ...p, areas: p.areas ? JSON.parse(p.areas as string) : [] })) }, 200, { "cache-control": "public, max-age=30" });
+  const people = await env.DB.prepare("SELECT login, name, role, areas, last_seen FROM contributors WHERE role = 'maintainer' ORDER BY login").all();
+  return json({ workers: workers.results, maintainers: people.results.map((p) => ({ ...p, areas: p.areas ? JSON.parse(p.areas as string) : [] })), groups: await groupsOf(env), source: GOVERNANCE_FILE }, 200, { "cache-control": "public, max-age=30" });
 }

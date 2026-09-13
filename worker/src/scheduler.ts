@@ -1,6 +1,7 @@
 import type { Env } from "./index";
 import { requeueExpiredLeases, pruneWorkers } from "./routes/factory";
 import { snapshotMetrics } from "./metrics";
+import { syncGovernance } from "./governance";
 
 /**
  * The pool's own scheduler. GitHub's cron is best-effort — on 2026-09-12 it
@@ -180,6 +181,13 @@ export async function runScheduler(env: Env, now = new Date()): Promise<string[]
     if (gone) log.push(`factory: ${gone} unregistered worker(s) forgotten`);
   } catch (e) {
     log.push(`factory requeue: ${String(e)}`);
+  }
+  // Governance: who maintains what, from the file on main.
+  try {
+    const g = await syncGovernance(env);
+    if (g !== "governance: unchanged") log.push(g);
+  } catch (e) {
+    log.push(`governance: ${String(e)}`);
   }
   // The metrics snapshot is the brain's own bookkeeping: no worker needed.
   if (jobMode(env, "metrics")) {
