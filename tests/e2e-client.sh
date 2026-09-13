@@ -101,7 +101,7 @@ export_rootfs "$OLD" "$ROOT/target/rootfs-2021"
 echo "current glibc: $(grep -A1 '%VERSION%' "$ROOT"/target/rootfs-current/var/lib/pacman/local/glibc-*/desc | tail -1)"
 echo "2021 glibc:    $(grep -A1 '%VERSION%' "$ROOT"/target/rootfs-2021/var/lib/pacman/local/glibc-*/desc | tail -1)"
 # Every .hook the current image ships parses (pkg-hooks' real-hooks test).
-OMARCHY_HOOKS_ROOT="$ROOT/target/rootfs-current" cargo test -q -p pkg-hooks --test real_hooks 2>&1 | tail -1
+OMARCHY_HOOKS_ROOT="$ROOT/target/rootfs-current" cargo test -q -p pkg-hooks --test real_hooks
 
 step "status / check on the current system (expected: safe)"
 "$CLI" "${CLI_ARGS[@]}" --root "$ROOT/target/rootfs-current" status
