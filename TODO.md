@@ -13,9 +13,6 @@ request (see [CONTRIBUTING.md](CONTRIBUTING.md)), and keep
 ## Medium (half a day)
 
 
-- [ ] **ABI gate on real installations.** The gate checks the upgrades against the
-      official base image; run it also against an exported Omarchy installation
-      (the ISO's package set) so the check covers what users actually have.
 
 ## Larger (needs a design conversation first)
 
@@ -94,7 +91,8 @@ security regressions block a promotion · promotion and rollback per
 architecture · the client's hook preview, config example and ring check ·
 `any` packages stored twice, counted on the overview · what statically linked
 binaries embed (Go modules, cargo-auditable crates) in the manifest and the
-index · OSV advisories against them.
+index · OSV advisories against them · the ABI gate against an Omarchy
+installation too · the verify job (served OPR objects checked and repaired).
 
 ## Factory findings (2026-09-12)
 

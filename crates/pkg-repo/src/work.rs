@@ -631,6 +631,7 @@ fn script(
         .env("OMARCHY_TOKEN", token.lock().unwrap().clone())
         .env("PKG_REPO", &exe)
         .env("OMARCHY_KEYRINGS", opts.work_dir.join("keyrings"))
+        .env("OMARCHY_WORK_DIR", &opts.work_dir)
         .env("OMARCHY_CLI", bin.join("omarchy-cli"))
         .env("PKG_EXTRACT", bin.join("pkg-extract"))
         .current_dir(&repo)

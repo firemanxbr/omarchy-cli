@@ -223,6 +223,18 @@ promotion — on the project worker, with the job's token (`OMARCHY_TOKEN`).
 
 ## ABI gate
 
+`tests/abi-gate.sh <ring> [arch]` checks two references: the distribution's
+base image and, on x86_64, the Omarchy installation `tests/omarchy-rootfs.sh`
+builds from `stable` (cached a week under `OMARCHY_WORK_DIR`); the `abi`
+event carries one entry per reference (`references`), blockers in either
+block. Run by hand:
+
+```bash
+OMARCHY_API=… OMARCHY_POOL=… OMARCHY_TOKEN=… OMARCHY_KEYRINGS=… OMARCHY_WORK_DIR=… tests/abi-gate.sh rc x86_64
+```
+
+### The check itself
+
 ```bash
 OMARCHY_API=… OMARCHY_POOL=… OMARCHY_TOKEN=… tests/abi-gate.sh rc x86_64
 ```
