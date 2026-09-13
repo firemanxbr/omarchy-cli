@@ -66,7 +66,7 @@ const SCRIPT = String.raw`
   busy(fetch("/api/v1/factory/groups")).then(function (r) { return r.json(); }).then(function (d) {
     $("#synced").textContent = d.synced_at ? "(" + ago(d.synced_at) + ")" : "(not yet)";
     pager("#groups", d.groups || [], function (g) {
-      return '<tr><td><b>' + esc(g.name) + '</b><br><span class="mono muted">factory/pkgbuilds/' + esc(g.name) + '/</span></td><td>' + esc(g.description) + '</td><td>' + (g.maintainers || []).map(function (m) { return '<a href="https://github.com/' + esc(m) + '">' + esc(m) + '</a>'; }).join(", ") + '</td></tr>';
+      return '<tr><td><b>' + esc(g.name) + '</b><br><span class="mono muted">factory/pkgbuilds/' + esc(g.name) + '/</span></td><td>' + esc(g.description) + '</td><td>' + (g.maintainers || []).map(function (m) { return '<a href="/user/' + encodeURIComponent(m) + '">' + esc(m) + '</a>'; }).join(", ") + '</td></tr>';
     }, { empty: "no groups applied yet — the pool reads factory/MAINTAINERS.toml on main every ten minutes" });
   }).catch(function () { endSkeleton(); });
   busy(fetch("/api/v1/events?kind=role&limit=50")).then(function (r) { return r.json(); }).then(function (d) {

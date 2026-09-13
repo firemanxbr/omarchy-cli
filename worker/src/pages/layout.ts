@@ -281,7 +281,7 @@ const HELPERS = String.raw`
   function whoami(cb) {
     fetch("/auth/me", { cache: "no-store" }).then(function (r) { return r.ok ? r.json() : null; }).then(function (me) {
       ME = me; var a = $("#account"); if (!a) return;
-      if (me) { a.innerHTML = '<b>' + esc(me.login) + '</b> <span class="who">' + esc(me.role) + '</span> · sign out'; a.href = "/auth/logout"; a.title = "signed in with GitHub as " + me.login + (me.areas && me.areas.length ? " (" + me.areas.join(", ") + ")" : ""); }
+      if (me) { a.innerHTML = '<b>' + esc(me.login) + '</b> <span class="who">' + esc(me.role) + '</span>'; a.href = "/user/" + encodeURIComponent(me.login); a.title = "signed in with GitHub as " + me.login + (me.areas && me.areas.length ? " (" + me.areas.join(", ") + ")" : ""); }
       if (cb) cb(me);
     }).catch(function () { if (cb) cb(null); });
   }

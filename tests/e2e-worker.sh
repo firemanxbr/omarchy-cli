@@ -225,6 +225,10 @@ review=$(curl -s "$OMARCHY_API/api/v1/factory/review"); grep -q '"staged"' <<<"$
 groups=$(curl -s "$OMARCHY_API/api/v1/factory/groups"); grep -q '"maintainers":\["e2e"\]' <<<"$groups" || { echo "groups not served from the governance table: $groups"; exit 1; }
 me=$(curl -s "$OMARCHY_API/api/v1/factory/me" -H "authorization: Bearer omc_e2e"); grep -q '"role":"maintainer"' <<<"$me" || { echo "the seeded maintainer is not one: $me"; exit 1; }
 gpage=$(curl -s "$OMARCHY_API/docs/governance"); grep -q "Becoming a maintainer" <<<"$gpage" || { echo "governance page not served"; exit 1; }
+upage=$(curl -s "$OMARCHY_API/api/v1/users/e2e"); grep -q '"role":"maintainer"' <<<"$upage" && grep -q '"github":"https://github.com/e2e"' <<<"$upage" || { echo "the profile API did not describe the seeded maintainer: $upage"; exit 1; }
+[[ "$(curl -s -o /dev/null -w '%{http_code}' "$OMARCHY_API/api/v1/users/nobody-here")" == 404 ]] || { echo "an unknown login must be 404"; exit 1; }
+upg=$(curl -s "$OMARCHY_API/user/e2e"); grep -q "omarchy-pool" <<<"$upg" || { echo "profile page not served"; exit 1; }
+pkgm=$(curl -s "$OMARCHY_API/api/v1/package/zlib?ring=stable"); grep -q '"maintenance":{"packager":' <<<"$pkgm" || { echo "package view lacks maintenance: $(head -c 200 <<<"$pkgm")"; exit 1; }
 # No shared secret: a maintainer runs jobs by hand (queued, not executed with their token); a contributor cannot.
 mauth=(-H "authorization: Bearer omc_e2e" -H "content-type: application/json")
 qj=$(curl -s -X POST "$OMARCHY_API/api/v1/factory/jobs" "${mauth[@]}" -d '{"kind":"health","params":{"ring":"stable","arch":"x86_64"}}')

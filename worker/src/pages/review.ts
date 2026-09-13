@@ -38,6 +38,7 @@ const SCRIPT = String.raw`
   function headers() { var h = { "content-type": "application/json" }; if (token && !signedIn) h["authorization"] = "Bearer " + token; return h; }
   $("#who").innerHTML = 'Read-only until you <a href="/auth/github?next=/review">sign in with GitHub</a>; approving and rejecting need the maintainer role.';
   whoami(function (me) { if (me) { login = me.login; signedIn = true; $("#who").innerHTML = 'Signed in as <b>' + esc(me.login) + '</b> (' + esc(me.role) + (me.areas && me.areas.length ? ' of ' + esc(me.areas.join(", ")) : '') + ')' + (me.role === "contributor" ? ' — approving needs the maintainer role.' : '.'); load(); } });
+  function person(l) { return l ? '<a href="/user/' + encodeURIComponent(l) + '">' + esc(l) + '</a>' : ''; }
   function decide(id, what) {
     var note = what === "reject" ? prompt("Why? The contributor sees this.") : (prompt("Note for the record (optional)") || "");
     if (what === "reject" && !note) return;
@@ -53,7 +54,7 @@ const SCRIPT = String.raw`
         var det = t.detected || {};
         return '<tr><td>' + t.id + '</td><td><b>' + esc(t.name) + '</b> <span class="src">' + esc(t.group) + '</span>' + (t.version ? ' <span class="mono muted">' + esc(t.version) + '</span>' : '') + '</td><td>' + esc(t.arch) + '</td>' +
           '<td>' + (t.url ? '<a href="' + esc(t.url) + '">' + esc(t.url.replace(/^https?:\/\/(www\.)?github\.com\//, "")) + '</a>' : '—') + '</td><td>' + esc([det.build_system, det.license, det.latest_tag].filter(Boolean).join(" · ")) + '</td>' +
-          '<td>' + esc(t.owner || "") + ' <span class="muted">' + (t.duration_ms ? Math.round(t.duration_ms / 1000) + " s" : "") + '</span></td>' +
+          '<td>' + person(t.owner) + ' <span class="muted">' + (t.duration_ms ? Math.round(t.duration_ms / 1000) + " s" : "") + '</span></td>' +
           '<td><a class="run" href="' + t.evidence.pkgbuild + '">PKGBUILD</a> <a class="run" href="' + t.evidence.log + '">log</a> <a class="run" href="' + t.evidence.pkginfo + '">PKGINFO</a> <span class="mono muted">' + esc((t.result_sha256 || "").slice(0, 12)) + '</span></td>' +
           '<td>' + (token || signedIn ? '<button type="button" data-approve="' + t.id + '">Approve</button> <button type="button" data-reject="' + t.id + '">Reject</button>' : '<span class="muted">sign in</span>') + '</td></tr>';
       }, { empty: 'nothing waiting for review' });
@@ -61,16 +62,16 @@ const SCRIPT = String.raw`
     }).catch(function () { endSkeleton(); });
     busy(fetch(API + "/trust")).then(function (r) { return r.json(); }).then(function (d) {
       pager("#trust", (d.workers || []), function (w) {
-        return '<tr><td class="mono">' + esc(w.id) + (w.revoked_at ? ' <span class="pill none">revoked</span>' : '') + '</td><td>' + esc(w.owner || "project") + '</td><td>' + esc(w.arch) + '</td><td>' + esc(w.trust) + '</td><td>' + esc(w.trusted_by || "—") + '</td><td>' + ago(w.last_seen) + '</td></tr>';
+        return '<tr><td class="mono">' + esc(w.id) + (w.revoked_at ? ' <span class="pill none">revoked</span>' : '') + '</td><td>' + (w.owner ? person(w.owner) : "project") + '</td><td>' + esc(w.arch) + '</td><td>' + esc(w.trust) + '</td><td>' + (w.trusted_by ? person(w.trusted_by) : "—") + '</td><td>' + ago(w.last_seen) + '</td></tr>';
       }, { empty: 'no trusted worker yet' });
       pager("#people", (d.maintainers || []), function (p) {
-        return '<tr><td><b>' + esc(p.login) + '</b>' + (p.name ? ' <span class="muted">' + esc(p.name) + '</span>' : '') + '</td><td>' + esc(p.role) + '</td><td>' + esc((p.areas || []).join(", ") || "all") + '</td><td>' + ago(p.last_seen) + '</td></tr>';
+        return '<tr><td><b>' + person(p.login) + '</b>' + (p.name ? ' <span class="muted">' + esc(p.name) + '</span>' : '') + '</td><td>' + esc(p.role) + '</td><td>' + esc((p.areas || []).join(", ") || "all") + '</td><td>' + ago(p.last_seen) + '</td></tr>';
       }, { empty: 'no maintainer named yet' });
       endSkeleton();
     }).catch(function () { endSkeleton(); });
     busy(fetch(API + "/approvals")).then(function (r) { return r.json(); }).then(function (d) {
       pager("#decisions", (d.approvals || []), function (a) {
-        return '<tr><td>' + ago(a.created_at) + '</td><td><b>' + esc(a.name) + '</b>' + (a.version ? ' <span class="mono muted">' + esc(a.version) + '</span>' : '') + '</td><td>' + esc(a.arch) + '</td><td>' + esc(a.decision) + '</td><td>' + esc(a.by) + '</td><td>' + esc(a.note || "") + '</td><td>' + (a.rebuild_task ? '#' + a.rebuild_task + ' ' + esc(a.rebuild_status || "") + (a.rebuild_result ? ' <span class="mono">' + esc(a.rebuild_result) + '</span>' : '') : '—') + '</td></tr>';
+        return '<tr><td>' + ago(a.created_at) + '</td><td><b>' + esc(a.name) + '</b>' + (a.version ? ' <span class="mono muted">' + esc(a.version) + '</span>' : '') + '</td><td>' + esc(a.arch) + '</td><td>' + esc(a.decision) + '</td><td>' + person(a.by) + '</td><td>' + esc(a.note || "") + '</td><td>' + (a.rebuild_task ? '#' + a.rebuild_task + ' ' + esc(a.rebuild_status || "") + (a.rebuild_result ? ' <span class="mono">' + esc(a.rebuild_result) + '</span>' : '') : '—') + '</td></tr>';
       }, { empty: 'no decision yet' });
       endSkeleton();
     }).catch(function () { endSkeleton(); });
