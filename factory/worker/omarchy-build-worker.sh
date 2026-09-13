@@ -50,6 +50,7 @@ log() { printf '[%s] %s\n' "$(date -u +%H:%M:%S)" "$*" >&2; }
 #   <commit>                   factory/pkgbuilds/<group>/<name> in omarchy-pool at that commit
 #   <url>@<tag>:<path>         the contributor's own repository at a tag (path is the PKGBUILD or its directory)
 #   draft:<url>@<tag|latest>   drafted here by factory/bin/draft-pkgbuild (the contributor's agent key, if any)
+#   staging:<task>             the PKGBUILD a contributor's build staged, approved by a maintainer (the project rebuild)
 prepare_container() {
   # pacman's download sandbox (seccomp + landlock) has no place in an
   # already-isolated, sometimes emulated container.
@@ -89,7 +90,12 @@ add_pool_repos() { # arch pool
 fetch_pkgbuild() { # name group ref → /build/pkg holds the PKGBUILD directory
   local name="$1" group="$2" ref="$3"
   rm -rf /build/pkg /build/src
-  if [[ "$ref" == draft:* ]]; then
+  if [[ "$ref" == staging:* ]]; then
+    local from="${ref#staging:}"
+    echo "==> PKGBUILD from staged task $from (approved)"
+    mkdir -p /build/pkg
+    curl -sSf "${OMARCHY_API:-https://pkgs.firemanxbr.org}/api/v1/factory/tasks/$from/artifacts/PKGBUILD" -o /build/pkg/PKGBUILD
+  elif [[ "$ref" == draft:* ]]; then
     local spec url
     spec="${ref#draft:}"; url="${spec%@*}"
     echo "==> Drafting a PKGBUILD for $url ($( [[ -n "${ANTHROPIC_API_KEY:-}" ]] && echo "with the contributor's Claude key" || echo "template; set ANTHROPIC_API_KEY on the worker for an agent-written draft"))"
@@ -316,7 +322,7 @@ build() { # task json
   ref="$(jq -r .task.pkgbuild_ref <<<"$task")"; reason="$(jq -r .task.reason <<<"$task")"; publish="$(jq -r '.task.publish // 1' <<<"$task")"
   local dir="$WORK/task-$id" started=$SECONDS logfile="$WORK/task-$id.log"
   rm -rf "$dir"; mkdir -p "$dir/out"; chmod 777 "$dir" "$dir/out"
-  printf 'name=%q\ngroup=%q\nref=%q\narch=%q\npool=%q\n' "$name" "$group" "$ref" "$ARCH" "$OMARCHY_POOL" > "$dir/meta.sh"
+  printf 'name=%q\ngroup=%q\nref=%q\narch=%q\npool=%q\nexport OMARCHY_API=%q\n' "$name" "$group" "$ref" "$ARCH" "$OMARCHY_POOL" "$OMARCHY_API" > "$dir/meta.sh"
   cp "${BASH_SOURCE[0]}" "$dir/worker.sh"
   log "task $id: $name for $ARCH at $ref ($reason)$([[ $publish == 0 ]] && echo " — dry run") → fresh $IMAGE"
   heartbeat_loop "$id" & local beat=$!

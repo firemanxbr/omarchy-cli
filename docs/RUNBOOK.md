@@ -156,6 +156,29 @@ the worker's own token only claims. Kinds not listed in `JOB_KINDS` keep
 running as GitHub workflows, dispatched by the same scheduler. Worker
 secrets: `JOB_TOKEN_SECRET` (any random string) signs the job tokens.
 
+## Maintainers: reviewing contributed builds
+
+The **Review** page lists staged builds (a contributor's package built on
+their worker, with PKGBUILD, log and PKGINFO). A maintainer of the package's
+group — signed in on Contribute with a contributor token that carries the
+role — approves or rejects:
+
+- **Approve** records the decision (`approvals`, with your login and note)
+  and queues a **project build** of the staged PKGBUILD (`pkgbuild_ref =
+  staging:<task>`, trust `project`). A project worker (`pkg-repo work`, or
+  the hosted fallback) builds it in a fresh container, signs it, publishes
+  it into `edge` as source `factory` and renders; from there the package
+  follows the rings like any other. The contributor's bytes are never
+  served.
+- **Reject** needs a note; the package returns to *registered* with the
+  note in its detail, the staged objects expire with the rest.
+
+Roles: an admin names maintainers and their areas —
+`PATCH /api/v1/factory/contributors/<login> {"role":"maintainer","areas":["community"]}`
+(the publish token also works during the transition). An empty `areas`
+list means every group. `GET /api/v1/factory/approvals` is the public
+record.
+
 ## The factory
 
 What no upstream ships is built from `factory/pkgbuilds` by workers that pull

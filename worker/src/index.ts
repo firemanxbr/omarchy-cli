@@ -53,6 +53,8 @@ import {
 import type { Actor } from "./routes/factory";
 import { jobOf } from "./jobtoken";
 import { handleTrustWorker, handleSetRole, handleTrustList } from "./routes/contributors";
+import { handleReviewList, handleApprove, handleReject, handleApprovals } from "./routes/review";
+import { reviewHtml } from "./pages/review";
 import { handleGetEvents, handlePostEvent } from "./routes/events";
 import { handleServiceStatus, handleStats } from "./routes/stats";
 import { handleGc, handleUnreferenced } from "./routes/gc";
@@ -134,6 +136,7 @@ export default {
       if (path === "/security") return html(securityHtml(env.POOL_URL, version(env)));
       if (path === "/factory") return html(factoryHtml(env.POOL_URL, version(env)));
       if (path === "/contribute") return html(contributeHtml(env.POOL_URL, version(env)));
+      if (path === "/review") return html(reviewHtml(env.POOL_URL, version(env)));
       if (path.startsWith("/package/")) return html(packageHtml(decodeURIComponent(path.slice("/package/".length)), env.POOL_URL, version(env)));
       return json({ error: "not found" }, 404);
     } catch (err) {
@@ -173,6 +176,12 @@ async function factoryRoutes(method: string, path: string, url: URL, request: Re
     const c = await contributorOf(request, env);
     if (c && c.role === "admin") return handleSetRole(m[1], request, env, c.login);
     return requireAuth(request, env) ?? handleSetRole(m[1], request, env, "publish-token");
+  }
+  // Maintainers: approve or reject a staged build.
+  if ((m = path.match(/^\/factory\/tasks\/(\d+)\/(approve|reject)$/)) && method === "POST") {
+    const c = await contributorOf(request, env);
+    if (!c) return json({ error: "a maintainer's contributor token is required" }, 401);
+    return m[2] === "approve" ? handleApprove(c, Number(m[1]), request, env) : handleReject(c, Number(m[1]), request, env);
   }
   // Workers: the project's (shared secret) or a registered one (own token).
   const workerActor = async (): Promise<Actor | Response> => {
@@ -263,6 +272,8 @@ async function api(method: string, path: string, url: URL, request: Request, env
   if (method === "GET" && path === "/factory/built") return handleBuilt(env);
   if (method === "GET" && path === "/factory/packages") return handleListPackages(env);
   if (method === "GET" && path === "/factory/trust") return handleTrustList(env);
+  if (method === "GET" && path === "/factory/review") return handleReviewList(env);
+  if (method === "GET" && path === "/factory/approvals") return handleApprovals(env);
   if (method === "GET" && path === "/factory/me") {
     const c = await contributorOf(request, env);
     return c ? handleMe(c, env) : json({ error: "a contributor token is required (POST /factory/register)" }, 401);
