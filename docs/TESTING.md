@@ -114,9 +114,12 @@ This is the local proof for POC questions 1 and 2: pool objects are uploaded onc
 and pacman consumes the generated database exactly as it would a `repo-add` one.
 
 The same run exercises the factory against seeded workers and contributors:
-claims with worker and job tokens, a community build staged and its evidence
-served, a shared worker waiting for `shared_after`, the governance table and
-groups API, the profile page and API, the browser session (`/auth/me` with the
+claims with worker and job tokens, a community build staged through the
+job token and its evidence served, the audit it queues (a community worker
+never gets it; the builder cannot write `audit.*`; a project worker declaring
+the `audit` kind attaches the report with the audit's own token, and only
+that; Review shows the verdict), a shared worker waiting for `shared_after`,
+the governance table and groups API, the profile page and API, the browser session (`/auth/me` with the
 cookie, sign-out invalidating it on the server while the CLI token keeps
 working), `workers/self`, and the approval rules (nobody approves their own
 package; the bootstrap exception with a single maintainer).
@@ -231,6 +234,15 @@ omarchy-cli --ring stable --root <rootfs> upgrade --security-only --dry-run
 The candidate rule (confident match, medium or worse or exploited in the wild,
 a clean newer version in the source ring) is unit-tested with the rest of the
 security module.
+
+## The auditor without a key
+
+`factory/bin/audit-pkgbuild` honours `ANTHROPIC_BASE_URL`, so a stub that
+answers `POST /v1/messages` with a fixed report exercises the parsing, the
+verdict check and the Markdown rendering without a key; `pkg-repo work
+--kind audit --once` against a local pool with the same variables runs the
+whole executor (fetch the staged evidence, attach `audit.json` / `audit.md`,
+complete with the verdict).
 
 ## Promotion gate
 

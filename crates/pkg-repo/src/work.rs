@@ -29,6 +29,22 @@ pub const REPO_URL: &str = "https://github.com/firemanxbr/omarchy-pool";
 const HEARTBEAT: Duration = Duration::from_secs(300);
 const POLL: Duration = Duration::from_secs(30);
 
+/// What a worker pulls when `--kind` is not given: every pool job and the
+/// project builds, plus `audit` when this machine has an agent key — the
+/// second agent (docs/GOVERNANCE.md) runs only where its owner put one.
+pub fn default_kinds() -> Vec<String> {
+    let mut kinds: Vec<String> = [
+        "build", "sync", "render", "promote", "health", "security", "enqueue", "rollback", "gc",
+    ]
+    .iter()
+    .map(|k| (*k).to_owned())
+    .collect();
+    if std::env::var("ANTHROPIC_API_KEY").is_ok_and(|k| !k.is_empty()) {
+        kinds.push("audit".to_owned());
+    }
+    kinds
+}
+
 pub struct WorkOptions {
     pub api: String,
     pub pool: String,
@@ -193,6 +209,11 @@ fn task_label(t: &Task) -> String {
         "security" => "security: advisories, matches, fast-track".to_owned(),
         "rollback" => format!("rollback {} → release {}", s(p, "ring"), s(p, "to")),
         "enqueue" => "enqueue: PKGBUILDs on main → the queue".to_owned(),
+        "audit" => format!(
+            "audit {} (staged task {})",
+            s(p, "name"),
+            p.get("task").map(ToString::to_string).unwrap_or_default()
+        ),
         "render" | "health" => format!("{} {}/{}", t.kind, s(p, "ring"), s(p, "arch")),
         _ => format!("{} {}", t.kind, t.name),
     }
@@ -335,6 +356,7 @@ fn execute(opts: &WorkOptions, task: &Task, token: &Arc<Mutex<String>>) -> Resul
             })
         }
         "build" => build_job(opts, &job, task),
+        "audit" => audit_job(opts, &job, task),
         other => Err(anyhow!("this worker does not run '{other}' jobs")),
     }
 }
@@ -719,6 +741,82 @@ fn build_job(opts: &WorkOptions, job: &Api, task: &Task) -> Result<Outcome> {
             rendered.join(", ")
         ),
         result: serde_json::json!({ "sha256": manifest.sha256, "filename": manifest.filename, "version": manifest.version, "rendered": rendered }),
+    })
+}
+
+/// The second agent: reads the evidence a contributor staged (PKGBUILD,
+/// build log, .PKGINFO — the public part of the staging workspace), asks
+/// the model for a structured review with `factory/bin/audit-pkgbuild`
+/// (the owner's `ANTHROPIC_API_KEY`, from this process's environment) and
+/// attaches `audit.json` and `audit.md` to the same evidence with the job's
+/// credential. The maintainer reads it; nothing here decides anything.
+fn audit_job(opts: &WorkOptions, job: &Api, task: &Task) -> Result<Outcome> {
+    anyhow::ensure!(
+        std::env::var("ANTHROPIC_API_KEY").is_ok_and(|k| !k.is_empty()),
+        "ANTHROPIC_API_KEY is not set on this worker; start it without the audit kind"
+    );
+    let staged = task
+        .params
+        .get("task")
+        .and_then(|v| {
+            v.as_u64()
+                .or_else(|| v.as_str().and_then(|x| x.parse().ok()))
+        })
+        .ok_or_else(|| anyhow!("audit needs `task`, the staged build's id"))?;
+    let repo = repo_dir(opts)?;
+    let dir = opts.work_dir.join(format!("audit-{}", task.id));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir)?;
+    let evidence = format!("{}/api/v1/factory/tasks/{staged}/artifacts", job.base());
+    for name in ["PKGBUILD", "build.log"] {
+        job.download(&format!("{evidence}/{name}"), &dir.join(name))
+            .with_context(|| format!("fetching {name} of staged task {staged}"))?;
+    }
+    let pkginfo = dir.join("PKGINFO");
+    let has_pkginfo = job
+        .download(&format!("{evidence}/PKGINFO"), &pkginfo)
+        .is_ok();
+    let mut cmd = Command::new("python3");
+    cmd.arg(repo.join("factory/bin/audit-pkgbuild"))
+        .arg("--pkgbuild")
+        .arg(dir.join("PKGBUILD"))
+        .arg("--log")
+        .arg(dir.join("build.log"))
+        .arg("--out")
+        .arg(&dir);
+    if has_pkginfo {
+        cmd.arg("--pkginfo").arg(&pkginfo);
+    }
+    let out = cmd.output().context("running audit-pkgbuild")?;
+    if !out.status.success() {
+        return Err(anyhow!(
+            "the audit produced no report (exit {:?}): {}",
+            out.status.code(),
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    let report: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(dir.join("audit.json"))?).context("audit.json")?;
+    for name in ["audit.json", "audit.md"] {
+        job.put_bytes(
+            &format!("/factory/tasks/{staged}/artifacts/{name}"),
+            &std::fs::read(dir.join(name))?,
+        )
+        .with_context(|| format!("attaching {name} to staged task {staged}"))?;
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+    let verdict = s(&report, "verdict");
+    let findings = report
+        .get("findings")
+        .and_then(|f| f.as_array())
+        .map_or(0, Vec::len);
+    Ok(Outcome {
+        summary: format!(
+            "{verdict}: {} ({findings} finding(s), {})",
+            s(&report, "summary"),
+            s(&report, "model")
+        ),
+        result: report,
     })
 }
 

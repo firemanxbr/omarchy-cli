@@ -54,14 +54,20 @@ PKGBUILD reviewed and merged ──▶ pool: build_requests / build_tasks (D1)
    corrected PKGBUILD — three attempts. The package, the PKGBUILD and the log
    land in the contributor's staging workspace as **evidence**; nothing is
    published.
-5. **A maintainer approves.** On the Review page, a maintainer of the group
+5. **The second agent reads it.** Staging the build queues an `audit`: a
+   project worker whose owner set an agent key reads the PKGBUILD, the log
+   and the `.PKGINFO`, asks the model for a structured review
+   (`factory/bin/audit-pkgbuild`, `factory/prompts/audit.md`) and attaches
+   `audit.json` / `audit.md` to the evidence. The Review page shows the
+   verdict (`ok`, `warn`, `block`); nothing acts on it, the maintainer does.
+6. **A maintainer approves.** On the Review page, a maintainer of the group
    (`factory/MAINTAINERS.toml`) approves or rejects with the evidence in
    front of them. Approval queues a **project build** of the same PKGBUILD
    on a worker the project trusts; what users get is the project's build,
    signed by the pool. The project's own recipes take the other door: a pull
    request adding `factory/pkgbuilds/<group>/<name>/PKGBUILD`, reviewed by
    the group's maintainers, queued by the hourly `enqueue` job on merge.
-6. **After that: bumps are evidence too.** Once a day the brain asks GitHub
+7. **After that: bumps are evidence too.** Once a day the brain asks GitHub
    for each approved package's latest release and queues a community build
    from the approved PKGBUILD with `pkgver` moved to the tag
    (`bump:<task>@<tag>`) — for the owner's worker first, for any `--shared`
@@ -70,13 +76,13 @@ PKGBUILD reviewed and merged ──▶ pool: build_requests / build_tasks (D1)
    takes it (docs/GOVERNANCE.md). Recipes in `factory/pkgbuilds/` are bumped
    by `factory-update.yml`: one pull request per package, reviewed, never
    auto-merged.
-7. **A worker builds it.** Any worker of that architecture claims the task,
+8. **A worker builds it.** Any worker of that architecture claims the task,
    holds a lease, builds in its fresh container, publishes the result
    into `edge` as source `factory` — the pool signs it with its own key —
    and renders the edge databases. From there
    it is a package like any other: health checks, the soak, `rc`, `stable`,
    the security layer, `omarchy-cli`.
-8. **If it fails**, the task returns to the queue with the log tail; after
+9. **If it fails**, the task returns to the queue with the log tail; after
    three attempts it is marked failed and the Factory page shows why. A
    worker that dies mid-build loses its lease and the task is requeued by the
    pool's scheduler within ten minutes.
@@ -259,6 +265,8 @@ factory/
 .github/ISSUE_TEMPLATE/package-request.yml   the request form the brain reads every ten minutes
   bin/draft-pkgbuild              project URL → PKGBUILD (Claude, or a template), checksums left to updpkgsums
   prompts/pkgbuild.md             the packaging rules the drafter follows
+  bin/audit-pkgbuild              the second agent: staged PKGBUILD + log + .PKGINFO → audit.json / audit.md
+  prompts/audit.md                what the auditor looks for, and the report's shape
   bin/check-updates               which PKGBUILDs are behind their GitHub upstream
 .github/CODEOWNERS                      who approves which group
 ```

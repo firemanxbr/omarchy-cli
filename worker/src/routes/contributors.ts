@@ -76,6 +76,8 @@ export interface WorkerIdentity {
   arch: string;
   /** community: its own or shared builds · project: everything, approved by a maintainer. */
   trust: string;
+  /** Set when the caller is a job token rather than a registered worker: the job's kind. */
+  job?: string;
 }
 
 /** The registered worker behind a `omw_…` token (not revoked), or null. */
@@ -294,11 +296,23 @@ export function stagingKey(owner: string, name: string, task: number, filename: 
  * holds. Scope is the task: the key is derived, never given. Up to 90 MB in
  * one request; larger archives use the multipart routes below.
  */
+/** What the audit job may add to a staged build's evidence, and nothing else. */
+const AUDIT_FILES = ["audit.json", "audit.md"];
+
 export async function handleStagingPut(taskId: number, filename: string, request: Request, env: Env, w: WorkerIdentity): Promise<Response> {
   const task = await env.DB.prepare("SELECT id, name, owner, status, lease_owner, trust FROM build_tasks WHERE id = ?").bind(taskId).first<{ id: number; name: string; owner: string; status: string; lease_owner: string; trust: string }>();
   if (!task) return json({ error: "no such task" }, 404);
   if (task.trust !== "community") return json({ error: "project tasks publish to the pool, not to staging" }, 400);
-  if (task.status !== "leased" || task.lease_owner !== w.id) return json({ error: "the lease is not yours" }, 409);
+  if (w.job === "audit") {
+    // The second agent's report, next to the evidence it read: only once
+    // the build is staged (its own worker is done), only the report files.
+    if (task.status !== "staged") return json({ error: `task ${taskId} is ${task.status}; the audit reports on a staged build` }, 409);
+    if (!AUDIT_FILES.includes(filename)) return json({ error: `an audit uploads ${AUDIT_FILES.join(" and ")}` }, 400);
+  } else {
+    if (task.status !== "leased" || task.lease_owner !== w.id) return json({ error: "the lease is not yours" }, 409);
+    // The builder never writes the report about its own build.
+    if (AUDIT_FILES.includes(filename)) return json({ error: `${filename} is written by the audit job, not by the build` }, 403);
+  }
   if (!/^[A-Za-z0-9][A-Za-z0-9._:+-]{0,200}$/.test(filename)) return json({ error: "bad filename" }, 400);
   const used = await env.DB.prepare("SELECT COALESCE(SUM(size), 0) AS bytes FROM staging_objects WHERE owner = ?").bind(task.owner).first<{ bytes: number }>();
   const len = Number(request.headers.get("content-length") ?? 0);
@@ -306,7 +320,7 @@ export async function handleStagingPut(taskId: number, filename: string, request
   if (len > SINGLE_PUT_MAX) return json({ error: "above 90 MB use /multipart" }, 413);
   if (!request.body) return json({ error: "empty body" }, 400);
   const key = stagingKey(task.owner, task.name, task.id, filename);
-  const obj = await env.STAGING.put(key, request.body, { httpMetadata: { contentType: filename.endsWith(".log") || filename === "PKGBUILD" ? "text/plain; charset=utf-8" : "application/octet-stream" } });
+  const obj = await env.STAGING.put(key, request.body, { httpMetadata: { contentType: isTextEvidence(filename) ? "text/plain; charset=utf-8" : "application/octet-stream" } });
   await env.DB.prepare("INSERT OR REPLACE INTO staging_objects (key, owner, task_id, size) VALUES (?, ?, ?, ?)").bind(key, task.owner, task.id, obj?.size ?? len).run();
   return json({ key, size: obj?.size ?? len }, 201);
 }
@@ -315,7 +329,7 @@ export async function handleStagingMultipart(taskId: number, filename: string, u
   const task = await env.DB.prepare("SELECT id, name, owner, status, lease_owner, trust FROM build_tasks WHERE id = ?").bind(taskId).first<{ id: number; name: string; owner: string; status: string; lease_owner: string; trust: string }>();
   if (!task || task.trust !== "community") return json({ error: "no such community task" }, 404);
   if (task.status !== "leased" || task.lease_owner !== w.id) return json({ error: "the lease is not yours" }, 409);
-  if (!/^[A-Za-z0-9][A-Za-z0-9._:+-]{0,200}$/.test(filename)) return json({ error: "bad filename" }, 400);
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:+-]{0,200}$/.test(filename) || AUDIT_FILES.includes(filename)) return json({ error: "bad filename" }, 400);
   const key = stagingKey(task.owner, task.name, task.id, filename);
   const action = url.searchParams.get("action");
   if (action === "create") {
@@ -351,10 +365,15 @@ export async function handleStagingList(taskId: number, env: Env): Promise<Respo
 }
 
 /** Text evidence of a community build: build.log and PKGBUILD are public; packages are for maintainers. */
+/** The evidence anyone may read: the recipe, the log, the metadata, the audit. Packages themselves are for maintainers. */
+function isTextEvidence(filename: string): boolean {
+  return filename.endsWith(".log") || filename === "PKGBUILD" || filename === "PKGINFO" || filename.endsWith(".json") || filename.endsWith(".md");
+}
+
 export async function handleStagingGet(taskId: number, filename: string, env: Env, maintainer: boolean): Promise<Response> {
   const row = await env.DB.prepare("SELECT key FROM staging_objects WHERE task_id = ? AND key LIKE ?").bind(taskId, `%/${filename}`).first<{ key: string }>();
   if (!row) return json({ error: "no such object" }, 404);
-  const isText = filename.endsWith(".log") || filename === "PKGBUILD" || filename.endsWith(".json");
+  const isText = isTextEvidence(filename);
   if (!isText && !maintainer) return json({ error: "packages in staging are for maintainers; the log and the PKGBUILD are public" }, 403);
   const obj = await env.STAGING.get(row.key);
   if (!obj) return json({ error: "gone (staging objects expire after 30 days)" }, 404);

@@ -238,8 +238,11 @@ enum Command {
         /// (donated compute; a community worker only).
         #[arg(long)]
         shared: bool,
-        /// Job kinds to pull (repeatable).
-        #[arg(long = "kind", default_values_t = ["build".to_owned(), "sync".to_owned(), "render".to_owned(), "promote".to_owned(), "health".to_owned(), "security".to_owned(), "enqueue".to_owned(), "rollback".to_owned(), "gc".to_owned()])]
+        /// Job kinds to pull (repeatable). Default: every pool job and the
+        /// project builds; `audit` (the second agent's review of a staged
+        /// build) joins them when `ANTHROPIC_API_KEY` is set — the worker
+        /// owner's key, never the pool's.
+        #[arg(long = "kind")]
         kinds: Vec<String>,
         /// Free JSON shown on the Factory page, e.g. {"where":"droplet-1"}.
         #[arg(long, default_value = "{}")]
@@ -483,7 +486,11 @@ fn main() -> Result<()> {
             } else {
                 arch
             },
-            kinds,
+            kinds: if kinds.is_empty() {
+                work::default_kinds()
+            } else {
+                kinds
+            },
             shared,
             labels: serde_json::from_str(&labels).context("--labels must be JSON")?,
             once,

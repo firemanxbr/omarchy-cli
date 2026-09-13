@@ -301,7 +301,9 @@ export async function runScheduler(env: Env, now = new Date()): Promise<string[]
       // Only pool jobs get a hosted fallback. Builds — contributors' on their
       // own workers, the project's on its trusted machines — never start a
       // GitHub runner: the project's compute is not for building packages.
-      const pending = await env.DB.prepare("SELECT COUNT(*) AS n FROM build_tasks WHERE status = 'queued' AND arch = ? AND kind != 'build' AND trust = 'project'").bind(d.arch).first<{ n: number }>();
+      // Audits neither: they need a worker owner's agent key, which GitHub
+      // never holds (SECURITY.md).
+      const pending = await env.DB.prepare("SELECT COUNT(*) AS n FROM build_tasks WHERE status = 'queued' AND arch = ? AND kind NOT IN ('build', 'audit') AND trust = 'project'").bind(d.arch).first<{ n: number }>();
       if (!pending?.n) {
         log.push(`factory ${d.arch}: ${d.queued} queued build(s) wait for a project worker (no hosted build workers)`);
         continue;

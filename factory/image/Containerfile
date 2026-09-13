@@ -37,11 +37,12 @@ RUN set -eu; name="omarchy-pool-${POOL_RELEASE}-${ARCH}-linux"; \
     curl -fsSL -o /tmp/tools.tgz.sha256 "https://github.com/firemanxbr/omarchy-pool/releases/download/${POOL_RELEASE}/${name}.tar.gz.sha256"; \
     cd /tmp && echo "$(cut -d' ' -f1 tools.tgz.sha256)  tools.tgz" | sha256sum -c -; \
     tar -xzf /tmp/tools.tgz -C /tmp && install -m 755 "/tmp/${name}"/pkg-repo "/tmp/${name}"/omarchy-cli "/tmp/${name}"/pkg-extract /usr/local/bin/ && rm -rf /tmp/tools.tgz* "/tmp/${name}"
-# The build half and the drafter (community mode); pacman runs at first start of a build.
+# The build half and the drafter (community mode), the auditor (project mode
+# with an agent key); pacman runs at first start of a build.
 COPY factory/worker/omarchy-build-worker.sh /usr/local/bin/omarchy-build-worker
 COPY factory/image/entrypoint.sh /usr/local/bin/omarchy-worker
-COPY factory/bin/draft-pkgbuild factory/bin/pkgbuild-meta /usr/local/lib/omarchy-factory/bin/
-COPY factory/prompts/pkgbuild.md /usr/local/lib/omarchy-factory/prompts/pkgbuild.md
+COPY factory/bin/draft-pkgbuild factory/bin/pkgbuild-meta factory/bin/audit-pkgbuild /usr/local/lib/omarchy-factory/bin/
+COPY factory/prompts/pkgbuild.md factory/prompts/audit.md /usr/local/lib/omarchy-factory/prompts/
 RUN chmod 755 /usr/local/bin/omarchy-build-worker /usr/local/bin/omarchy-worker /usr/local/lib/omarchy-factory/bin/* && mkdir -p /build /task /var/lib/omarchy-worker
 ENV OMARCHY_API=https://pkgs.firemanxbr.org OMARCHY_POOL=https://pool.firemanxbr.org \
     OMARCHY_WORK_DIR=/var/lib/omarchy-worker DOCKER_HOST=unix:///var/run/docker.sock

@@ -1,0 +1,87 @@
+#!/usr/bin/env python3
+"""The second agent: audits a staged build's PKGBUILD, log and .PKGINFO.
+
+Runs on a project worker whose owner set ANTHROPIC_API_KEY (the key is the
+worker owner's, never the pool's). Reads the evidence a contributor staged,
+asks the model for a structured review following factory/prompts/audit.md
+and writes audit.json and audit.md for the maintainer to read on the Review
+page. Exit 0 with a report, non-zero when no report could be produced.
+
+Usage: audit-pkgbuild --pkgbuild FILE --log FILE [--pkginfo FILE] --out DIR
+"""
+import argparse
+import json
+import os
+import re
+import sys
+import urllib.request
+
+RULES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "prompts", "audit.md")
+
+
+def ask(pkgbuild, log, pkginfo):
+    key = os.environ.get("ANTHROPIC_API_KEY")
+    if not key:
+        sys.exit("ANTHROPIC_API_KEY is not set: the audit needs the worker owner's agent key")
+    user = "--- PKGBUILD ---\n" + pkgbuild + "\n\n--- build log (tail) ---\n" + log[-12000:] + "\n"
+    if pkginfo:
+        user += "\n--- .PKGINFO ---\n" + pkginfo[:4000] + "\n"
+    user += "\nReturn the JSON report only."
+    body = json.dumps({
+        "model": os.environ.get("FACTORY_MODEL", "claude-sonnet-5"), "max_tokens": 3000,
+        "system": open(RULES).read(), "messages": [{"role": "user", "content": user}],
+    }).encode()
+    base = os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com").rstrip("/")
+    req = urllib.request.Request(base + "/v1/messages", data=body, method="POST",
+                                 headers={"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"})
+    with urllib.request.urlopen(req, timeout=180) as r:
+        out = json.load(r)
+    text = "".join(c.get("text", "") for c in out.get("content", []))
+    text = re.sub(r"^```\w*\n|\n```\s*$", "", text.strip())
+    try:
+        report = json.loads(text)
+    except json.JSONDecodeError:
+        m = re.search(r"\{.*\}", text, re.S)
+        if not m:
+            sys.exit("the model did not return a JSON report:\n" + text[:500])
+        report = json.loads(m.group(0))
+    if report.get("verdict") not in ("ok", "warn", "block"):
+        sys.exit("the report has no verdict:\n" + text[:500])
+    report["model"] = out.get("model", os.environ.get("FACTORY_MODEL", "claude-sonnet-5"))
+    report["findings"] = [f for f in report.get("findings", []) if isinstance(f, dict)]
+    return report
+
+
+def markdown(report):
+    lines = [f"# Audit: {report['verdict']}", "", report.get("summary", ""), ""]
+    if report["findings"]:
+        lines.append("| Severity | Area | Where | What | Fix |")
+        lines.append("|---|---|---|---|---|")
+        for f in report["findings"]:
+            cell = lambda k: str(f.get(k, "")).replace("|", "\\|").replace("\n", " ")
+            lines.append(f"| {cell('severity')} | {cell('area')} | {cell('where')} | {cell('what')} | {cell('fix')} |")
+    else:
+        lines.append("No findings.")
+    lines += ["", f"_Reviewed by {report['model']} on a project worker; the maintainer decides._", ""]
+    return "\n".join(lines)
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--pkgbuild", required=True)
+    ap.add_argument("--log", required=True)
+    ap.add_argument("--pkginfo")
+    ap.add_argument("--out", required=True)
+    a = ap.parse_args()
+    report = ask(open(a.pkgbuild).read(), open(a.log, errors="replace").read(),
+                 open(a.pkginfo, errors="replace").read() if a.pkginfo else None)
+    os.makedirs(a.out, exist_ok=True)
+    with open(os.path.join(a.out, "audit.json"), "w") as f:
+        json.dump(report, f, indent=1)
+    with open(os.path.join(a.out, "audit.md"), "w") as f:
+        f.write(markdown(report))
+    print(f"{report['verdict']}: {report.get('summary', '')} ({len(report['findings'])} finding(s))")
+
+
+if __name__ == "__main__":
+    main()
