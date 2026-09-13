@@ -136,8 +136,14 @@ sup=$(curl -s -X PUT "$OMARCHY_API/api/v1/releases/1/artifacts/db.sig?repo=omarc
 grep -q '"status":"superseded"' <<<"$sup" || { echo "client signature was not superseded: $sup"; exit 1; }
 # A release that only touches aarch64 keeps x86_64's rendered databases: the
 # artifact rows carry over and the response says not to render it again.
-unch=$(curl -s -X POST "$OMARCHY_API/api/v1/releases" -H "Authorization: Bearer $OMARCHY_TOKEN" -H "content-type: application/json" -d '{"ring":"stable","remove":["nothing-here"],"remove_arch":"aarch64","note":"aarch64-only change"}')
-grep -q '"unchanged_arches":\["x86_64"\]' <<<"$unch" || { echo "an aarch64-scoped release must report x86_64 unchanged: $unch"; exit 1; }
+unch=$(curl -s -w '\nHTTP %{http_code} in %{time_total}s' -X POST "$OMARCHY_API/api/v1/releases" -H "Authorization: Bearer $OMARCHY_TOKEN" -H "content-type: application/json" -d '{"ring":"stable","remove":["nothing-here"],"remove_arch":"aarch64","note":"aarch64-only change"}')
+if ! grep -q '"unchanged_arches":\["x86_64"\]' <<<"$unch"; then
+  echo "an aarch64-scoped release did not report x86_64 unchanged: $unch"
+  echo "--- once more, two seconds later:"
+  sleep 2; curl -s -w '\nHTTP %{http_code} in %{time_total}s\n' -X POST "$OMARCHY_API/api/v1/releases" -H "Authorization: Bearer $OMARCHY_TOKEN" -H "content-type: application/json" -d '{"ring":"stable","remove":["nothing-here"],"remove_arch":"aarch64","note":"aarch64-only change, retry"}'
+  curl -s "$OMARCHY_API/api/v1/status"; echo
+  exit 1
+fi
 carried=$(curl -s "$OMARCHY_API/api/v1/releases/stable?fields=summary"); grep -q '"repo":"omarchy-packages-stable","arch":"x86_64","kind":"db"' <<<"$carried" || { echo "the parent's x86_64 databases were not carried over: $(head -c 300 <<<"$carried")"; exit 1; }
 
 step "Pool sanity (flat layout: databases beside the packages)"
