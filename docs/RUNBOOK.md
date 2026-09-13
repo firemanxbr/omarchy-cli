@@ -292,7 +292,10 @@ What keeps the bill near US$ 10:
   per ring** — not one release per source per hour.
 
 **Watching it.** Once a day (06:30 UTC) the brain estimates the month's
-bill from Cloudflare's own analytics (`src/cost.ts`; secret
+bill from Cloudflare's own analytics — what was used so far, priced, plus
+the *current* rate (the last six hours, scaled) for the days left, so a fix
+shows in the next estimate instead of being averaged with the expensive
+days before it (`src/cost.ts`; secret
 `CLOUDFLARE_ANALYTICS_TOKEN`, an API token with *Account Analytics: Read*
 and *D1: Read*) and records a `cost` journal line; `GET /api/v1/cost` has
 the breakdown and the overview shows the projection. `cost-report.yml`
