@@ -121,10 +121,14 @@ A promotion happens when the recorded evidence says the source ring is good,
 and is undone automatically when the target ring turns out not to be:
 
 1. **Evidence.** On both architectures, a real pacman syncs the source ring and
-   downloads a signed package (`health` event), and `omarchy-cli` runs the
-   ELF-level safety check on every upgrade the ring would apply to the official
-   Arch / Arch Linux ARM base image (`abi` event, blockers = unsatisfiable symbol
-   versions).
+   downloads a signed sample of every repository (`health` event), and
+   `omarchy-cli` runs the ELF-level safety check on every upgrade the ring
+   would apply to two reference systems (`abi` event, blockers = unsatisfiable
+   symbol versions): the official Arch / Arch Linux ARM base image, and — on
+   x86_64 — an **Omarchy installation**, the ISO's package set
+   (`omacom/omarchy`'s `omarchy-base.packages` plus the archinstall base)
+   installed from `stable` into a container and cached for a week
+   (`tests/omarchy-rootfs.sh`, ~900 packages) — what users actually have.
 2. **Gate** (`pkg-repo gate`). Per architecture: the latest health of the source
    ring is recent and not an error; no health inside the soak window failed
    (0 days into `rc`, 1 day into `stable`: edge is upstream in real time, rc a day behind, stable a day behind rc) and the source ring's content has

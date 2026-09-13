@@ -248,6 +248,16 @@ tasks from the pool ([factory/README.md](../factory/README.md)). Day to day:
   Mac (`pkg-repo work`, one process per architecture). No GitHub runner
   builds packages; a queued build waits for a project worker. Workers
   hold no key: the pool signs what they publish.
+- **The Omarchy reference for the ABI gate**: `tests/omarchy-rootfs.sh
+  x86_64 stable` installs the ISO's package set from `stable` into a
+  container and keeps pacman's database and the libraries under the
+  worker's work directory (`omarchy-rootfs/x86_64`, ~1.5 GB) for seven
+  days; the gate rebuilds it when older. The packages are installed as
+  bytes (`SigLevel = DatabaseRequired PackageNever`): what a reference
+  needs is their libraries; whether their signatures verify is the health
+  check's and the verify job's question. A missing or failed reference
+  never blocks the gate — the `abi` event says *omarchy: unavailable* and the
+  base image alone decides.
 - **OPR provenance**: once a day (05:15 UTC) the brain reads
   `omacom/omarchy-pkgs` — one tree request, then one request per package
   whose PKGBUILD changed — and records whether each OPR recipe is Omarchy's
