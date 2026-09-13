@@ -116,10 +116,7 @@ request (see [CONTRIBUTING.md](CONTRIBUTING.md)), and keep
 
 - [ ] Rotate the staging key (`docs/omarchy-staging.pub.asc`, expires 2027-09-12)
       before it expires; it is the Worker secret `SIGNING_KEY` (RUNBOOK).
-- [ ] Pin the `archlinux:base` / `menci/archlinuxarm:base` image digests used by
-      the e2e, health and ABI scripts for reproducible runs.
-- [ ] The `events` table grows by ~1.5k rows a month from the metrics snapshots;
-      prune snapshots older than 90 days in the GC workflow.
+- [x] ~~The `events` table grows by ~1.5k rows a month from the metrics snapshots~~ — the snapshot prunes the ones older than 90 days.
 
 ## Done (kept for the record)
 

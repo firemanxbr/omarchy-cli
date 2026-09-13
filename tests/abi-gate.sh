@@ -12,9 +12,10 @@ set -uo pipefail
 
 RING="$1"
 ARCH="${2:-x86_64}"
+source "$(cd "$(dirname "$0")" && pwd)/images.env"
 case "$ARCH" in
-  x86_64)  IMAGE="docker.io/library/archlinux:base"; PLATFORM="linux/amd64" ;;
-  aarch64) IMAGE="docker.io/menci/archlinuxarm:base"; PLATFORM="linux/arm64" ;;
+  x86_64)  IMAGE="$ARCHLINUX_BASE"; PLATFORM="linux/amd64" ;;
+  aarch64) IMAGE="$ARCHLINUXARM_BASE"; PLATFORM="linux/arm64" ;;
   *) echo "unknown arch $ARCH"; exit 1 ;;
 esac
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

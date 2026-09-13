@@ -37,7 +37,7 @@ job_token() {
   echo "omj.$payload.$sig"
 }
 export OMARCHY_TOKEN="$(job_token)"
-CURRENT="docker.io/library/archlinux:base"
+source "$(cd "$(dirname "$0")" && pwd)/images.env"; CURRENT="$ARCHLINUX_BASE"
 OLD="docker.io/library/archlinux:base-20210131.0.14634"
 
 step() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }

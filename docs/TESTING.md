@@ -158,6 +158,13 @@ repo-add mechanics at the same package count — live in `poc/bench/`
 (`bench-promotion.sh`, `bench-current.sh`, `seed.py`) with their results in
 [`poc/RESULTS.md`](../poc/RESULTS.md); the `Benchmark` workflow runs them by hand.
 
+## The images the checks run in
+
+`tests/images.env` pins `archlinux:base` and `menci/archlinuxarm:base` by
+digest; every script that starts a container sources it, so a run today and
+a run next month see the same image. `tests/pin-images.sh` moves the pins
+to the current digests (commit the diff).
+
 ## Health check
 
 ```bash

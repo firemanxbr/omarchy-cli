@@ -12,7 +12,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 E2E="$ROOT/target/e2e"
 GNUPGHOME="${OMARCHY_POC_GNUPGHOME:-$HOME/.cache/omarchy-cli-poc/gnupg}"
 export GNUPGHOME
-IMAGE="docker.io/library/archlinux:base"
+source "$(cd "$(dirname "$0")" && pwd)/images.env"; IMAGE="$ARCHLINUX_BASE"
 RUNTIME="$(command -v podman || command -v docker)"
 
 step() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
