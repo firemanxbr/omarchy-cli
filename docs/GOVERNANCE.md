@@ -38,6 +38,22 @@ package at least **two different people** checked — the contributor who
 made it work, the maintainer who rebuilt and attested it — and, when both
 sides run an agent, one that two independent agents built and tested.
 
+### The second agent
+
+The contributor's agent, if any, wrote the recipe. The maintainer's side
+has one too: when a build is staged, the pool queues an **audit** — a job
+a project worker takes only if its owner set an agent key. That worker
+reads the same evidence the maintainer will (the PKGBUILD, the build log,
+the `.PKGINFO`), asks its model for a structured review — supply chain,
+security, packaging practice, correctness against the log, licence
+(`factory/prompts/audit.md`) — and attaches `audit.json` and `audit.md` to
+the evidence. The Review page shows the verdict next to the build: `ok`,
+`warn` (approve with the findings in mind), `block` (do not approve as
+is). It is evidence, never a decision: nothing in the pool acts on it, the
+maintainer does. The builder cannot write those two files, and the audit
+cannot write anything else; a build decided before the audit ran cancels
+it. No project worker with a key, no audit: the column says *waiting*.
+
 ## Groups
 
 A group is an area of interest — `omarchy` (what Omarchy ships or depends
@@ -107,11 +123,12 @@ bypassed review. The exception ends the moment a second maintainer exists.
   `--shared` on `pkg-repo work` — never at registration, so nobody's laptop
   ends up busy with strangers' packages by accident.
 - **Agent keys stay with the worker's owner.** A worker that drafts or
-  corrects PKGBUILDs with an agent gets `ANTHROPIC_API_KEY` in its
-  environment when it starts — community and project workers alike. The
-  pool holds no agent key and GitHub runs no agent; what an agent produces
-  is evidence like any other build, reviewed by a maintainer before it
-  reaches anyone.
+  corrects PKGBUILDs with an agent (community trust), or audits staged
+  builds for the maintainers (project trust), gets `ANTHROPIC_API_KEY` in
+  its environment when it starts. The pool holds no agent key and GitHub
+  runs no agent — the hosted fallback never takes an audit; what an agent
+  produces is evidence like any other build, reviewed by a maintainer
+  before it reaches anyone.
 - **Package requests** (a GitHub issue) become a task for a *shared*
   community worker whose owner runs an agent. No such worker, no draft: the
   request waits, visibly, on the Factory page.

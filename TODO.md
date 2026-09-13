@@ -81,11 +81,10 @@ request (see [CONTRIBUTING.md](CONTRIBUTING.md)), and keep
       (approvals, rollbacks avoided) per area of interest — games, kernel, … —
       so that profiles say "good in this area". Later; the record it would be
       computed from (approvals, bump events, role lines) already exists.
-- [ ] **A maintainer-side agent audit.** Before approval, a project worker
-      with the maintainer's own agent key reviews the staged PKGBUILD and
-      log (security, packaging practice, licence) and attaches a report to
-      the evidence — the "second agent" of the zero-trust relationship,
-      today only true when the project worker's owner sets one.
+- [ ] **Audit the rebuild too.** The second agent reads the staged
+      evidence; a second pass on the project's own rebuild (its log and
+      `.PKGINFO` against the staged ones) would catch a recipe that builds
+      differently on the trusted worker.
 
 - [ ] **Production keys and hosting.** The staging database key is throwaway and
       the pool lives on a personal account; moving to omarchy.org means a key in
@@ -144,7 +143,9 @@ the factory: contributors' workers and staging, maintainers' approvals, the
 project's rebuild, package requests and bumps as evidence · every pipeline
 step a pulled job with a per-job token, no shared secret, GitHub only
 releasing · signing inside the Worker · governance from a file, two roles ·
-the cost estimate, the guard and the daily report.
+the cost estimate, the guard and the daily report · one worker image for
+everyone, nobody approves their own package · the second agent (the audit
+of a staged build, attached to its evidence).
 
 ## Factory findings (2026-09-12)
 

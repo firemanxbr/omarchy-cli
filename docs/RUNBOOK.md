@@ -237,6 +237,15 @@ tasks from the pool ([factory/README.md](../factory/README.md)). Day to day:
   Mac (`pkg-repo work`, one process per architecture). No GitHub runner
   builds packages; a queued build waits for a project worker. Workers
   hold no key: the pool signs what they publish.
+- **The audit** (the second agent, GOVERNANCE.md): every staged community
+  build queues an `audit` task. A project worker takes it only when it
+  was started with `ANTHROPIC_API_KEY` in its environment (`pkg-repo work`
+  adds the `audit` kind by itself then; `FACTORY_MODEL` picks the model,
+  default `claude-sonnet-5`). The report lands next to the evidence
+  (`/api/v1/factory/tasks/<id>/artifacts/audit.md`) and the Review page
+  shows the verdict; *waiting* in that column means no such worker is
+  running. It is advice for the maintainer; nothing acts on it. A build
+  approved or rejected before the audit ran cancels it.
 - **New upstream versions** — two paths, one rule (evidence before review):
   - a package a contributor registered: once a day (05:45 UTC) the brain
     asks GitHub for each approved package's latest release and queues a

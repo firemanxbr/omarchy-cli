@@ -221,7 +221,29 @@ c3=$(curl -s -X POST "$OMARCHY_API/api/v1/factory/claim" "${w3[@]}" -d '{"arch":
 grep -q '"name":"nowish"' <<<"$c3" || { echo "a shared worker must get the task that is shareable now: $c3"; exit 1; }
 [[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/claim" "${w3[@]}" -d '{"arch":"aarch64","shared":true}')" == 204 ]] || { echo "a shared worker must not get a task before its shared_after"; exit 1; }
 fac3=$(curl -s "$OMARCHY_API/api/v1/factory?limit=50"); grep -q '"id":"w3","arch":"aarch64"' <<<"$fac3" && grep -q '"mode":"shared"' <<<"$fac3" || { echo "the claim did not record the worker as shared: $fac3"; exit 1; }
+# The community build's evidence goes to staging with the job token; the
+# builder cannot write the audit files. Staging it queues the second agent.
+c3_id=$(jq -r .task.id <<<"$c3"); c3_tok=$(jq -r .token <<<"$c3"); c3j=(-H "authorization: Bearer $c3_tok")
+for f in PKGBUILD build.log PKGINFO nowish-1.0-1-aarch64.pkg.tar.zst; do
+  [[ "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$OMARCHY_API/api/v1/factory/tasks/$c3_id/artifacts/$f" "${c3j[@]}" --data-binary "evidence: $f")" == 201 ]] || { echo "the job token must upload $f to its own staging"; exit 1; }
+done
+[[ "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$OMARCHY_API/api/v1/factory/tasks/$c3_id/artifacts/audit.json" "${c3j[@]}" --data-binary '{"verdict":"ok"}')" == 403 ]] || { echo "a builder must not write the audit about its own build"; exit 1; }
+st3=$(curl -s -X POST "$OMARCHY_API/api/v1/factory/tasks/$c3_id/complete" "${c3j[@]}" -H "content-type: application/json" -d '{"sha256":"1111","filename":"nowish-1.0-1-aarch64.pkg.tar.zst","version":"1.0-1"}'); grep -q '"status":"staged"' <<<"$st3" || { echo "the community build did not stage: $st3"; exit 1; }
 review=$(curl -s "$OMARCHY_API/api/v1/factory/review"); grep -q '"staged"' <<<"$review" || { echo "review list not served: $review"; exit 1; }
+python3 -c 'import json,sys; d=json.load(sys.stdin); t=[t for t in d["staged"] if t["id"]=='"$c3_id"'][0]; assert t["audit"]["status"]=="queued", t["audit"]' <<<"$review" || { echo "staging a build must queue its audit: $(head -c 400 <<<"$review")"; exit 1; }
+[[ "$(curl -s "$OMARCHY_API/api/v1/factory/tasks/$c3_id/artifacts/PKGINFO")" == "evidence: PKGINFO" ]] || { echo "the .PKGINFO is public evidence"; exit 1; }
+# A project worker that declares the audit kind (it has an agent key) takes it;
+# the report is attached to the staged build's evidence with the audit's own token.
+[[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/claim" "${w3[@]}" -d '{"arch":"aarch64","kinds":["audit"]}')" == 204 ]] || { echo "a community worker never audits"; exit 1; }
+au=$(curl -s -X POST "$OMARCHY_API/api/v1/factory/claim" "${w1[@]}" -d '{"arch":"aarch64","kinds":["audit"]}'); grep -q '"kind":"audit"' <<<"$au" && grep -q "\"task\":$c3_id" <<<"$au" || { echo "the project worker did not get the audit: $au"; exit 1; }
+au_id=$(jq -r .task.id <<<"$au"); auj=(-H "authorization: Bearer $(jq -r .token <<<"$au")")
+[[ "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$OMARCHY_API/api/v1/factory/tasks/$c3_id/artifacts/PKGBUILD" "${auj[@]}" --data-binary 'x')" == 400 ]] || { echo "the audit writes its report only"; exit 1; }
+[[ "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$OMARCHY_API/api/v1/factory/tasks/$c3_id/artifacts/audit.json" "${auj[@]}" --data-binary '{"verdict":"warn","summary":"SKIP checksum","findings":[{"severity":"high","area":"supply-chain","where":"sha256sums","what":"SKIP","fix":"pin it"}]}')" == 201 ]] || { echo "the audit could not attach its report"; exit 1; }
+[[ "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$OMARCHY_API/api/v1/factory/tasks/$c3_id/artifacts/audit.md" "${auj[@]}" --data-binary '# Audit: warn')" == 201 ]] || { echo "the audit could not attach audit.md"; exit 1; }
+aud=$(curl -s -X POST "$OMARCHY_API/api/v1/factory/tasks/$au_id/complete" "${auj[@]}" -H "content-type: application/json" -d '{"summary":"warn: SKIP checksum","result":{"verdict":"warn","summary":"SKIP checksum","model":"e2e","findings":[{"severity":"high","area":"supply-chain"}]}}'); grep -q '"status":"done"' <<<"$aud" || { echo "the audit did not complete: $aud"; exit 1; }
+review=$(curl -s "$OMARCHY_API/api/v1/factory/review")
+python3 -c 'import json,sys; d=json.load(sys.stdin); a=[t for t in d["staged"] if t["id"]=='"$c3_id"'][0]["audit"]; assert a["status"]=="done" and a["verdict"]=="warn" and a["findings"]==1 and a["high"]==1, a' <<<"$review" || { echo "review does not show the audit verdict: $(head -c 400 <<<"$review")"; exit 1; }
+[[ "$(curl -s "$OMARCHY_API/api/v1/factory/tasks/$c3_id/artifacts/audit.md")" == "# Audit: warn" ]] || { echo "the audit report is public evidence"; exit 1; }
 groups=$(curl -s "$OMARCHY_API/api/v1/factory/groups"); grep -q '"maintainers":\["e2e"\]' <<<"$groups" || { echo "groups not served from the governance table: $groups"; exit 1; }
 me=$(curl -s "$OMARCHY_API/api/v1/factory/me" -H "authorization: Bearer omc_e2e"); grep -q '"role":"maintainer"' <<<"$me" || { echo "the seeded maintainer is not one: $me"; exit 1; }
 gpage=$(curl -s "$OMARCHY_API/docs/governance"); grep -q "Becoming a maintainer" <<<"$gpage" || { echo "governance page not served"; exit 1; }

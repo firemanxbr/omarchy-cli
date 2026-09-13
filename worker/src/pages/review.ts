@@ -9,12 +9,13 @@ import type { RunningVersion } from "../meta";
 
 const BODY = String.raw`
   <h1>Review</h1>
-  <p class="lede">What contributors built, waiting for a maintainer. Each row is one build in a contributor's staging workspace — evidence, not a package: you do not ship their bytes, you learn from them. Read the PKGBUILD, the log and the manifest, then <b>approve</b> — the project rebuilds the same recipe on a trusted worker, signs it and publishes it into <code>edge</code>, where it takes the usual 48-hour path to <code>stable</code> — or <b>reject</b> with a note the contributor sees. Approvals are recorded with your name: every package users get was checked by two different people.</p>
+  <p class="lede">What contributors built, waiting for a maintainer. Each row is one build in a contributor's staging workspace — evidence, not a package: you do not ship their bytes, you learn from them. Read the PKGBUILD, the log and the manifest — and the <b>audit</b>, the second agent's report when a project worker with an agent key has read the same evidence — then <b>approve</b> — the project rebuilds the same recipe on a trusted worker, signs it and publishes it into <code>edge</code>, where it takes the usual 48-hour path to <code>stable</code> — or <b>reject</b> with a note the contributor sees. Approvals are recorded with your name: every package users get was checked by two different people.</p>
   <p class="sub" id="who"></p>
 
   <section>
     <h2>Staged builds</h2>
-    <div class="table-wrap"><table id="staged"><thead><tr><th>#</th><th>Package</th><th>Arch</th><th>Project</th><th>Detected</th><th>Built by</th><th>Evidence</th><th>Decision</th></tr></thead><tbody></tbody></table></div>
+    <div class="table-wrap"><table id="staged"><thead><tr><th>#</th><th>Package</th><th>Arch</th><th>Project</th><th>Detected</th><th>Built by</th><th>Evidence</th><th>Audit</th><th>Decision</th></tr></thead><tbody></tbody></table></div>
+    <p class="sub">The audit column is the second agent (<a href="/docs/governance">Governance</a>): a project worker whose owner set an agent key reads the PKGBUILD, the log and the <code>.PKGINFO</code> and writes a report — supply chain, security, packaging practice, licence. It is evidence for you, never a decision: <span class="pill ok">ok</span> nothing worth a change · <span class="pill warn">warn</span> approve with the findings in mind · <span class="pill error">block</span> do not approve as is. <em>Waiting</em> means no project worker with a key has picked it up yet.</p>
   </section>
 
   <section>
@@ -47,8 +48,21 @@ const SCRIPT = String.raw`
       load();
     });
   }
+  // The second agent's column: its verdict and one line, the report behind it.
+  function audit(t) {
+    var a = t.audit || { status: "none" };
+    if (a.status === "done" && a.verdict) {
+      var cls = a.verdict === "ok" ? "ok" : a.verdict === "warn" ? "warn" : "error";
+      return '<span class="pill ' + cls + '">' + esc(a.verdict) + '</span> <a class="run" href="' + t.evidence.audit + '" title="' + esc(a.summary || "") + '">' + (a.findings ? a.findings + ' finding' + (a.findings === 1 ? '' : 's') + (a.high ? ', ' + a.high + ' high' : '') : 'report') + '</a>';
+    }
+    if (a.status === "queued") return '<span class="muted">waiting</span>';
+    if (a.status === "leased") return '<span class="muted">running</span>';
+    if (a.status === "failed") return '<span class="pill none" title="' + esc(a.error || "") + '">failed</span>';
+    if (a.status === "done") return '<span class="pill none">unreadable</span>';
+    return '<span class="muted">—</span>';
+  }
   function load() {
-    skeletonRows("#staged", 8, 3); skeletonRows("#trust", 6, 2); skeletonRows("#people", 4, 1); skeletonRows("#decisions", 7, 2);
+    skeletonRows("#staged", 9, 3); skeletonRows("#trust", 6, 2); skeletonRows("#people", 4, 1); skeletonRows("#decisions", 7, 2);
     busy(fetch(API + "/review")).then(function (r) { return r.json(); }).then(function (d) {
       pager("#staged", (d.staged || []), function (t) {
         var det = t.detected || {};
@@ -56,6 +70,7 @@ const SCRIPT = String.raw`
           '<td>' + (t.url ? '<a href="' + esc(t.url) + '">' + esc(t.url.replace(/^https?:\/\/(www\.)?github\.com\//, "")) + '</a>' : '—') + '</td><td>' + esc([det.build_system, det.license, det.latest_tag].filter(Boolean).join(" · ")) + '</td>' +
           '<td>' + person(t.owner) + ' <span class="muted">' + (t.duration_ms ? Math.round(t.duration_ms / 1000) + " s" : "") + '</span></td>' +
           '<td><a class="run" href="' + t.evidence.pkgbuild + '">PKGBUILD</a> <a class="run" href="' + t.evidence.log + '">log</a> <a class="run" href="' + t.evidence.pkginfo + '">PKGINFO</a> <span class="mono muted">' + esc((t.result_sha256 || "").slice(0, 12)) + '</span></td>' +
+          '<td>' + audit(t) + '</td>' +
           '<td>' + (token || signedIn ? '<button type="button" data-approve="' + t.id + '">Approve</button> <button type="button" data-reject="' + t.id + '">Reject</button>' : '<span class="muted">sign in</span>') + '</td></tr>';
       }, { empty: 'nothing waiting for review' });
       endSkeleton();

@@ -5,7 +5,7 @@ import { groupsOf } from "../governance";
 /**
  * Review: what maintainers do with staged builds.
  *
- *   GET  /factory/review                    staged community builds with their evidence (public)
+ *   GET  /factory/review                    staged community builds with their evidence and the audit's verdict (public)
  *   POST /factory/tasks/:id/approve {note?} maintainer of the package's area → a project build of the
  *                                           same PKGBUILD is queued; its result is signed and published
  *   POST /factory/tasks/:id/reject  {note}  maintainer → the package goes back to registered with the reason
@@ -34,7 +34,10 @@ export async function handleReviewList(env: Env): Promise<Response> {
     `SELECT t.id, t.name, t."group", t.arch, t.version, t.owner, t.status, t.staged_prefix, t.result_sha256, t.result_filename, t.duration_ms, t.finished_at, t.pkgbuild_ref,
             p.url, p.detected,
             (SELECT decision FROM approvals a WHERE a.task_id = t.id ORDER BY a.id DESC LIMIT 1) AS decision,
-            (SELECT by FROM approvals a WHERE a.task_id = t.id ORDER BY a.id DESC LIMIT 1) AS decided_by
+            (SELECT by FROM approvals a WHERE a.task_id = t.id ORDER BY a.id DESC LIMIT 1) AS decided_by,
+            (SELECT u.status FROM build_tasks u WHERE u.kind = 'audit' AND json_extract(u.params, '$.task') = t.id ORDER BY u.id DESC LIMIT 1) AS audit_status,
+            (SELECT u.result FROM build_tasks u WHERE u.kind = 'audit' AND json_extract(u.params, '$.task') = t.id ORDER BY u.id DESC LIMIT 1) AS audit_result,
+            (SELECT u.error FROM build_tasks u WHERE u.kind = 'audit' AND json_extract(u.params, '$.task') = t.id ORDER BY u.id DESC LIMIT 1) AS audit_error
        FROM build_tasks t LEFT JOIN factory_packages p ON p.name = t.name
       WHERE t.kind = 'build' AND t.trust = 'community' AND t.status = 'staged'
         AND NOT EXISTS (SELECT 1 FROM approvals a WHERE a.task_id = t.id AND a.decision = 'approved')
@@ -45,12 +48,36 @@ export async function handleReviewList(env: Env): Promise<Response> {
       staged: staged.results.map((r) => ({
         ...r,
         detected: r.detected ? JSON.parse(r.detected as string) : null,
-        evidence: { log: `/api/v1/factory/tasks/${r.id}/artifacts/build.log`, pkgbuild: `/api/v1/factory/tasks/${r.id}/artifacts/PKGBUILD`, pkginfo: `/api/v1/factory/tasks/${r.id}/artifacts/PKGINFO` },
+        evidence: { log: `/api/v1/factory/tasks/${r.id}/artifacts/build.log`, pkgbuild: `/api/v1/factory/tasks/${r.id}/artifacts/PKGBUILD`, pkginfo: `/api/v1/factory/tasks/${r.id}/artifacts/PKGINFO`, audit: `/api/v1/factory/tasks/${r.id}/artifacts/audit.md` },
+        // The second agent's report (docs/GOVERNANCE.md): a verdict a
+        // maintainer reads, never one the pool acts on.
+        audit: auditOf(r.audit_status as string | null, r.audit_result as string | null, r.audit_error as string | null),
+        audit_status: undefined, audit_result: undefined, audit_error: undefined,
       })),
     },
     200,
     { "cache-control": "no-store" },
   );
+}
+
+interface AuditReport { verdict: string; summary: string; findings: { severity: string; area: string }[]; model?: string }
+
+/** The audit as the Review page shows it: its state while pending, the verdict once done. */
+function auditOf(status: string | null, result: string | null, error: string | null): { status: string; verdict?: string; summary?: string; findings?: number; high?: number; model?: string; error?: string } {
+  if (!status) return { status: "none" };
+  if (status !== "done") return { status, error: error ?? undefined };
+  try {
+    const r = JSON.parse(result ?? "{}") as AuditReport;
+    const findings = Array.isArray(r.findings) ? r.findings : [];
+    return { status: "done", verdict: r.verdict, summary: r.summary, findings: findings.length, high: findings.filter((f) => f.severity === "high").length, model: r.model };
+  } catch {
+    return { status: "done", error: "unreadable report" };
+  }
+}
+
+/** A decision on the build ends the audit that has not started (the report of one that ran stays as evidence). */
+async function cancelPendingAudit(env: Env, taskId: number): Promise<void> {
+  await env.DB.prepare("UPDATE build_tasks SET status = 'cancelled', error = 'the build was decided before the audit ran' WHERE kind = 'audit' AND status = 'queued' AND json_extract(params, '$.task') = ?").bind(taskId).run();
 }
 
 function canReview(c: Contributor, group: string): boolean {
@@ -91,6 +118,7 @@ export async function handleApprove(c: Contributor, id: number, request: Request
   await env.DB.prepare("UPDATE build_requests SET status = 'approved', approved_by = ?, approved_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), detail = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE name = ? AND status != 'approved'")
     .bind(c.login, `approved by ${c.login}; project rebuild task ${rebuild?.id}`, t.name)
     .run();
+  await cancelPendingAudit(env, id);
   await env.DB.prepare("INSERT INTO events (kind, ring, source, status, summary, payload) VALUES ('approve', 'edge', 'factory', 'ok', ?, ?)")
     .bind(`${t.name} ${t.version ?? ""} (${t.arch}) approved by ${c.login}${b.note ? " — " + b.note.slice(0, 120) : ""}; project rebuild queued as task ${rebuild?.id}`, JSON.stringify({ task: id, rebuild: rebuild?.id, name: t.name, arch: t.arch, by: c.login, owner: t.owner, note: b.note ?? null }))
     .run();
@@ -108,6 +136,7 @@ export async function handleReject(c: Contributor, id: number, request: Request,
     .bind(id, t.name, t.group, t.arch, t.version, c.login, b.note)
     .run();
   await env.DB.prepare("UPDATE build_tasks SET status = 'cancelled', error = ? WHERE id = ?").bind(`rejected by ${c.login}: ${b.note.slice(0, 500)}`, id).run();
+  await cancelPendingAudit(env, id);
   await env.DB.prepare("UPDATE factory_packages SET status = 'registered', detail = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE name = ?")
     .bind(`rejected by ${c.login}: ${b.note.slice(0, 200)}`, t.name)
     .run();

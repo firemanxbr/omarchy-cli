@@ -613,6 +613,19 @@ impl Api {
         })
     }
 
+    /// `PUT` raw bytes to an authenticated endpoint (a staging artifact), retrying on 5xx.
+    pub fn put_bytes(&self, path: &str, bytes: &[u8]) -> Result<(), RepoError> {
+        with_retry("put_bytes", || {
+            let resp = self
+                .http
+                .put(self.url(path))
+                .bearer_auth(&self.token)
+                .body(bytes.to_vec())
+                .send()?;
+            Self::check(resp).map(|_| ())
+        })
+    }
+
     /// `PUT` a JSON body to an authenticated endpoint, retrying on 5xx.
     pub fn put_json(
         &self,
