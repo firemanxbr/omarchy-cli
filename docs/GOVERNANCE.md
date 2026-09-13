@@ -13,6 +13,31 @@ Two roles, one file, decisions by pull request.
   applies it (`worker/src/governance.ts`); every change is a `role` line in
   the journal.
 
+## Contributors and maintainers
+
+*We do not use what you built; we learn from it.*
+
+A contributor uses exactly the tools a maintainer uses — the same signed
+worker image, the same PKGBUILD conventions, `namcap`, the same build — to
+produce a package that respects the packaging practices, is checked for
+quality and is safer for users. An AI agent may help: nobody knows better
+than the author how their software should be compiled and packaged, and an
+agent turns that knowledge into a recipe faster. The agent's key is the
+contributor's, on their machine; the project runs no agent for them.
+
+**What the contributor built is never what users get.** The maintainer does
+not trust it and must not: they redo the work on a worker the project
+trusts, and the pool signs that. What they have in front of them is not
+"some software, go package it" — it is a recipe that already built, its
+log, its manifest, its metrics, the corrections made along the way.
+Evidence. It makes the maintainer faster and less likely to err, and the
+approval more confident, not less demanding.
+
+Zero trust between people, shared knowledge between them. Users get a
+package at least **two different people** checked — the contributor who
+made it work, the maintainer who rebuilt and attested it — and, when both
+sides run an agent, one that two independent agents built and tested.
+
 ## Groups
 
 A group is an area of interest — `omarchy` (what Omarchy ships or depends

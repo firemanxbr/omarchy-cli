@@ -21,6 +21,12 @@ const BODY = String.raw`
   </section>
 
   <section>
+    <h2>Contributors and maintainers: we do not use what you built, we learn from it</h2>
+    <p class="sub">A contributor uses exactly the tools a maintainer uses — the same signed worker image, the same PKGBUILD conventions, <code>namcap</code>, the same build — to produce a package that respects the packaging practices, is checked for quality and is safer for users; an AI agent may help, because nobody knows better than the author how their software should be compiled and packaged, and an agent turns that knowledge into a recipe faster. <b>What the contributor built is never what users get.</b> The maintainer does not trust it and must not: they redo the work on a worker the project trusts. What they have in front of them is not "some software, go package it" — it is a recipe that already built, its log, its manifest, its metrics, the corrections the agent made along the way. Evidence. It makes the maintainer faster and less likely to err, and the approval more confident, not less demanding.</p>
+    <p class="sub">Zero trust between people, shared knowledge between them. Users get a package at least <b>two different people</b> checked — the contributor who made it work, the maintainer who rebuilt and attested it — and, when both sides run an agent, one that two independent agents built and tested.</p>
+  </section>
+
+  <section>
     <h2>What each role does</h2>
     <div class="steps">
       <div class="step"><h3>Contributor</h3><p>Signs in with GitHub — nothing else is asked. Registers packages, runs workers on their own machines, follows their builds. A contributor's worker builds <em>their</em> packages; the result is evidence in their staging workspace, never a package users receive.</p></div>

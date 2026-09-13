@@ -61,6 +61,10 @@ Read [How it works](https://omarchy-pool.firemanxbr.org/how-it-works) on the
 dashboard, or [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design:
 the pool and index, the release model, promotion by evidence (health + ABI gate,
 one-day soak, automatic rollback), the sources, the security layer, the pipeline.
+Packages nobody ships yet come through the factory: contributors build them
+with the same tools maintainers use, maintainers rebuild and attest them —
+*we do not use what you built, we learn from it*
+([docs/GOVERNANCE.md](docs/GOVERNANCE.md)).
 
 | | |
 |---|---|
