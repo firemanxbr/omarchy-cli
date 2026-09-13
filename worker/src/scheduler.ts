@@ -157,16 +157,17 @@ export function isDue(rule: Rule, runs: RunSummary[], now: Date): { due: boolean
  * architecture and no worker of that architecture is alive, the scheduler
  * starts one there. It is a worker like any other: it claims from Cloudflare.
  */
-export async function factoryDemand(env: Env, now = new Date()): Promise<{ arch: string; queued: number; alive: number }[]> {
+export async function factoryDemand(env: Env, now = new Date()): Promise<{ arch: string; queued: number; alive: number; pool: number }[]> {
   // "alive" here means alive *and idle*: a worker busy with a nine-hour
-  // build does not serve the queue behind it.
+  // build does not serve the queue behind it. Pool jobs (sync, promote…)
+  // need project trust; community workers do not count for them.
   const rows = await env.DB.prepare(
-    `SELECT arch, COUNT(*) AS queued,
-            (SELECT COUNT(*) FROM build_workers w WHERE w.arch = t.arch AND w.last_seen > ? AND w.current_task IS NULL) AS alive
-       FROM build_tasks t WHERE status = 'queued' GROUP BY arch`,
+    `SELECT arch, COUNT(*) AS queued, SUM(CASE WHEN kind != 'build' OR trust = 'project' THEN 1 ELSE 0 END) AS pool,
+            (SELECT COUNT(*) FROM build_workers w WHERE w.arch = t.arch AND w.last_seen > ? AND w.current_task IS NULL AND (w.trust = 'project' OR w.owner IS NULL)) AS alive
+       FROM build_tasks t WHERE status = 'queued' AND (kind != 'build' OR trust = 'project') GROUP BY arch`,
   )
     .bind(new Date(now.getTime() - 10 * 60000).toISOString())
-    .all<{ arch: string; queued: number; alive: number }>();
+    .all<{ arch: string; queued: number; alive: number; pool: number }>();
   return rows.results;
 }
 
@@ -228,20 +229,25 @@ export async function runScheduler(env: Env, now = new Date()): Promise<string[]
   try {
     for (const d of await factoryDemand(env, now)) {
       if (d.alive > 0) {
-        log.push(`factory ${d.arch}: ${d.queued} queued, ${d.alive} idle worker(s)`);
+        log.push(`factory ${d.arch}: ${d.queued} queued, ${d.alive} idle project worker(s)`);
         continue;
       }
-      const runs = await recentRuns(env, "factory-worker.yml");
-      const busy = runs.find((r) => (r.display_title ?? "").includes(d.arch) && ["queued", "in_progress", "waiting", "pending"].includes(r.status));
-      if (busy) {
-        log.push(`factory ${d.arch}: a hosted worker is ${busy.status}`);
-        continue;
+      // Builds go to the build worker (containers, signing), pool jobs to the pool worker.
+      const kinds = await env.DB.prepare("SELECT DISTINCT kind FROM build_tasks WHERE status = 'queued' AND arch = ? AND (kind != 'build' OR trust = 'project')").bind(d.arch).all<{ kind: string }>();
+      const wanted = new Set(kinds.results.map((k) => k.kind));
+      for (const workflow of [wanted.has("build") ? "factory-worker.yml" : "", [...wanted].some((k) => k !== "build") ? "pool-worker.yml" : ""].filter(Boolean)) {
+        const runs = await recentRuns(env, workflow);
+        const busy = runs.find((r) => (r.display_title ?? "").includes(d.arch) && ["queued", "in_progress", "waiting", "pending"].includes(r.status));
+        if (busy) {
+          log.push(`${workflow} ${d.arch}: a hosted worker is ${busy.status}`);
+          continue;
+        }
+        await dispatch(env, workflow, { arch: d.arch });
+        log.push(`${workflow} ${d.arch}: hosted worker dispatched for ${d.queued} queued task(s)`);
+        await env.DB.prepare("INSERT INTO events (kind, ring, source, status, summary, payload) VALUES ('dispatch', NULL, 'factory', 'ok', ?, ?)")
+          .bind(`hosted ${d.arch} ${workflow === "pool-worker.yml" ? "pool" : "build"} worker started by the pool scheduler — ${d.queued} task(s) queued, no idle project worker`, JSON.stringify({ workflow, arch: d.arch, queued: d.queued }))
+          .run();
       }
-      await dispatch(env, "factory-worker.yml", { arch: d.arch });
-      log.push(`factory ${d.arch}: hosted worker dispatched for ${d.queued} queued task(s)`);
-      await env.DB.prepare("INSERT INTO events (kind, ring, source, status, summary, payload) VALUES ('dispatch', NULL, 'factory', 'ok', ?, ?)")
-        .bind(`hosted ${d.arch} build worker started by the pool scheduler — ${d.queued} task(s) queued, no idle worker`, JSON.stringify({ workflow: "factory-worker.yml", arch: d.arch, queued: d.queued }))
-        .run();
     }
   } catch (e) {
     log.push(`factory workers: ${String(e)}`);
