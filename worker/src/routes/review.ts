@@ -36,6 +36,7 @@ export async function handleReviewList(env: Env): Promise<Response> {
             (SELECT by FROM approvals a WHERE a.task_id = t.id ORDER BY a.id DESC LIMIT 1) AS decided_by
        FROM build_tasks t LEFT JOIN factory_packages p ON p.name = t.name
       WHERE t.kind = 'build' AND t.trust = 'community' AND t.status = 'staged'
+        AND NOT EXISTS (SELECT 1 FROM approvals a WHERE a.task_id = t.id AND a.decision = 'approved')
       ORDER BY t.id DESC LIMIT 100`,
   ).all();
   return json(
