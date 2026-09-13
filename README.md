@@ -3,7 +3,7 @@
 One package repository for [Omarchy](https://omarchy.org): every Arch Linux, Arch
 Linux ARM and Omarchy (OPR) package, verified against its project's signing key,
 stored once in an **immutable pool**, and served in three **rings** —
-`edge` follows upstream in real time, `rc` is what passed a real pacman and an ABI
+`edge` follows upstream within hours, `rc` is what passed a real pacman and an ABI
 check on both architectures a day later, `stable` is what stayed healthy in `rc`
 for another day — with **automatic rollback** when a promotion fails its checks.
 Packages stay unmodified `makepkg` output; pacman reads generated, signed
@@ -69,7 +69,9 @@ with the same tools maintainers use, maintainers rebuild and attest them —
 | | |
 |---|---|
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | design, API, pipeline, security |
-| [docs/RUNBOOK.md](docs/RUNBOOK.md) | operating it: workflows, promotions, keys, the kill switch, the scheduler, known limits |
+| [docs/RUNBOOK.md](docs/RUNBOOK.md) | operating it: jobs, promotions, keys, costs, the kill switch, the scheduler, known limits |
+| [docs/GOVERNANCE.md](docs/GOVERNANCE.md) | contributors and maintainers, groups, how a pull request is the only way to become a maintainer |
+| [SECURITY.md](SECURITY.md) | the trust model: who holds what, per-job tokens, the key that never leaves the pool |
 | [docs/TESTING.md](docs/TESTING.md) | how every piece is verified, locally and in CI |
 | [docs/MIGRATION.md](docs/MIGRATION.md) | moving the whole thing to another Cloudflare account and GitHub organisation |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | pull requests, releases, versions |
@@ -85,10 +87,10 @@ crates/
   pkg-repo/       the publisher: sync, publish, promote, gate, fast-track, render, security, gc
   pkg-check/      the ABI safety check (ELF symbol versions against a system)
   omarchy-cli/    the thin client
-worker/           Cloudflare Worker (TypeScript): index API, dashboard pages, scheduler; D1 migrations
-tests/            end-to-end scripts (real pacman), health check, ABI gate, keyring fetcher
-docs/             architecture, runbook, testing, migration, diagrams, the database key
-factory/          the factory: worker script, reviewed PKGBUILDs (a tenant; moves out later)
+worker/           Cloudflare Worker (TypeScript): index API, dashboard pages, the scheduler (jobs, governance, requests, bumps, cost); D1 migrations
+tests/            end-to-end scripts (real pacman), health check, ABI gate, keyring fetcher, pinned images
+docs/             architecture, runbook, governance, testing, migration, diagrams, the signing key's public part
+factory/          the factory: the governance file, the worker script and image, the project's own recipes (a tenant; moves out later)
 poc/              the proof of concept: results, benchmarks, parked crates
 .github/          CI, E2E, Release (every merge), Sync, Promote, Health, Security, Metrics, GC, Factory
 ```

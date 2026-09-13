@@ -33,7 +33,15 @@ export async function handleQueueJob(c: Contributor, request: Request, env: Env)
     case "promote": {
       const from = s("from"), to = s("to");
       if (!RINGS.includes(from) || !RINGS.includes(to) || from === to) return json({ error: "promote needs from and to (edge, rc, stable)" }, 400);
-      job = { kind: "promote", params: { from, to, note: s("note") || `manual ${from} → ${to} by ${c.login}` }, arch: "x86_64" };
+      const params: Record<string, string> = { from, to, note: s("note") || `manual ${from} → ${to} by ${c.login}` };
+      if (s("force") === "yes") params.force = "yes"; // skips the evidence and the gate; the target's health still decides
+      job = { kind: "promote", params, arch: "x86_64" };
+      break;
+    }
+    case "rollback": {
+      const ring = s("ring"), to = s("to");
+      if (!RINGS.includes(ring) || !/^\d+$/.test(to)) return json({ error: "rollback needs ring (edge, rc, stable) and to (a release id of that ring)" }, 400);
+      job = { kind: "rollback", params: { ring, to, note: s("note") || `rollback to release ${to} by ${c.login}` }, arch: "x86_64" };
       break;
     }
     case "render":
@@ -51,7 +59,7 @@ export async function handleQueueJob(c: Contributor, request: Request, env: Env)
       job = { kind: b.kind, params: {}, arch: ARCHES.includes(b.arch ?? "") ? (b.arch as string) : "x86_64" };
       break;
     default:
-      return json({ error: "kind must be one of sync, promote, render, health, security, enqueue, gc" }, 400);
+      return json({ error: "kind must be one of sync, promote, rollback, render, health, security, enqueue, gc" }, 400);
   }
   const id = await createJob(env, job, `queued by ${c.login}`);
   await env.DB.prepare("INSERT INTO events (kind, ring, source, status, summary, payload) VALUES ('dispatch', ?, ?, 'ok', ?, ?)")

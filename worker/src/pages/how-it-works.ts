@@ -20,7 +20,7 @@ const DIAGRAM = String.raw`
   <rect class="box src" x="20" y="190" width="300" height="66" rx="3"/><text class="t" x="34" y="212">Omarchy (OPR) · both</text><text class="s" x="34" y="232">edge / rc / stable channels</text><text class="d" x="34" y="248">pkgs.omarchy.org · Omarchy key</text>
   <rect class="box src" x="20" y="270" width="300" height="66" rx="3"/><text class="t" x="34" y="292">chaotic-aur · x86_64 <tspan class="d">optional</tspan></text><text class="s" x="34" y="312">prebuilt AUR, unclaimed names only</text><text class="d" x="34" y="328">builds.garudalinux.org · chaotic key</text>
   <rect class="box src blue" x="20" y="350" width="300" height="66" rx="3"/><text class="t" x="34" y="372">Factory · both</text><text class="s" x="34" y="392">contributors build, maintainers approve</text><text class="d" x="34" y="408">staging → edge as source factory</text>
-  <text class="d" x="20" y="446">upstream, read every hour · the factory, on approval</text>
+  <text class="d" x="20" y="446">upstream, read every three hours · the factory, on approval</text>
   <path class="ln" d="M320 63 L350 63 L350 140 L378 140"/><path class="ln" d="M320 143 L350 143 L350 140 L378 140"/><path class="ln" d="M320 223 L350 223 L350 140 L378 140"/><path class="ln" d="M320 303 L350 303 L350 140 L378 140"/><path class="ln" d="M320 383 L350 383 L350 140 L378 140"/>
   <!-- verify -->
   <rect class="box amber" x="380" y="98" width="250" height="84" rx="3"/><text class="t" x="394" y="124">Verify</text><text class="s" x="394" y="146">sha256 from the upstream db</text><text class="s" x="394" y="164">signature by the project's key</text>
@@ -34,7 +34,7 @@ const DIAGRAM = String.raw`
   <path class="ln" d="M990 312 L1028 312 L1028 229 L1038 229"/>
   <!-- rings -->
   <path class="ln" d="M990 202 L1015 202 L1015 189 L1038 189"/>
-  <rect class="box" x="1040" y="40" width="260" height="58" rx="3"/><text class="t" x="1054" y="62">edge</text><text class="s" x="1054" y="84">follows upstream, hourly</text>
+  <rect class="box" x="1040" y="40" width="260" height="58" rx="3"/><text class="t" x="1054" y="62">edge</text><text class="s" x="1054" y="84">follows upstream, every 3 h</text>
   <rect class="box" x="1040" y="120" width="260" height="58" rx="3"/><text class="t" x="1054" y="142">rc</text><text class="s" x="1054" y="164">daily · health + ABI checks</text>
   <rect class="box green" x="1040" y="200" width="260" height="58" rx="3"/><text class="t" x="1054" y="222">stable <tspan class="g" font-size="11">recommended</tspan></text><text class="s" x="1054" y="244">one-day soak · auto rollback</text>
   <path class="ln" d="M1170 98 L1170 118"/><path class="ln" d="M1170 178 L1170 198"/>
@@ -43,7 +43,7 @@ const DIAGRAM = String.raw`
   <!-- render -->
   <rect class="box" x="660" y="380" width="330" height="70" rx="3"/><text class="t" x="674" y="404">Render + sign</text><text class="s" x="674" y="424">omarchy-&lt;source&gt;-&lt;ring&gt;.db + .files</text><text class="s" x="674" y="440">per arch, beside the packages</text>
   <path class="ln" d="M1040 229 L1015 229 L1015 415 L992 415"/>
-  <text class="d" x="660" y="476">the pool's own scheduler decides when; GitHub Actions and workers anywhere do the work</text>
+  <text class="d" x="660" y="476">the pool's own scheduler decides when; project workers anywhere do the work</text>
   <!-- user -->
   <path class="ln" d="M660 415 L640 415 L640 503 L632 503"/>
   <rect class="box green" x="330" y="470" width="300" height="66" rx="3"/><text class="t" x="344" y="492">Your machine · pacman</text><text class="s" x="344" y="512">[omarchy-core-stable] → pool/$arch</text><text class="d" x="344" y="528">plain HTTP · static files · signed dbs</text>
@@ -130,8 +130,8 @@ Server = https://pool.firemanxbr.org/$arch
       <tr><td>Pool</td><td>A Cloudflare R2 bucket with a custom domain. pacman reads packages and databases from it as plain static files; nothing runs in front of them.</td></tr>
       <tr><td>Index</td><td>A D1 (SQLite) database: one row per package object with its manifest, dependency edges, sonames; releases and ring heads; every event the pipeline records.</td></tr>
       <tr><td>API + this site</td><td>One Cloudflare Worker serving <code>/api/v1</code> and these pages.</td></tr>
-      <tr><td>Pipeline</td><td>Jobs the pool queues on its own clock and project workers pull: sync (hourly), promote (daily, evidence-gated), health (daily), security (every 3 h), GC (weekly); a metrics snapshot every 30 min by the pool itself. GitHub only releases the code (every merge).</td></tr>
-      <tr><td>Factory</td><td>The build queue lives in the index (requests, tasks, leases); workers are containers anywhere — a laptop, a GitHub-hosted runner — that claim a task, build it in a fresh Arch container, sign, publish into <code>edge</code> and report. A lease that expires goes back to the queue.</td></tr>
+      <tr><td>Pipeline</td><td>Jobs the pool queues on its own clock and project workers pull: sync (every 3 h, one release per ring), promote (daily, evidence-gated), health (daily), security (every 3 h), the PKGBUILD reconcile (hourly), GC (weekly); a metrics snapshot every 30 min and the daily cost estimate by the pool itself. GitHub only releases the code (every merge).</td></tr>
+      <tr><td>Factory</td><td>The build queue lives in the index (requests, tasks, leases); workers are containers anywhere — a contributor's laptop for their own packages, machines the project trusts for what maintainers approved — that claim a task, build it in a fresh Arch container and report; the pool signs what a project worker publishes into <code>edge</code>. A lease that expires goes back to the queue.</td></tr>
       <tr><td>Tools</td><td><code>pkg-repo</code> (publisher: sync, promote, gate, render), <code>pkg-extract</code> (manifests), <code>omarchy-cli</code> (thin client) — Rust, built for both architectures on every release.</td></tr>
     </tbody></table></div>
   </section>

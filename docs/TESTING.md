@@ -172,13 +172,14 @@ OMARCHY_API=… OMARCHY_POOL=… OMARCHY_TOKEN=… tests/health-check.sh stable
 ```
 
 Second argument selects the architecture (`x86_64` default, `aarch64` uses the Arch
-Linux ARM image on an ARM runner). Reads the ring's rendered repos from
+Linux ARM image on an ARM host). Reads the ring's rendered repos from
 `/api/v1/stats`, writes a `pacman.conf` with
 `SigLevel = Required DatabaseRequired`, runs `pacman -Sy`, lists every repo and
 downloads the first package with signature verification inside an Arch container,
 then posts a `health` event (ok / warn when nothing is rendered / error). The
-`Health` workflow runs it daily for all rings; `Promote` runs it for the source
-ring before the gate and for the target ring after the promotion.
+`health` job runs it daily for every ring and architecture; the `promote` job
+runs it for the source ring before the gate and for the target ring after the
+promotion — on the project worker, with the job's token (`OMARCHY_TOKEN`).
 
 ## ABI gate
 
@@ -192,7 +193,7 @@ Exports the pacman database and shared libraries of the official base image
 runs `omarchy-cli check` on them in batches of 40 (each batch resolves its
 dependency closure through `/api/v1/graph?arch=`). Posts an `abi` event with the
 counts and the first blockers; exits 2 on any blocker, 1 if a batch could not be
-checked. Runs in a few seconds; `Promote` runs it for both architectures.
+checked. Runs in a few seconds; the `promote` job runs it for both architectures.
 
 ## Security matching
 
@@ -275,7 +276,7 @@ not verify against that keyring; `tests/fetch-keyrings.sh <dir>` builds
 have their own layouts: `--base-url http://os.archlinuxarm.org/aarch64/core --arch aarch64`,
 `--base-url https://pkgs.omarchy.org/edge/x86_64 --db-name omarchy --source packages`.
 
-The scheduler queues exactly these as jobs (sync hourly, promote daily,
+The scheduler queues exactly these as jobs (sync every 3 h, promote daily,
 health daily, security every 3 h, gc weekly, enqueue hourly); project workers
 run them. No GitHub workflow writes to the pool.
 

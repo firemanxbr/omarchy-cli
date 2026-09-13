@@ -27,7 +27,7 @@ export function version(env: Env): RunningVersion {
 
 /**
  * Every upstream repository the pipeline mirrors (the SOURCES table of
- * sync.yml), so the dashboard can show what has not been synced yet.
+ * SYNC_SOURCES in scheduler.ts), so the dashboard can show what has not been synced yet.
  */
 export const EXPECTED_SOURCES: { source: string; arch: string; upstream: string; optional?: boolean; title: string }[] = [
   { source: "core", arch: "x86_64", upstream: "mirror.omarchy.org", title: "Arch Linux core" },

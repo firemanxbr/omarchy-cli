@@ -50,5 +50,5 @@
 <text x="290" y="190" text-anchor="middle" font-size="12" fill="#666">exit 3</text>
 <path d="M 462 138 L 462 250" fill="none" stroke="#8A8A8A" stroke-width="1.6" marker-end="url(#arrow)"/>
 <text x="484" y="190" text-anchor="middle" font-size="12" fill="#666">exit 1</text>
-<text x="620.0" y="378" text-anchor="middle" font-size="12" fill="#777">promote.yml — edge → rc daily at 06:00 UTC, rc → stable daily at 09:00 UTC after a one-day soak · STABLE_ENVIRONMENT=stable adds a human approval before stable moves</text>
+<text x="620.0" y="378" text-anchor="middle" font-size="12" fill="#777">the promote job — edge → rc daily at 06:00 UTC, rc → stable daily at 09:00 UTC after a one-day soak</text>
 </svg>

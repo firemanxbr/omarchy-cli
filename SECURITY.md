@@ -38,11 +38,13 @@ please do not file a public issue for it.
 | Contributor token `omc_…` | one person (GitHub identity read once, never stored) | register packages under their name, queue community builds, register and revoke their workers, read their own state | write to the pool, claim jobs, approve | live |
 | Worker token `omw_…` | one machine, registered by a contributor | claim tasks its trust allows (community: its owner's or shared builds; project: pool jobs too); heartbeat | write to the pool or staging directly | live |
 | Job token `omj.…` | the worker running one task, for the lease | the routes that task needs — e.g. `sync`: upload objects, index, create a release in one ring, store that ring's databases; community `build`: upload to that task's staging folder | anything outside its scopes (403, journaled); anything after the lease (30 min, renewed by heartbeat) | live |
-| Maintainer role | a contributor listed under a group in `factory/MAINTAINERS.toml` on `main` (applied by the brain every ten minutes) | promote a worker to project trust; approve or reject staged builds of their groups (recorded); review the group's PKGBUILDs and governance pull requests | operate as a worker; grant a role | live |
-| Publish token | GitHub Actions (pipeline), maintainers on the command line | everything a job can, on any ring | — | live; **retiring** as each job kind moves to pulled jobs |
+| Maintainer role | a contributor listed under a group in `factory/MAINTAINERS.toml` on `main` (applied by the brain every ten minutes) | promote a worker to project trust; approve or reject staged builds of their groups (recorded); queue any pool job by hand (`POST /factory/jobs`); enqueue, cancel, remove a registration; review the group's PKGBUILDs and governance pull requests | write to the pool with their own token (a job does); operate as a worker; grant a role | live |
+| Session cookie `oms_…` | one person's browser, after Sign in with GitHub | what that person's contributor token can, from the dashboard's pages | — | live; separate from the CLI token, so signing in never invalidates a worker |
 | Signing key (OpenPGP) | the pool's Worker only (`SIGNING_KEY` secret, `worker/src/signing.ts`) | sign the databases it stores and the packages the factory builds (`POST /pool/:sha256/sign`) | — | live; no worker, runner or repository holds it |
-| `CLOUDFLARE_API_TOKEN` | GitHub Actions release workflow | deploy the Worker, apply migrations | — | live; the only secret GitHub will keep |
-| GitHub PAT on the Worker | the scheduler | dispatch workflows | — | live; removed once no rule dispatches a workflow |
+| `CLOUDFLARE_API_TOKEN` | the release workflow on GitHub | deploy the Worker, apply migrations, record the deploy | — | live; with the two hosted-worker tokens, all GitHub holds |
+| `POOL_WORKER_TOKEN_{X86_64,AARCH64}` | `pool-worker.yml`, the hosted fallback | what a registered project worker can: claim pool jobs | build a package | live |
+| `CLOUDFLARE_ANALYTICS_TOKEN` on the Worker | the daily cost estimate | read the account's analytics and the D1 file size | write anything | live |
+| GitHub PAT on the Worker | the scheduler | dispatch `factory-update.yml` and `pool-worker.yml`; a higher rate limit for the update check | write to the repository | live; removed once neither is dispatched |
 
 Tokens are 192-bit random values shown once and stored as SHA-256 hashes;
 job tokens are HMAC-SHA256-signed claims (`JOB_TOKEN_SECRET`, a Worker

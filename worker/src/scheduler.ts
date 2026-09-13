@@ -22,6 +22,7 @@ const REPO = "firemanxbr/omarchy-pool";
 const API = `https://api.github.com/repos/${REPO}/actions/workflows`;
 
 interface Rule {
+  /** The rule's name — a workflow file for the two GitHub still starts, otherwise the job it queues. */
   workflow: string;
   /** Run when the last run is older than this many minutes… */
   every?: number;
@@ -37,8 +38,7 @@ interface Rule {
 }
 
 /**
- * What the sync job pulls, per source and architecture — the table sync.yml
- * carries, so the two stay in step until the workflow retires.
+ * What the sync job pulls, per source and architecture.
  */
 export const SYNC_SOURCES: { source: string; arch: string; ring: string; base_url: string; db_name: string; keyring: string; defer_to?: string }[] = [
   { source: "core", arch: "x86_64", ring: "edge", base_url: "https://mirror.omarchy.org/core/os/x86_64", db_name: "core", keyring: "archlinux" },
@@ -59,14 +59,14 @@ export const RULES: Rule[] = [
   // ring's whole selection and D1 bills every row written, so the sources
   // of an architecture are synced together and pinned as one release per
   // ring (cost review, 2026-09-13).
-  { workflow: "sync.yml", every: 180, job: { kind: "sync", params: {} } },
-  { workflow: "security.yml", every: 180, job: { kind: "security", params: {} } },
-  { workflow: "factory-enqueue.yml", every: 60, job: { kind: "enqueue", params: {} } },
-  { workflow: "promote.yml", at: { hour: 6, minute: 0 }, inputs: { from: "edge", to: "rc", note: "daily rc" }, job: { kind: "promote", params: { from: "edge", to: "rc", note: "daily rc" } } },
-  { workflow: "promote.yml", at: { hour: 9, minute: 0 }, inputs: { from: "rc", to: "stable", note: "daily stable" }, job: { kind: "promote", params: { from: "rc", to: "stable", note: "daily stable" } } },
-  { workflow: "health.yml", at: { hour: 8, minute: 30 }, job: { kind: "health", params: {} } },
+  { workflow: "sync", every: 180, job: { kind: "sync", params: {} } },
+  { workflow: "security", every: 180, job: { kind: "security", params: {} } },
+  { workflow: "enqueue", every: 60, job: { kind: "enqueue", params: {} } },
+  { workflow: "promote", at: { hour: 6, minute: 0 }, inputs: { from: "edge", to: "rc", note: "daily rc" }, job: { kind: "promote", params: { from: "edge", to: "rc", note: "daily rc" } } },
+  { workflow: "promote", at: { hour: 9, minute: 0 }, inputs: { from: "rc", to: "stable", note: "daily stable" }, job: { kind: "promote", params: { from: "rc", to: "stable", note: "daily stable" } } },
+  { workflow: "health", at: { hour: 8, minute: 30 }, job: { kind: "health", params: {} } },
   { workflow: "factory-update.yml", at: { hour: 5, minute: 45 } },
-  { workflow: "gc.yml", at: { hour: 4, minute: 0, weekday: 0 }, job: { kind: "gc", params: {} } },
+  { workflow: "gc", at: { hour: 4, minute: 0, weekday: 0 }, job: { kind: "gc", params: {} } },
 ];
 
 /** The tasks a rule expands to in job mode: sync is one per architecture (all its sources), health one per ring and architecture. */
@@ -265,9 +265,15 @@ export async function runScheduler(env: Env, now = new Date()): Promise<string[]
     log.push("GITHUB_TOKEN not set; scheduler idle");
     return log;
   }
+  // What still starts on GitHub by dispatch: the rules without a job (the
+  // recipe bumps). A job kind left out of JOB_KINDS simply does not run —
+  // the workflows that once did are gone.
   const cache = new Map<string, RunSummary[]>();
   for (const rule of RULES) {
-    if (rule.job && jobMode(env, rule.job.kind)) continue;
+    if (rule.job) {
+      if (!jobMode(env, rule.job.kind)) log.push(`${rule.workflow}: not in JOB_KINDS; nothing runs it`);
+      continue;
+    }
     try {
       const runs = cache.get(rule.workflow) ?? (await recentRuns(env, rule.workflow));
       cache.set(rule.workflow, runs);

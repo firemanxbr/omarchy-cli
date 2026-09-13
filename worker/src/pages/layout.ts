@@ -224,15 +224,15 @@ const HELPERS = String.raw`
       setStatus(s.ok ? "online" : "degraded", s.ok ? "API, index (" + s.index.ms + " ms) and pool (" + s.pool.ms + " ms) answering" : why.join(" · "));
     }).catch(function (e) { setStatus("offline", "API not answering: " + e); });
   }
-  // What is wrong, if anything: no sync for two hours, a source not synced
+  // What is wrong, if anything: no sync for four hours (they run every three), a source not synced
   // for six (a long import holds the pipeline's queue, so small sources wait),
   // or a ring whose latest health check failed. The header pill and the
   // status page use the same list.
   function problemsOf(d) {
     var sync = latest(d.events || [], "sync"), why = [];
-    if (!sync || Date.now() - Date.parse(sync.created_at) > 2 * 3600e3) why.push("no sync for " + (sync ? ago(sync.created_at).replace(" ago", "") : "ever"));
-    var late = (d.coverage || []).filter(function (c) { return c.last_sync && Date.now() - Date.parse(c.last_sync) > 6 * 3600e3; });
-    if (late.length) why.push(late.length + " source(s) not synced for 6 h");
+    if (!sync || Date.now() - Date.parse(sync.created_at) > 4 * 3600e3) why.push("no sync for " + (sync ? ago(sync.created_at).replace(" ago", "") : "ever"));
+    var late = (d.coverage || []).filter(function (c) { return c.last_sync && Date.now() - Date.parse(c.last_sync) > 9 * 3600e3; });
+    if (late.length) why.push(late.length + " source(s) not synced for 9 h");
     (d.latest || []).forEach(function (e) { if (e.kind === "health" && e.status === "error") why.push(e.ring + " " + (e.source || "x86_64") + " failed its health check"); });
     return why;
   }

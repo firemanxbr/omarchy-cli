@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Paste the project's URL. The factory checks whether Arch, Arch Linux ARM or the OPR already ship it, drafts a PKGBUILD, builds it as a dry run on x86_64 and aarch64 and opens a pull request for a maintainer to approve. You will be mentioned on that pull request.
+        Paste the project's URL. The pool reads open requests every ten minutes: it checks whether Arch, Arch Linux ARM or the OPR already ship the name, then queues a build with a drafted PKGBUILD for a shared community worker whose owner runs an agent. The result is evidence a maintainer of the group reviews on the dashboard; if it is approved, the project rebuilds it and it enters the pool. Follow it on the Factory page. If you can run a worker yourself, sign in on Contributors and register the package instead — it is the same flow, on your machine.
   - type: input
     id: url
     attributes:

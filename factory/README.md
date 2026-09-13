@@ -155,12 +155,13 @@ Who approves, and how one becomes a maintainer, is
 
 ## Sizing a package before committing to it
 
-A **dry run** builds and measures but never signs, publishes or renders:
-*Actions → Factory enqueue → Run workflow* with `group/name`, `dry_run`
-(and `override` when an upstream source ships the name). The worker keeps
-the result under `~/.cache/omarchy-factory/dry-run/`; the Factory page shows
-the task with a *dry run* pill and how long it took. `factory/pkgbuilds/sizing/`
-holds recipes kept only for this (chromium, from Arch Linux ARM).
+A **dry run** builds and measures but never publishes or renders: a
+maintainer queues it with `publish:false` —
+`curl -X POST $API/factory/enqueue -H "authorization: Bearer omc_…" -d '{"name":"chromium","group":"sizing","pkgbuild_ref":"<commit>","version":"…","arches":["aarch64"],"reason":"sizing","publish":false,"override":true}'`
+(`override` when an upstream source ships the name). The worker keeps the
+result under its work directory; the Factory page shows the task with a
+*dry run* pill and how long it took. `factory/pkgbuilds/sizing/` holds
+recipes kept only for this (chromium, from Arch Linux ARM).
 
 ## Run a worker
 
@@ -184,7 +185,7 @@ pkg-repo work --worker-token omw_… --arch x86_64 --labels '{"where":"laptop","
 ```
 
 `--idle-exit 300` makes a worker exit after five minutes without work (what
-the hosted runner uses); `--once` makes it one-shot. A build container gets `[omarchy-factory-edge]` in its `pacman.conf` once that
+the hosted fallback uses); `--once` makes it one-shot. A build container gets `[omarchy-factory-edge]` in its `pacman.conf` once that
 database exists, so a package can depend on an earlier factory build.
 
 **Whose compute.** Contributors build on their own workers (or a shared
@@ -202,7 +203,7 @@ The factory touches the pool through four things, all versioned in the API:
 | The factory uses | Meaning |
 |---|---|
 | `GET /api/v1/package/:name` | who ships a name already (the guard) |
-| `POST /api/v1/factory/{requests,enqueue}` · `/requests/:id/{approve,reject}` · `/tasks/:id/cancel` (a maintainer's token, or the enqueue job's) · `POST /factory/jobs` (a maintainer queues a pool job) · `GET /factory/built` | maintainers and the enqueue workflow |
+| `POST /api/v1/factory/{requests,enqueue}` · `/requests/:id/{approve,reject}` · `/tasks/:id/cancel` (a maintainer's token, or the enqueue job's) · `/tasks/:id/{approve,reject}` (a maintainer of the group) · `POST /factory/jobs` (a maintainer queues a pool job) · `GET /factory/built`, `/factory/groups`, `/factory/review` | maintainers and the enqueue job |
 | `POST /api/v1/factory/claim` (a registered worker's token) · `/tasks/:id/{heartbeat,complete,fail}` (the claim's job token) | the worker protocol |
 | `POST /api/v1/factory/register` · `/factory/packages[/:name/build]` · `/factory/workers` (contributor token) · `PUT /factory/tasks/:id/artifacts/:file` (worker token) · `GET /factory/packages`, `/factory/me` | contributors: registry, own workers, staging uploads |
 | `pkg-repo publish --source factory --ring edge --arch …` · `pkg-repo render` | how a result enters the pool: as a source like any other |
@@ -210,20 +211,21 @@ The factory touches the pool through four things, all versioned in the API:
 Nothing in the pool knows how a package is built, where a worker runs or what a
 PKGBUILD looks like; nothing in the factory knows how rings, rendering or
 promotion work. Moving the factory to its own repository means moving
-`factory/` and the two workflows, and pointing `REPO_URL` in the worker script
-at the new home; the pool keeps `worker/src/routes/factory.ts` (the queue) and
-the `factory` source.
+`factory/`, `factory-update.yml`, `factory-image.yml` and the issue form, and
+pointing the repository name in the worker script, `reconcile.rs`,
+`governance.ts` and `requests.ts` at the new home; the pool keeps
+`worker/src/routes/factory.ts` (the queue) and the `factory` source.
 
 ### Worker protocol
 
 ```
-POST /factory/claim                 {worker, arch, hostname?, labels?, version?}
-  200 {task:{id,name,group,arch,version,pkgbuild_ref,reason,attempts,…}, lease_minutes, repo, pkgbuild_path}
-  204 nothing queued for this architecture
-POST /factory/tasks/:id/heartbeat   {worker}                     → lease extended 30 min
-POST /factory/tasks/:id/complete    {worker, sha256, filename, version?, duration_ms?, log_tail?}
-  409 unless the sha256 is already indexed in the pool (publish first)
-POST /factory/tasks/:id/fail        {worker, error, duration_ms?, log_tail?}
+POST /factory/claim                 {arch, hostname?, labels?, version?, kinds?, shared?}   Authorization: Bearer omw_… (the registration)
+  200 {task:{id,name,group,arch,version,pkgbuild_ref,reason,attempts,…}, token: "omj.…", token_expires_at, lease_minutes, repo, pkgbuild_path, upload}
+  204 nothing queued for this worker
+POST /factory/tasks/:id/heartbeat                                 (the job token) → lease extended 30 min, a fresh token
+POST /factory/tasks/:id/complete    {sha256, filename, version?, duration_ms?, log_tail?} · jobs: {result, summary}
+  409 unless the sha256 is in the pool (project) or in staging (community)
+POST /factory/tasks/:id/fail        {error, duration_ms?, log_tail?}
   → {status:"queued"} while attempts < max_attempts, else {status:"failed"}
 ```
 
@@ -237,14 +239,16 @@ requeues leases past `lease_expires_at`.
 ```
 factory/
   README.md                       this file
-  worker/omarchy-build-worker.sh  the worker: claims on the host, builds each task in a fresh container;
-                                  `--container` is the contributor's one-task-per-container mode
+  worker/omarchy-build-worker.sh  the build half: `--inside` (called by pkg-repo work in a fresh container),
+                                  `--container` (the contributor's one-task-per-container mode)
+  MAINTAINERS.toml                the governance file: groups and their maintainers (docs/GOVERNANCE.md)
+  bin/check-governance            validates it and generates .github/CODEOWNERS from it
   image/Containerfile             the Omarchy Packaging image (signed, both architectures); image/compose.yml runs it
   bin/pkgbuild-meta               PKGBUILD → arches and version, without executing it as you
   pkgbuilds/<group>/<name>/       reviewed PKGBUILDs; CODEOWNERS per group
-.github/workflows/factory-enqueue.yml   merged PKGBUILD → tasks
-.github/workflows/factory-request.yml   issue with a URL → drafted PKGBUILD → dry-run builds → pull request
-.github/workflows/factory-update.yml    daily: bump approved packages to their latest upstream release
+.github/workflows/factory-update.yml    daily: pull requests bumping the project's own recipes (reviewed, never auto-merged)
+.github/workflows/factory-image.yml     builds and signs the Omarchy Packaging image
+.github/ISSUE_TEMPLATE/package-request.yml   the request form the brain reads every ten minutes
   bin/draft-pkgbuild              project URL → PKGBUILD (Claude, or a template), checksums left to updpkgsums
   prompts/pkgbuild.md             the packaging rules the drafter follows
   bin/check-updates               which PKGBUILDs are behind their GitHub upstream

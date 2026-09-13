@@ -191,6 +191,7 @@ fn task_label(t: &Task) -> String {
         ),
         "promote" => format!("promote {} → {}", s(p, "from"), s(p, "to")),
         "security" => "security: advisories, matches, fast-track".to_owned(),
+        "rollback" => format!("rollback {} → release {}", s(p, "ring"), s(p, "to")),
         "enqueue" => "enqueue: PKGBUILDs on main → the queue".to_owned(),
         "render" | "health" => format!("{} {}/{}", t.kind, s(p, "ring"), s(p, "arch")),
         _ => format!("{} {}", t.kind, t.name),
@@ -260,6 +261,32 @@ fn execute(opts: &WorkOptions, task: &Task, token: &Arc<Mutex<String>>) -> Resul
         }
         "promote" => promote_job(opts, &job, task, token),
         "security" => security_job(opts, &job, token),
+        "rollback" => {
+            let ring = s(&task.params, "ring");
+            let to = task
+                .params
+                .get("to")
+                .and_then(|v| {
+                    v.as_u64()
+                        .or_else(|| v.as_str().and_then(|x| x.parse().ok()))
+                })
+                .ok_or_else(|| anyhow!("rollback needs `to`, a release id"))?;
+            let note = s(&task.params, "note");
+            let created = ops::rollback(
+                &job,
+                &ring,
+                to,
+                if note.is_empty() { None } else { Some(&note) },
+            )?;
+            let rendered = render_both(opts, &job, &ring, &opts.arch)?;
+            Ok(Outcome {
+                summary: format!(
+                    "{ring} rolled back to release {to} as release {created}; rendered {}",
+                    rendered.join(", ")
+                ),
+                result: serde_json::json!({ "ring": ring, "to": to, "release_id": created, "rendered": rendered }),
+            })
+        }
         "enqueue" => {
             let r = crate::reconcile::run(&job, &opts.work_dir, &opts.arch)?;
             Ok(Outcome {
@@ -721,23 +748,36 @@ fn promote_job(
     )
     .unwrap_or(1);
     let arches = ["x86_64".to_owned(), "aarch64".to_owned()];
-    // Evidence: health and ABI of the source ring, both architectures. The
-    // scripts record events; the gate reads them. Failures are evidence too.
-    for arch in &arches {
-        let _ = script(opts, token, "tests/health-check.sh", &[&from, arch]);
-        let _ = script(opts, token, "tests/abi-gate.sh", &[&from, arch]);
+    // `force` (a maintainer's emergency, queued by hand) skips the evidence
+    // and the gate; the health check of the target still runs and still
+    // rolls back.
+    let forced = s(&task.params, "force") == "yes";
+    if !forced {
+        // Evidence: health and ABI of the source ring, both architectures. The
+        // scripts record events; the gate reads them. Failures are evidence too.
+        for arch in &arches {
+            let _ = script(opts, token, "tests/health-check.sh", &[&from, arch]);
+            let _ = script(opts, token, "tests/abi-gate.sh", &[&from, arch]);
+        }
     }
-    let report = gate::run(
-        job,
-        &GateOptions {
-            from: &from,
-            to: &to,
-            arches: &arches,
-            soak_days,
-            max_age_hours: 24,
-            dry_run: false,
-        },
-    )?;
+    let report = if forced {
+        gate::GateReport {
+            verdict: Verdict::Promote,
+            evidence: Vec::new(),
+        }
+    } else {
+        gate::run(
+            job,
+            &GateOptions {
+                from: &from,
+                to: &to,
+                arches: &arches,
+                soak_days,
+                max_age_hours: 24,
+                dry_run: false,
+            },
+        )?
+    };
     match report.verdict {
         Verdict::Skip(why) => {
             return Ok(Outcome {
