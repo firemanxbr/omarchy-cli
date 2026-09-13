@@ -6,12 +6,16 @@
 
 Analyses the repository through the GitHub API (metadata, latest release and
 its assets, the files that reveal the build system, the README head) and asks
-Claude for the PKGBUILD following factory/prompts/pkgbuild.md; without
-ANTHROPIC_API_KEY it falls back to a template for Rust, Go, CMake, Meson and
+the worker owner's agent (agent.py: Anthropic, OpenAI, Gemini or xAI, by the
+key set) for the PKGBUILD following factory/prompts/pkgbuild.md; without an
+agent key it falls back to a template for Rust, Go, CMake, Meson and
 prebuilt release binaries. Writes DIR/PKGBUILD and prints a JSON summary.
 Checksums are left as SKIP for updpkgsums.
 """
 import argparse, json, os, re, sys, urllib.request, urllib.error, base64
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import agent  # noqa: E402
 
 GH = "https://api.github.com"
 FILES = ["Cargo.toml", "Cargo.lock", "go.mod", "package.json", "pyproject.toml", "setup.py", "CMakeLists.txt",
@@ -217,11 +221,10 @@ package() {{
 }}
 '''
         return head + lines
-    sys.exit(f"no template for build system '{bs}' and no ANTHROPIC_API_KEY to draft with")
+    sys.exit(f"no template for build system '{bs}' and no agent key ({', '.join(agent.KEYS)}) to draft with")
 
 
-def claude(a, previous, log, hint):
-    key = os.environ["ANTHROPIC_API_KEY"]
+def draft(a, previous, log, hint):
     rules = open(os.path.join(os.path.dirname(__file__), "..", "prompts", "pkgbuild.md")).read()
     facts = {k: v for k, v in a.items() if k not in ("files", "readme")}
     user = "Project facts (native_deps_hint: Arch packages behind the -sys crates in Cargo.lock):\n" + json.dumps(facts, indent=1) + "\n\n"
@@ -235,13 +238,7 @@ def claude(a, previous, log, hint):
     if hint:
         user += "\n--- maintainer hint ---\n" + hint + "\n"
     user += "\nReturn the PKGBUILD only."
-    body = json.dumps({"model": os.environ.get("FACTORY_MODEL", "claude-sonnet-5"), "max_tokens": 4000, "system": rules,
-                       "messages": [{"role": "user", "content": user}]}).encode()
-    req = urllib.request.Request("https://api.anthropic.com/v1/messages", data=body, method="POST",
-                                 headers={"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"})
-    with urllib.request.urlopen(req, timeout=180) as r:
-        out = json.load(r)
-    text = "".join(c.get("text", "") for c in out.get("content", []))
+    text, _model = agent.complete(rules, user, max_tokens=4000)
     text = re.sub(r"^```\w*\n|\n```\s*$", "", text.strip())
     if "pkgname=" not in text or "package()" not in text:
         sys.exit("the model did not return a PKGBUILD:\n" + text[:500])
@@ -258,8 +255,9 @@ def main():
         sys.exit(f"{a['url']} has no release or tag; the factory packages releases only")
     previous = open(args.previous).read() if args.previous else None
     log = open(args.log).read() if args.log else None
-    mode = "claude" if os.environ.get("ANTHROPIC_API_KEY") else "template"
-    text = claude(a, previous, log, args.hint) if mode == "claude" else template(a)
+    found = agent.provider()
+    mode = found[0] if found else "template"
+    text = draft(a, previous, log, args.hint) if found else template(a)
     os.makedirs(args.out, exist_ok=True)
     with open(os.path.join(args.out, "PKGBUILD"), "w") as f:
         f.write(text)

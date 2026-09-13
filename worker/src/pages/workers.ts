@@ -17,8 +17,8 @@ const BODY = String.raw`
   <section>
     <h2>What the registration decides</h2>
     <div class="table-wrap"><table><thead><tr><th>Your registration</th><th>What the container does</th><th>What it needs</th></tr></thead><tbody>
-      <tr><td><b>community</b> trust — every registration starts here</td><td>builds <em>your</em> registered packages, one task per container, right inside it, into your staging workspace as evidence for a maintainer. With <code>WORKER_SHARED=1</code> it also builds other contributors' packages (donated compute), with <code>ANTHROPIC_API_KEY</code> your agent drafts and corrects PKGBUILDs. It never sees a package in review or approved.</td><td>the token</td></tr>
-      <tr><td><b>project</b> trust — a maintainer trusted the registration</td><td>the project's work: the pool's own jobs (sync, promote, health, security, gc, the PKGBUILD reconcile) and the rebuild of packages maintainers approved — what users actually get. Each build and check runs in a <em>fresh</em> Arch container it starts as a sibling. With <code>ANTHROPIC_API_KEY</code> it also <b>audits</b> staged builds for the maintainers (the second agent). Never a contributor's build.</td><td>the token, the runtime's socket, a working directory at the same path on both sides</td></tr>
+      <tr><td><b>community</b> trust — every registration starts here</td><td>builds <em>your</em> registered packages, one task per container, right inside it, into your staging workspace as evidence for a maintainer. With <code>WORKER_SHARED=1</code> it also builds other contributors' packages (donated compute), with your agent key (<code>ANTHROPIC_API_KEY</code>, <code>OPENAI_API_KEY</code>, <code>GEMINI_API_KEY</code> or <code>XAI_API_KEY</code>) your agent drafts and corrects PKGBUILDs. It never sees a package in review or approved.</td><td>the token</td></tr>
+      <tr><td><b>project</b> trust — a maintainer trusted the registration</td><td>the project's work: the pool's own jobs (sync, promote, health, security, gc, the PKGBUILD reconcile) and the rebuild of packages maintainers approved — what users actually get. Each build and check runs in a <em>fresh</em> Arch container it starts as a sibling. With an agent key it also <b>audits</b> staged builds for the maintainers (the second agent). Never a contributor's build.</td><td>the token, the runtime's socket, a working directory at the same path on both sides</td></tr>
     </tbody></table></div>
     <p class="sub">A maintainer who also contributes packages registers a second worker and leaves it untrusted: one registration per role of a machine. Tags: <code>latest</code> is a multi-architecture manifest (your machine pulls its own), <code>x86_64</code> and <code>aarch64</code> pin one, and every pool release is a tag (<code>v0.0.70</code>). Verify before trusting it:</p>
     <div class="steps"><div class="step"><pre>cosign verify ${IMG}:latest \
@@ -54,8 +54,11 @@ podman run -d --name omarchy-worker --restart unless-stopped \
 <pre># also build other contributors' packages (their bumps after 14 days, package requests at once)
   -e WORKER_SHARED=1
 
-# an agent drafts and corrects PKGBUILDs on this machine, with your key — the pool never holds one
-  -e ANTHROPIC_API_KEY=sk-…</pre>
+# an agent drafts and corrects PKGBUILDs on this machine, with your key — the pool never holds one;
+# one of these is enough (Anthropic, OpenAI, Gemini, xAI), FACTORY_MODEL picks the model
+  -e ANTHROPIC_API_KEY=sk-…      # or OPENAI_API_KEY / GEMINI_API_KEY / XAI_API_KEY
+  -e FACTORY_MODEL=claude-sonnet-5</pre>
+      <p>The Factory page shows which agent each worker reported (<code>anthropic/claude-sonnet-5</code>, <code>openai/gpt-5</code>, …); the key itself never leaves your machine.</p>
       <p>A shared worker with an agent is what turns a <em>package request</em> (a GitHub issue) into a first PKGBUILD and a first build; without one, requests wait. What your agent produces is evidence like any other build: a maintainer reads it before anything reaches users.</p></div>
       <div class="step"><h3>4. Watch it</h3><p>In <b>Docker Desktop</b>, <em>Containers</em> lists <code>omarchy-worker</code> with its state and a <em>Logs</em> tab; in <b>Podman Desktop</b>, the same under <em>Containers</em>. On the command line: <code>docker logs -f omarchy-worker</code> / <code>podman logs -f omarchy-worker</code>. The container exits after each task (that is by design) and the restart policy brings it back.</p>
       <div class="shot">Screenshot to add: Docker Desktop → Containers, the running <code>omarchy-worker</code> and its Logs tab; Podman Desktop → Containers, the same.</div></div>
@@ -97,7 +100,7 @@ podman run -d --name omarchy-worker --restart unless-stopped --security-opt labe
 --once                    one task, then exit
 --labels '{"where":"…"}'  shown on the Factory page</pre>
       <p>A project worker never builds a contributor's package: those run on the contributor's worker, or on a worker somebody donated with <code>WORKER_SHARED=1</code>. What it builds is the rebuild a maintainer approved — never one the same maintainer brought — and the pool signs the result.</p></div>
-      <div class="step"><h3>5. The second agent</h3><p>Add <code>-e ANTHROPIC_API_KEY=sk-…</code> (your key, on your machine; <code>-e FACTORY_MODEL=…</code> picks the model) and the worker also takes the <b>audit</b> of every build a contributor stages: it reads the PKGBUILD, the log and the <code>.PKGINFO</code> the maintainer will read, asks the model for a structured review — supply chain, security, packaging practice, licence — and attaches the report to the evidence. <a href="/review">Review</a> shows the verdict next to the build; the maintainer still decides. No such worker running, and the column says <em>waiting</em>.</p></div>
+      <div class="step"><h3>5. The second agent</h3><p>Add your agent key — <code>-e ANTHROPIC_API_KEY=sk-…</code>, or <code>OPENAI_API_KEY</code>, <code>GEMINI_API_KEY</code>, <code>XAI_API_KEY</code> (your key, on your machine; <code>-e FACTORY_MODEL=…</code> picks the model) — and the worker also takes the <b>audit</b> of every build a contributor stages: it reads the PKGBUILD, the log and the <code>.PKGINFO</code> the maintainer will read, asks the model for a structured review — supply chain, security, packaging practice, licence — and attaches the report to the evidence. <a href="/review">Review</a> shows the verdict next to the build; the maintainer still decides. No such worker running, and the column says <em>waiting</em>.</p></div>
     </div>
   </section>
 

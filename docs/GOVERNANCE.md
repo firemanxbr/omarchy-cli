@@ -124,11 +124,15 @@ bypassed review. The exception ends the moment a second maintainer exists.
   ends up busy with strangers' packages by accident.
 - **Agent keys stay with the worker's owner.** A worker that drafts or
   corrects PKGBUILDs with an agent (community trust), or audits staged
-  builds for the maintainers (project trust), gets `ANTHROPIC_API_KEY` in
-  its environment when it starts. The pool holds no agent key and GitHub
-  runs no agent — the hosted fallback never takes an audit; what an agent
-  produces is evidence like any other build, reviewed by a maintainer
-  before it reaches anyone.
+  builds for the maintainers (project trust), gets the owner's key in its
+  environment when it starts — `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
+  `GEMINI_API_KEY` or `XAI_API_KEY`, whichever provider they use
+  (`factory/bin/agent.py`; `FACTORY_MODEL` picks the model). The worker
+  reports *which* agent it runs (`anthropic/claude-sonnet-5`,
+  `openai/gpt-5`, …) so the Factory page can show it; the key itself never
+  travels. The pool holds no agent key and GitHub runs no agent — the
+  hosted fallback never takes an audit; what an agent produces is evidence
+  like any other build, reviewed by a maintainer before it reaches anyone.
 - **Package requests** (a GitHub issue) become a task for a *shared*
   community worker whose owner runs an agent. No such worker, no draft: the
   request waits, visibly, on the Factory page.

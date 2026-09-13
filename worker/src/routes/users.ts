@@ -91,7 +91,7 @@ export async function handleUser(login: string, env: Env): Promise<Response> {
       .bind(login)
       .first<{ staged: number; published: number; failed: number; total: number }>(),
     env.DB.prepare(`SELECT task_id, name, "group", arch, version, decision, note, created_at FROM approvals WHERE by = ? ORDER BY id DESC LIMIT 50`).bind(login).all(),
-    env.DB.prepare("SELECT id, arch, mode, trust, last_seen, builds_done, builds_failed, revoked_at FROM build_workers WHERE owner = ? ORDER BY last_seen DESC").bind(login).all(),
+    env.DB.prepare("SELECT id, arch, mode, trust, agent, last_seen, builds_done, builds_failed, revoked_at FROM build_workers WHERE owner = ? ORDER BY last_seen DESC").bind(login).all(),
     groupsOf(env),
     recordOf(env, login),
   ]);

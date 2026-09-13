@@ -39,14 +39,14 @@ const BODY = String.raw`
 
   <section>
     <h2>Workers</h2>
-    <div class="table-wrap"><table id="workers"><thead><tr><th>Worker</th><th>Arch</th><th>Trust</th><th>Mode</th><th>Last seen</th><th>Done / failed</th></tr></thead><tbody></tbody></table></div>
+    <div class="table-wrap"><table id="workers"><thead><tr><th>Worker</th><th>Arch</th><th>Trust</th><th>Mode</th><th>Agent</th><th>Last seen</th><th>Done / failed</th></tr></thead><tbody></tbody></table></div>
   </section>
 `;
 
 const SCRIPT = String.raw`
   var login = decodeURIComponent(location.pathname.split("/")[2] || "");
   $("#crumb").textContent = login;
-  skeletonTiles("#tiles", 4); skeletonRows("#packages", 6, 2); skeletonRows("#builds", 7, 3); skeletonRows("#workers", 6, 1);
+  skeletonTiles("#tiles", 4); skeletonRows("#packages", 6, 2); skeletonRows("#builds", 7, 3); skeletonRows("#workers", 7, 1);
   function pill(s) {
     var c = { leased: "var(--blue)", queued: "var(--amber)", done: "var(--green)", staged: "var(--green)", failed: "var(--red)", cancelled: "var(--dim)", registered: "var(--dim)", waiting: "var(--amber)", building: "var(--blue)", approved: "var(--green)", rejected: "var(--red)", unmaintained: "var(--red)" }[s] || "var(--dim)";
     return '<span class="pill" style="color:' + c + ';border-color:' + c + '">' + esc(s === "leased" ? "building" : s) + '</span>';
@@ -91,7 +91,7 @@ const SCRIPT = String.raw`
       return '<tr><td>' + t.id + '</td><td><b>' + esc(t.name) + '</b>' + (t.version ? ' <span class="mono muted">' + esc(t.version) + '</span>' : '') + '</td><td>' + esc(t.arch) + '</td><td>' + pill(t.status) + '</td><td>' + esc(t.reason || "") + '</td><td>' + took(t.duration_ms) + '</td><td class="when">' + ago(t.finished_at || t.created_at) + '</td></tr>';
     }, { empty: "nothing built yet" });
     pager("#workers", d.workers, function (w) {
-      return '<tr><td class="mono">' + esc(w.id) + (w.revoked_at ? ' <span class="pill none">revoked</span>' : w.alive ? ' <span class="pill ok">alive</span>' : '') + '</td><td>' + esc(w.arch) + '</td><td>' + esc(w.trust) + '</td><td>' + esc(w.mode) + '</td><td class="when">' + ago(w.last_seen) + '</td><td>' + num(w.builds_done) + ' / ' + num(w.builds_failed) + '</td></tr>';
+      return '<tr><td class="mono">' + esc(w.id) + (w.revoked_at ? ' <span class="pill none">revoked</span>' : w.alive ? ' <span class="pill ok">alive</span>' : '') + '</td><td>' + esc(w.arch) + '</td><td>' + esc(w.trust) + '</td><td>' + esc(w.mode) + '</td><td>' + agentCell(w) + '</td><td class="when">' + ago(w.last_seen) + '</td><td>' + num(w.builds_done) + ' / ' + num(w.builds_failed) + '</td></tr>';
     }, { empty: "no worker registered" });
     endSkeleton();
     // Your own page: the place to sign out, and to get a token for the command line.

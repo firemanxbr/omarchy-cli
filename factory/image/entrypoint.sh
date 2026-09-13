@@ -8,13 +8,14 @@
 #   community trust  → the contributor's worker: one task per container,
 #                      built right here, the result into the contributor's
 #                      staging workspace (WORKER_SHARED=1 builds anyone's,
-#                      ANTHROPIC_API_KEY brings the owner's agent).
+#                      an agent key — ANTHROPIC_API_KEY, OPENAI_API_KEY,
+#                      GEMINI_API_KEY or XAI_API_KEY — brings the owner's agent).
 #   project trust    → the project's worker: the pool's jobs and the rebuild
 #                      of approved packages, each in a fresh sibling
 #                      container through the runtime's socket mounted at
-#                      /var/run/docker.sock (docs: /docs/workers); with
-#                      ANTHROPIC_API_KEY it also audits staged builds for
-#                      the maintainers (the second agent).
+#                      /var/run/docker.sock (docs: /docs/workers); with an
+#                      agent key it also audits staged builds for the
+#                      maintainers (the second agent).
 #
 # Extra arguments go to `pkg-repo work` in project mode (--kind, --idle-exit,
 # --once, --labels); in community mode they are ignored.
@@ -38,7 +39,8 @@ case "$mode" in
       exit 2
     fi
     [[ -n "${OMARCHY_WORK_DIR:-}" ]] || echo "omarchy-worker: OMARCHY_WORK_DIR not set; using /var/lib/omarchy-worker — mount the same host path there" >&2
-    echo "omarchy-worker: $id — project worker ($arch, ${owner:-project}); pool jobs and approved rebuilds${ANTHROPIC_API_KEY:+, audits of staged builds}" >&2
+    agent=""; for k in ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY XAI_API_KEY; do [[ -n "${!k:-}" ]] && agent=1; done
+    echo "omarchy-worker: $id — project worker ($arch, ${owner:-project}); pool jobs and approved rebuilds${agent:+, audits of staged builds}" >&2
     exec pkg-repo work --arch "$arch" "$@"
     ;;
   community)

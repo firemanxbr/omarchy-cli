@@ -44,9 +44,12 @@ PKGBUILD reviewed and merged ──▶ pool: build_requests / build_tasks (D1)
    missing.
 3. **The PKGBUILD is drafted, not written**, when none is given:
    `factory/bin/draft-pkgbuild` in the worker reads the repository (metadata,
-   latest release, build files, README) and asks Claude for the PKGBUILD
-   following `factory/prompts/pkgbuild.md` — the worker owner's
-   `ANTHROPIC_API_KEY`, never the pool's; without one a template covers Rust,
+   latest release, build files, README) and asks the owner's agent for the
+   PKGBUILD following `factory/prompts/pkgbuild.md` — `factory/bin/agent.py`
+   speaks to Anthropic, OpenAI, Gemini or xAI by the key set
+   (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `XAI_API_KEY`;
+   `FACTORY_MODEL` picks the model), the worker owner's key, never the
+   pool's; without one a template covers Rust,
    Go, CMake, Meson, autotools and prebuilt release binaries. `updpkgsums`
    fills the checksums and `namcap` lints, in the container.
 4. **It is built before anyone reviews it.** The worker builds it in its
@@ -120,7 +123,7 @@ curl -s -X POST $API/factory/workers -H "authorization: Bearer $OMC" -H 'content
 curl -s -X POST $API/factory/packages/project/build -H "authorization: Bearer $OMC"
 
 # 5. Run the worker: the project's signed image, one fresh container per task.
-#    ANTHROPIC_API_KEY is *your* agent key, on your machine: the pool never holds one.
+#    the agent key (ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY or XAI_API_KEY) is *yours*, on your machine: the pool never holds one.
 #    WORKER_SHARED=1 donates the worker to other contributors' packages too.
 WORKER_ID=you-laptop-ab12 OMARCHY_WORKER_TOKEN=omw_… ANTHROPIC_API_KEY=sk-… \
   podman compose -f factory/image/compose.yml up -d        # or docker compose
@@ -134,7 +137,7 @@ curl -s $API/factory/me -H "authorization: Bearer $OMC"       # your packages, w
 What happens: the worker claims your task (a dedicated worker only ever
 sees your packages; a shared one takes any community task), builds it in the
 container — from the `PKGBUILD` in your repository if you named one, else a
-PKGBUILD **drafted** from the project (with your `ANTHROPIC_API_KEY` your agent
+PKGBUILD **drafted** from the project (with your agent key your agent
 writes it and corrects it from the build log, up to three times; without a
 key a template covers Rust, Go, CMake, Meson, autotools and release
 binaries) — and uploads the package, the PKGBUILD, `PKGINFO` and the build
@@ -263,7 +266,8 @@ factory/
   pkgbuilds/<group>/<name>/       reviewed PKGBUILDs; CODEOWNERS per group
 .github/workflows/factory-update.yml    daily: pull requests bumping the project's own recipes (reviewed, never auto-merged)
 .github/ISSUE_TEMPLATE/package-request.yml   the request form the brain reads every ten minutes
-  bin/draft-pkgbuild              project URL → PKGBUILD (Claude, or a template), checksums left to updpkgsums
+  bin/agent.py                    the owner's agent, whichever provider: Anthropic, OpenAI, Gemini, xAI (by the key set)
+  bin/draft-pkgbuild              project URL → PKGBUILD (the agent, or a template), checksums left to updpkgsums
   prompts/pkgbuild.md             the packaging rules the drafter follows
   bin/audit-pkgbuild              the second agent: staged PKGBUILD + log + .PKGINFO → audit.json / audit.md
   prompts/audit.md                what the auditor looks for, and the report's shape

@@ -23,7 +23,9 @@
 #   WORKER_ID              the registered worker id (shown with the token)
 #   WORKER_LABELS          JSON shown on the Factory page, e.g. {"where":"laptop"}
 #   WORKER_SHARED          1 = build anyone's community packages (donated compute); default: the owner's only
-#   ANTHROPIC_API_KEY      the worker owner's agent key, if any: drafts and corrects PKGBUILDs here, on this machine
+#   ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, XAI_API_KEY
+#                          the worker owner's agent key, if any (one is enough): drafts and corrects PKGBUILDs
+#                          here, on this machine (factory/bin/agent.py; FACTORY_PROVIDER / FACTORY_MODEL choose)
 #   IDLE_EXIT              exit after this many seconds without work (0 = never; default 0)
 #   MAX_TASKS              exit after this many tasks (0 = unlimited; default 0)
 set -euo pipefail
@@ -31,6 +33,19 @@ set -euo pipefail
 REPO_URL="https://github.com/firemanxbr/omarchy-pool"
 
 log() { printf '[%s] %s\n' "$(date -u +%H:%M:%S)" "$*" >&2; }
+
+# The agent this worker runs, as "<provider>/<model>" (the same choice
+# factory/bin/agent.py makes), or "" without a key — reported at claim time
+# so the Factory page can show it; the key itself never leaves this machine.
+agent_label() {
+  local p k m
+  for p in anthropic:ANTHROPIC_API_KEY:claude-sonnet-5 openai:OPENAI_API_KEY:gpt-5 gemini:GEMINI_API_KEY:gemini-2.5-pro xai:XAI_API_KEY:grok-4; do
+    k="${p#*:}"; k="${k%%:*}"; m="${p##*:}"
+    [[ -n "${FACTORY_PROVIDER:-}" && "${FACTORY_PROVIDER}" != "${p%%:*}" ]] && continue
+    [[ -n "${!k:-}" ]] && { echo "${p%%:*}/${FACTORY_MODEL:-$m}"; return; }
+  done
+  echo ""
+}
 
 # ---------------------------------------------------------------- inside ---
 # Runs as root in a fresh Arch container with /task mounted: /task/meta.sh
@@ -100,7 +115,7 @@ fetch_pkgbuild() { # name group ref → /build/pkg holds the PKGBUILD directory
   elif [[ "$ref" == draft:* ]]; then
     local spec url
     spec="${ref#draft:}"; url="${spec%@*}"
-    echo "==> Drafting a PKGBUILD for $url ($( [[ -n "${ANTHROPIC_API_KEY:-}" ]] && echo "with the contributor's Claude key" || echo "template; set ANTHROPIC_API_KEY on the worker for an agent-written draft"))"
+    echo "==> Drafting a PKGBUILD for $url ($( [[ -n "$(agent_label)" ]] && echo "with the contributor's agent, $(agent_label)" || echo "template; set an agent key on the worker for an agent-written draft"))"
     mkdir -p /build/pkg
     GITHUB_TOKEN="${GITHUB_TOKEN:-}" python3 /build/pool/factory/bin/draft-pkgbuild --url "$url" --name "$name" --out /build/pkg
   elif [[ "$ref" == *@*:* ]]; then
@@ -145,7 +160,7 @@ run_makepkg() { # → /build/out/*.pkg.tar.zst
 # agent doing the heavy lifting, on the contributor's machine.
 build_with_retries() { # name group ref
   local name="$1" group="$2" ref="$3" attempt=1 max=1
-  [[ "$ref" == draft:* && -n "${ANTHROPIC_API_KEY:-}" ]] && max=3
+  [[ "$ref" == draft:* && -n "$(agent_label)" ]] && max=3
   fetch_pkgbuild "$name" "$group" "$ref"
   while :; do
     if run_makepkg > /build/attempt.log 2>&1; then cat /build/attempt.log; return 0; fi
@@ -185,7 +200,7 @@ container_worker() {
   add_pool_repos "$ARCH" "$OMARCHY_POOL"
   local idle=0 out code body task id name group ref version
   while :; do
-    out="$(api POST /factory/claim "$(jq -n --arg a "$ARCH" --arg h "$(hostname -s 2>/dev/null || echo ?)" --arg v "container" --argjson l "${WORKER_LABELS:-{\}}" --argjson s "$( [[ "${WORKER_SHARED:-0}" == 1 ]] && echo true || echo false)" '{arch:$a,hostname:$h,version:$v,labels:$l,shared:$s}')")" \
+    out="$(api POST /factory/claim "$(jq -n --arg a "$ARCH" --arg h "$(hostname -s 2>/dev/null || echo ?)" --arg v "container" --arg g "$(agent_label)" --argjson l "${WORKER_LABELS:-{\}}" --argjson s "$( [[ "${WORKER_SHARED:-0}" == 1 ]] && echo true || echo false)" '{arch:$a,hostname:$h,version:$v,labels:$l,shared:$s,agent:$g}')")" \
       || { log "claim failed: ${out##*$'\n'}"; sleep 60; continue; }
     code="${out##*$'\n'}"; body="${out%$'\n'*}"
     if [[ "$code" == "204" ]]; then

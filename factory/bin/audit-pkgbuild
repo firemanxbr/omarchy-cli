@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """The second agent: audits a staged build's PKGBUILD, log and .PKGINFO.
 
-Runs on a project worker whose owner set ANTHROPIC_API_KEY (the key is the
-worker owner's, never the pool's). Reads the evidence a contributor staged,
+Runs on a project worker whose owner set an agent key (ANTHROPIC_API_KEY,
+OPENAI_API_KEY, GEMINI_API_KEY or XAI_API_KEY — see agent.py; the key is
+the worker owner's, never the pool's). Reads the evidence a contributor staged,
 asks the model for a structured review following factory/prompts/audit.md
 and writes audit.json and audit.md for the maintainer to read on the Review
 page. Exit 0 with a report, non-zero when no report could be produced.
@@ -14,29 +15,19 @@ import json
 import os
 import re
 import sys
-import urllib.request
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import agent  # noqa: E402
 
 RULES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "prompts", "audit.md")
 
 
 def ask(pkgbuild, log, pkginfo):
-    key = os.environ.get("ANTHROPIC_API_KEY")
-    if not key:
-        sys.exit("ANTHROPIC_API_KEY is not set: the audit needs the worker owner's agent key")
     user = "--- PKGBUILD ---\n" + pkgbuild + "\n\n--- build log (tail) ---\n" + log[-12000:] + "\n"
     if pkginfo:
         user += "\n--- .PKGINFO ---\n" + pkginfo[:4000] + "\n"
     user += "\nReturn the JSON report only."
-    body = json.dumps({
-        "model": os.environ.get("FACTORY_MODEL", "claude-sonnet-5"), "max_tokens": 3000,
-        "system": open(RULES).read(), "messages": [{"role": "user", "content": user}],
-    }).encode()
-    base = os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com").rstrip("/")
-    req = urllib.request.Request(base + "/v1/messages", data=body, method="POST",
-                                 headers={"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"})
-    with urllib.request.urlopen(req, timeout=180) as r:
-        out = json.load(r)
-    text = "".join(c.get("text", "") for c in out.get("content", []))
+    text, model = agent.complete(open(RULES).read(), user, max_tokens=3000)
     text = re.sub(r"^```\w*\n|\n```\s*$", "", text.strip())
     try:
         report = json.loads(text)
@@ -47,7 +38,7 @@ def ask(pkgbuild, log, pkginfo):
         report = json.loads(m.group(0))
     if report.get("verdict") not in ("ok", "warn", "block"):
         sys.exit("the report has no verdict:\n" + text[:500])
-    report["model"] = out.get("model", os.environ.get("FACTORY_MODEL", "claude-sonnet-5"))
+    report["model"] = model
     report["findings"] = [f for f in report.get("findings", []) if isinstance(f, dict)]
     return report
 

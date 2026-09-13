@@ -29,6 +29,34 @@ pub const REPO_URL: &str = "https://github.com/firemanxbr/omarchy-pool";
 const HEARTBEAT: Duration = Duration::from_secs(300);
 const POLL: Duration = Duration::from_secs(30);
 
+/// The agent providers `factory/bin/agent.py` knows, in the order it picks
+/// them when several keys are set: (name, key variable, default model).
+const AGENTS: [(&str, &str, &str); 4] = [
+    ("anthropic", "ANTHROPIC_API_KEY", "claude-sonnet-5"),
+    ("openai", "OPENAI_API_KEY", "gpt-5"),
+    ("gemini", "GEMINI_API_KEY", "gemini-2.5-pro"),
+    ("xai", "XAI_API_KEY", "grok-4"),
+];
+
+/// The agent this worker runs, as `<provider>/<model>` — what the claim
+/// reports so the Factory page can show it; the key itself stays here.
+/// None without a key. `FACTORY_PROVIDER` and `FACTORY_MODEL` override the
+/// choice the way `agent.py` honours them.
+pub fn agent_label() -> Option<String> {
+    let set = |var: &str| std::env::var(var).is_ok_and(|k| !k.is_empty());
+    let wanted = std::env::var("FACTORY_PROVIDER")
+        .ok()
+        .filter(|p| !p.is_empty());
+    let (name, _, default_model) = AGENTS
+        .iter()
+        .find(|(name, key, _)| wanted.as_deref().is_none_or(|w| w == *name) && set(key))?;
+    let model = std::env::var("FACTORY_MODEL")
+        .ok()
+        .filter(|m| !m.is_empty())
+        .unwrap_or_else(|| (*default_model).to_owned());
+    Some(format!("{name}/{model}"))
+}
+
 /// What a worker pulls when `--kind` is not given: every pool job and the
 /// project builds, plus `audit` when this machine has an agent key — the
 /// second agent (docs/GOVERNANCE.md) runs only where its owner put one.
@@ -39,7 +67,7 @@ pub fn default_kinds() -> Vec<String> {
     .iter()
     .map(|k| (*k).to_owned())
     .collect();
-    if std::env::var("ANTHROPIC_API_KEY").is_ok_and(|k| !k.is_empty()) {
+    if agent_label().is_some() {
         kinds.push("audit".to_owned());
     }
     kinds
@@ -104,12 +132,17 @@ pub fn run(opts: &WorkOptions) -> Result<()> {
     let claimer = Api::new(&opts.api, &opts.worker_token)?;
     let hostname = hostname();
     let version = pkg_manifest::BUILD_VERSION;
+    let agent = agent_label();
     eprintln!(
-        "worker ({}) ready — {} — asking {} for {}",
+        "worker ({}) ready — {} — asking {} for {}{}",
         opts.arch,
         version,
         opts.api,
-        opts.kinds.join(", ")
+        opts.kinds.join(", "),
+        agent
+            .as_deref()
+            .map(|a| format!(" — agent {a}"))
+            .unwrap_or_default()
     );
     // The keyrings the health check and the sync need, before the first job.
     if let Err(e) = keyrings(opts) {
@@ -120,6 +153,7 @@ pub fn run(opts: &WorkOptions) -> Result<()> {
     loop {
         let body = serde_json::json!({
             "arch": opts.arch, "hostname": hostname, "version": version, "labels": opts.labels, "kinds": opts.kinds, "shared": opts.shared,
+            "agent": agent.clone().unwrap_or_default(),
         });
         let claimed = match claimer.post_json_as(&opts.worker_token, "/factory/claim", &body) {
             Ok(Some(v)) => serde_json::from_value::<Claimed>(v).context("claim response")?,
@@ -747,13 +781,14 @@ fn build_job(opts: &WorkOptions, job: &Api, task: &Task) -> Result<Outcome> {
 /// The second agent: reads the evidence a contributor staged (PKGBUILD,
 /// build log, .PKGINFO — the public part of the staging workspace), asks
 /// the model for a structured review with `factory/bin/audit-pkgbuild`
-/// (the owner's `ANTHROPIC_API_KEY`, from this process's environment) and
+/// (the owner's agent key, from this process's environment; any provider
+/// `factory/bin/agent.py` knows) and
 /// attaches `audit.json` and `audit.md` to the same evidence with the job's
 /// credential. The maintainer reads it; nothing here decides anything.
 fn audit_job(opts: &WorkOptions, job: &Api, task: &Task) -> Result<Outcome> {
     anyhow::ensure!(
-        std::env::var("ANTHROPIC_API_KEY").is_ok_and(|k| !k.is_empty()),
-        "ANTHROPIC_API_KEY is not set on this worker; start it without the audit kind"
+        agent_label().is_some(),
+        "no agent key on this worker (ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY or XAI_API_KEY); start it without the audit kind"
     );
     let staged = task
         .params

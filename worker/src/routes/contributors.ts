@@ -120,7 +120,7 @@ export async function handleNewToken(c: Contributor, env: Env): Promise<Response
 
 export async function handleMe(c: Contributor, env: Env): Promise<Response> {
   const packages = await env.DB.prepare("SELECT * FROM factory_packages WHERE owner = ? ORDER BY name").bind(c.login).all();
-  const workers = await env.DB.prepare("SELECT id, arch, mode, packages, labels, last_seen, current_task, builds_done, builds_failed, revoked_at FROM build_workers WHERE owner = ? ORDER BY last_seen DESC").bind(c.login).all();
+  const workers = await env.DB.prepare("SELECT id, arch, mode, packages, labels, agent, last_seen, current_task, builds_done, builds_failed, revoked_at FROM build_workers WHERE owner = ? ORDER BY last_seen DESC").bind(c.login).all();
   const tasks = await env.DB.prepare("SELECT id, name, arch, version, status, attempts, lease_owner, duration_ms, error, staged_prefix, created_at FROM build_tasks WHERE owner = ? ORDER BY id DESC LIMIT 50").bind(c.login).all();
   const staged = await env.DB.prepare("SELECT COALESCE(SUM(size), 0) AS bytes FROM staging_objects WHERE owner = ?").bind(c.login).first<{ bytes: number }>();
   return json({ contributor: c, packages: packages.results, workers: workers.results.map((w) => ({ ...w, packages: w.packages ? JSON.parse(w.packages as string) : null, labels: w.labels ? JSON.parse(w.labels as string) : null })), tasks: tasks.results, staging: { bytes: staged?.bytes ?? 0, quota_bytes: STAGING_QUOTA_BYTES } });
@@ -409,7 +409,7 @@ export async function handleTrustWorker(c: Contributor, id: string, request: Req
 
 /** Workers the project trusts and the people who may approve: the dashboard's trust page. */
 export async function handleTrustList(env: Env): Promise<Response> {
-  const workers = await env.DB.prepare("SELECT id, owner, arch, mode, trust, trusted_by, trusted_at, last_seen, revoked_at FROM build_workers WHERE trust = 'project' OR owner IS NULL ORDER BY trust DESC, last_seen DESC LIMIT 100").all();
+  const workers = await env.DB.prepare("SELECT id, owner, arch, mode, trust, trusted_by, trusted_at, agent, last_seen, revoked_at FROM build_workers WHERE trust = 'project' OR owner IS NULL ORDER BY trust DESC, last_seen DESC LIMIT 100").all();
   const people = await env.DB.prepare("SELECT login, name, role, areas, last_seen FROM contributors WHERE role = 'maintainer' ORDER BY login").all();
   return json({ workers: workers.results, maintainers: people.results.map((p) => ({ ...p, areas: p.areas ? JSON.parse(p.areas as string) : [] })), groups: await groupsOf(env), source: GOVERNANCE_FILE }, 200, { "cache-control": "public, max-age=30" });
 }

@@ -235,7 +235,10 @@ python3 -c 'import json,sys; d=json.load(sys.stdin); t=[t for t in d["staged"] i
 # A project worker that declares the audit kind (it has an agent key) takes it;
 # the report is attached to the staged build's evidence with the audit's own token.
 [[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/claim" "${w3[@]}" -d '{"arch":"aarch64","kinds":["audit"]}')" == 204 ]] || { echo "a community worker never audits"; exit 1; }
-au=$(curl -s -X POST "$OMARCHY_API/api/v1/factory/claim" "${w1[@]}" -d '{"arch":"aarch64","kinds":["audit"]}'); grep -q '"kind":"audit"' <<<"$au" && grep -q "\"task\":$c3_id" <<<"$au" || { echo "the project worker did not get the audit: $au"; exit 1; }
+au=$(curl -s -X POST "$OMARCHY_API/api/v1/factory/claim" "${w1[@]}" -d '{"arch":"aarch64","kinds":["audit"],"agent":"anthropic/claude-sonnet-5"}'); grep -q '"kind":"audit"' <<<"$au" && grep -q "\"task\":$c3_id" <<<"$au" || { echo "the project worker did not get the audit: $au"; exit 1; }
+# What the worker said it runs shows on the Factory page; the key itself never travels.
+facw=$(curl -s "$OMARCHY_API/api/v1/factory?limit=10&after=agent")
+python3 -c 'import json,sys; w=[w for w in json.load(sys.stdin)["workers"] if w["id"]=="w1"][0]; assert w["agent"]=="anthropic/claude-sonnet-5", w' <<<"$facw" || { echo "the worker's agent is not listed"; exit 1; }
 au_id=$(jq -r .task.id <<<"$au"); auj=(-H "authorization: Bearer $(jq -r .token <<<"$au")")
 [[ "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$OMARCHY_API/api/v1/factory/tasks/$c3_id/artifacts/PKGBUILD" "${auj[@]}" --data-binary 'x')" == 400 ]] || { echo "the audit writes its report only"; exit 1; }
 [[ "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$OMARCHY_API/api/v1/factory/tasks/$c3_id/artifacts/audit.json" "${auj[@]}" --data-binary '{"verdict":"warn","summary":"SKIP checksum","findings":[{"severity":"high","area":"supply-chain","where":"sha256sums","what":"SKIP","fix":"pin it"}]}')" == 201 ]] || { echo "the audit could not attach its report"; exit 1; }

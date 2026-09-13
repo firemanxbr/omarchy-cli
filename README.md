@@ -62,8 +62,10 @@ dashboard, or [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design:
 the pool and index, the release model, promotion by evidence (health + ABI gate,
 one-day soak, automatic rollback), the sources, the security layer, the pipeline.
 Packages nobody ships yet come through the factory: contributors build them
-with the same tools maintainers use, maintainers rebuild and attest them —
-*we do not use what you built, we learn from it*
+with the same tools maintainers use (one signed worker image for everyone,
+the owner's own agent if they like — Anthropic, OpenAI, Gemini or xAI), a
+second agent audits the staged evidence, maintainers rebuild and attest
+them, never their own — *we do not use what you built, we learn from it*
 ([docs/GOVERNANCE.md](docs/GOVERNANCE.md)).
 
 | | |

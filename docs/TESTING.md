@@ -118,7 +118,8 @@ claims with worker and job tokens, a community build staged through the
 job token and its evidence served, the audit it queues (a community worker
 never gets it; the builder cannot write `audit.*`; a project worker declaring
 the `audit` kind attaches the report with the audit's own token, and only
-that; Review shows the verdict), a shared worker waiting for `shared_after`,
+that; Review shows the verdict; the agent the worker reported at claim time
+is listed on the Factory API), a shared worker waiting for `shared_after`,
 the governance table and groups API, the profile page and API (with the
 track record per group), the browser session (`/auth/me` with the
 cookie, sign-out invalidating it on the server while the CLI token keeps
@@ -236,11 +237,14 @@ The candidate rule (confident match, medium or worse or exploited in the wild,
 a clean newer version in the source ring) is unit-tested with the rest of the
 security module.
 
-## The auditor without a key
+## The agent without a key
 
-`factory/bin/audit-pkgbuild` honours `ANTHROPIC_BASE_URL`, so a stub that
-answers `POST /v1/messages` with a fixed report exercises the parsing, the
-verdict check and the Markdown rendering without a key; `pkg-repo work
+`factory/bin/agent.py` honours `ANTHROPIC_BASE_URL`, `OPENAI_BASE_URL`,
+`GEMINI_BASE_URL` and `XAI_BASE_URL`, so a stub that answers
+`POST /v1/messages` (Anthropic) and `POST …/chat/completions` (the
+OpenAI-compatible path Gemini and xAI share) with a fixed report exercises
+every provider path of `audit-pkgbuild` — parsing, the verdict check, the
+Markdown rendering — without a key; `pkg-repo work
 --kind audit --once` against a local pool with the same variables runs the
 whole executor (fetch the staged evidence, attach `audit.json` / `audit.md`,
 complete with the verdict).

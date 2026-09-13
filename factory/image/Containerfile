@@ -10,7 +10,7 @@
 # The image carries no key and no pool credential: the pool signs, and a
 # worker's token only claims; each task runs with the per-job token the
 # claim issues. Whoever runs it brings the token and, for an agent that
-# drafts and corrects PKGBUILDs, their own ANTHROPIC_API_KEY.
+# drafts and corrects PKGBUILDs, their own agent key (Anthropic, OpenAI, Gemini or xAI).
 #
 # Arch Linux, both architectures, built by the release workflow from the
 # binaries it just published (the tag is the pool's release) and signed
@@ -41,7 +41,7 @@ RUN set -eu; name="omarchy-pool-${POOL_RELEASE}-${ARCH}-linux"; \
 # with an agent key); pacman runs at first start of a build.
 COPY factory/worker/omarchy-build-worker.sh /usr/local/bin/omarchy-build-worker
 COPY factory/image/entrypoint.sh /usr/local/bin/omarchy-worker
-COPY factory/bin/draft-pkgbuild factory/bin/pkgbuild-meta factory/bin/audit-pkgbuild /usr/local/lib/omarchy-factory/bin/
+COPY factory/bin/draft-pkgbuild factory/bin/pkgbuild-meta factory/bin/audit-pkgbuild factory/bin/agent.py /usr/local/lib/omarchy-factory/bin/
 COPY factory/prompts/pkgbuild.md factory/prompts/audit.md /usr/local/lib/omarchy-factory/prompts/
 RUN chmod 755 /usr/local/bin/omarchy-build-worker /usr/local/bin/omarchy-worker /usr/local/lib/omarchy-factory/bin/* && mkdir -p /build /task /var/lib/omarchy-worker
 ENV OMARCHY_API=https://pkgs.firemanxbr.org OMARCHY_POOL=https://pool.firemanxbr.org \
