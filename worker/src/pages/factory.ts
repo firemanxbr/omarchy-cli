@@ -16,7 +16,7 @@ const BODY = String.raw`
 
   <section>
     <h2>Contributed packages</h2>
-    <p class="sub">Anyone with a GitHub account registers a package and runs a worker for it — no permission needed, nothing spent by the project. Builds land in the contributor's staging workspace with their PKGBUILD and log; a maintainer of the group approves them into <code>edge</code>. <a href="${REPO_URL}/blob/main/factory/README.md#contribute-a-package">Contribute a package →</a></p>
+    <p class="sub">Anyone with a GitHub account registers a package and runs a worker for it — no permission needed, nothing spent by the project. Builds land in the contributor's staging workspace with their PKGBUILD and log; a maintainer of the group approves them into <code>edge</code>. <a href="/contribute">Contribute a package →</a></p>
     <div class="table-wrap"><table id="registry"><thead><tr><th>Package</th><th>Project</th><th>Owner</th><th>Arches</th><th>Detected</th><th>Stage</th><th>Detail</th><th>Updated</th></tr></thead><tbody></tbody></table></div>
   </section>
 
@@ -52,8 +52,8 @@ const SCRIPT = String.raw`
         var det = p.detected || {};
         return '<tr><td><b>' + esc(p.name) + '</b> <span class="src">' + esc(p.group) + '</span></td><td><a href="' + esc(p.url) + '">' + esc(p.url.replace(/^https?:\/\/(www\.)?github\.com\//, "")) + '</a></td><td>' + esc(p.owner) + '</td><td>' + esc((p.arches || []).join(", ")) + '</td>' +
           '<td>' + esc([det.build_system, det.language, det.license, det.latest_tag].filter(Boolean).join(" · ")) + '</td><td>' + statusPill(p.status) + (p.staged_builds ? ' <span class="muted">' + p.staged_builds + ' staged</span>' : '') + '</td><td>' + esc(p.detail || "") + '</td><td>' + ago(p.updated_at) + '</td></tr>';
-      }).join("") || '<tr><td colspan="8" class="muted">no package registered yet — <a href="' + REPO + '/blob/main/factory/README.md#contribute-a-package">be the first</a></td></tr>';
-    }).catch(function () {});
+      }).join("") || '<tr><td colspan="8" class="muted">no package registered yet — <a href="/contribute">be the first</a></td></tr>';
+    }).catch(function () { $("#registry tbody").innerHTML = ""; });
   }
   var REPO = "${REPO_URL}";
   function load() {
@@ -91,7 +91,8 @@ const SCRIPT = String.raw`
           '<td>' + statusPill(r.status) + (r.approved_by ? ' <span class="muted">by ' + esc(r.approved_by) + '</span>' : '') + links + '</td>' +
           '<td>' + esc(r.requested_by || "—") + '</td><td>' + esc(r.detail || r.reason || "") + '</td><td>' + ago(r.updated_at || r.created_at) + '</td></tr>';
       }).join("") || '<tr><td colspan="8" class="muted">no requests</td></tr>';
-    }).catch(function (e) { $("#updated").textContent = "failed: " + e; });
+      endSkeleton();
+    }).catch(function (e) { $("#updated").textContent = "failed: " + e; endSkeleton(); });
   }
   load();
   setInterval(load, 30000);

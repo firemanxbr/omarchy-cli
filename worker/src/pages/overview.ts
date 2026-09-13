@@ -52,7 +52,7 @@ const BODY = String.raw`
 `;
 
 const SCRIPT = String.raw`
-  skeletonTiles("#tiles", 6); skeletonRows("#coverage", 9, 5); skeletonRows("#workflows", 7, 4); skeletonRows("#events", 7, 6); skeletonRows("#releases", 8, 4);
+  skeletonTiles("#tiles", 5); skeletonRows("#coverage", 9, 5); skeletonRows("#workflows", 7, 4); skeletonRows("#events", 7, 6); skeletonRows("#releases", 8, 4);
 __CHARTS__
   var RING_INFO = {
     stable: { title: "Recommended for daily use", text: "What <b>rc</b> served for a day without a failed check. About two days behind Arch; health-checked on both architectures after every promotion and rolled back automatically if that fails." },
@@ -128,7 +128,11 @@ export function overviewHtml(poolUrl: string, version: RunningVersion): string {
 
 const CHARTS = String.raw`  // ---- tiny SVG charts (no library; the page has no build step) ----
   var C = { green: "#9ece6a", amber: "#e0af68", red: "#f7768e", blue: "#7aa2f7", dim: "#414868", grid: "#2a2e3f", text: "#8b93b8" };
-  function svg(w, h, body) { return '<svg viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none" height="' + h + '" font-family="JetBrains Mono, ui-monospace, monospace" font-size="11" fill="' + C.text + '">' + body + '</svg>'; }
+  // The viewBox is the drawing; the SVG scales uniformly with its column
+  // (no preserveAspectRatio="none": stretched text overflowed its space).
+  function svg(w, h, body) { return '<svg viewBox="0 0 ' + w + ' ' + h + '" width="100%" style="display:block;height:auto" font-family="JetBrains Mono, ui-monospace, monospace" font-size="11" fill="' + C.text + '">' + body + '</svg>'; }
+  // Labels get the room they have, not more: cut with an ellipsis, full text in the tooltip.
+  function fit(t, n) { t = String(t || ""); return t.length > n ? t.slice(0, n - 1) + "…" : t; }
   function day(iso) { return iso.slice(0, 10); }
   function lastDays(n) { var out = [], t = Date.now(); for (var i = n - 1; i >= 0; i--) out.push(new Date(t - i * 86400000).toISOString().slice(0, 10)); return out; }
   function bars(items, fmt) { // vertical bars, items: [{label, value, color, title}]
@@ -140,7 +144,7 @@ const CHARTS = String.raw`  // ---- tiny SVG charts (no library; the page has no
       var h = (H - top - bottom) * it.value / max, x = left + i * bw, y = H - bottom - h;
       body += '<rect x="' + (x + bw * 0.15) + '" y="' + y + '" width="' + (bw * 0.7) + '" height="' + h + '" fill="' + (it.color || C.green) + '"><title>' + esc(it.title || it.label + ": " + fmt(it.value)) + '</title></rect>';
       var step = items.length > 8 ? 2 : 1;
-      if (i % step === 0 || i === items.length - 1) body += '<text x="' + (x + bw / 2) + '" y="' + (H - 7) + '" text-anchor="middle" font-size="10">' + esc(it.label) + '</text>';
+      if (i % step === 0) body += '<text x="' + (x + bw / 2) + '" y="' + (H - 7) + '" text-anchor="middle" font-size="10">' + esc(it.label) + '</text>';
     });
     body += '<text x="' + left + '" y="11" font-size="10">max ' + esc(fmt(max)) + '</text>';
     return svg(W, H, body);
@@ -163,7 +167,7 @@ const CHARTS = String.raw`  // ---- tiny SVG charts (no library; the page has no
     if (!rows.length) return '<div class="empty">no health checks yet</div>';
     var W = 360, labelW = 110, rh = 18, H = rows.length * rh + 22, cw = (W - labelW) / days.length, body = '';
     rows.forEach(function (r, ri) {
-      body += '<text x="0" y="' + (ri * rh + 13) + '" font-size="10.5">' + esc(r.label) + '</text>';
+      body += '<text x="0" y="' + (ri * rh + 13) + '" font-size="10.5"><title>' + esc(r.label) + '</title>' + esc(fit(r.label, 17)) + '</text>';
       days.forEach(function (dd, di) {
         var st = cell(r.key, dd), col = st === "error" ? C.red : st === "warn" ? C.amber : st === "ok" ? C.green : C.dim;
         body += '<rect x="' + (labelW + di * cw + 1) + '" y="' + (ri * rh + 2) + '" width="' + (cw - 2) + '" height="' + (rh - 4) + '" fill="' + col + '" fill-opacity="' + (st ? 1 : 0.35) + '"><title>' + esc(r.label + " " + dd + ": " + (st || "no check")) + '</title></rect>';
@@ -174,12 +178,12 @@ const CHARTS = String.raw`  // ---- tiny SVG charts (no library; the page has no
   }
   function hbars(items) { // items: [{label, parts: [{v, color}], note}]
     if (!items.length) return '<div class="empty">no snapshot yet</div>';
-    var W = 360, labelW = 84, noteW = 60, rh = 20, H = items.length * rh + 4, body = '';
+    var W = 360, labelW = 112, noteW = 66, rh = 20, H = items.length * rh + 4, body = '';
     var max = Math.max.apply(null, items.map(function (i) { return i.parts.reduce(function (a, p) { return a + p.v; }, 0); })) || 1;
     items.forEach(function (it, i) {
       var x = labelW, y = i * rh + 2;
-      body += '<text x="0" y="' + (y + 12) + '" font-size="10.5">' + esc(it.label) + '</text>';
-      it.parts.forEach(function (p) { var w = (W - labelW - noteW) * p.v / max; if (w > 0) { body += '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + (rh - 6) + '" fill="' + p.color + '"><title>' + esc(it.label + ": " + p.v + " " + p.name) + '</title></rect>'; x += w; } });
+      body += '<text x="0" y="' + (y + 12) + '" font-size="10.5"><title>' + esc(it.label) + '</title>' + esc(fit(it.label, 17)) + '</text>';
+      it.parts.forEach(function (p) { var w = (W - labelW - noteW - 10) * p.v / max; if (w > 0) { body += '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + (rh - 6) + '" fill="' + p.color + '"><title>' + esc(it.label + ": " + p.v + " " + p.name) + '</title></rect>'; x += w; } });
       body += '<text x="' + (W) + '" y="' + (y + 12) + '" text-anchor="end" font-size="10">' + esc(it.note) + '</text>';
     });
     return svg(W, H, body);

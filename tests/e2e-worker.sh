@@ -99,7 +99,7 @@ dash_body=$(curl -s "$OMARCHY_API/")
 grep -q "tested before they reach you" <<<"$dash_body" || {
   echo "dashboard not served; response head:"; head -c 600 <<<"$dash_body"; echo
   echo "--- worker log tail ---"; tail -20 "$E2E/wrangler.log"; exit 1; }
-for p in /get-started /how-it-works /status /api; do
+for p in /get-started /how-it-works /status /api /contribute /factory; do
   body=$(curl -s "$OMARCHY_API$p"); grep -q "omarchy-pool" <<<"$body" || { echo "page $p not served"; exit 1; }
 done
 search_body=$(curl -s "$OMARCHY_API/api/v1/search?q=zlib&ring=stable")

@@ -62,6 +62,7 @@ import { apiDocsHtml } from "./pages/api-docs";
 import { packageHtml, packagesHtml } from "./pages/packages";
 import { securityHtml } from "./pages/security";
 import { factoryHtml } from "./pages/factory";
+import { contributeHtml } from "./pages/contribute";
 import { DASHBOARD_HOST, LEGACY_DASHBOARD_HOST, version } from "./meta";
 import { handleStatic } from "./routes/static";
 import { requireAuth } from "./auth";
@@ -126,6 +127,7 @@ export default {
       if (path === "/packages") return html(packagesHtml(env.POOL_URL, version(env)));
       if (path === "/security") return html(securityHtml(env.POOL_URL, version(env)));
       if (path === "/factory") return html(factoryHtml(env.POOL_URL, version(env)));
+      if (path === "/contribute") return html(contributeHtml(env.POOL_URL, version(env)));
       if (path.startsWith("/package/")) return html(packageHtml(decodeURIComponent(path.slice("/package/".length)), env.POOL_URL, version(env)));
       return json({ error: "not found" }, 404);
     } catch (err) {
