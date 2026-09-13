@@ -232,22 +232,25 @@ export async function runScheduler(env: Env, now = new Date()): Promise<string[]
         log.push(`factory ${d.arch}: ${d.queued} queued, ${d.alive} idle project worker(s)`);
         continue;
       }
-      // Builds go to the build worker (containers, signing), pool jobs to the pool worker.
-      const kinds = await env.DB.prepare("SELECT DISTINCT kind FROM build_tasks WHERE status = 'queued' AND arch = ? AND (kind != 'build' OR trust = 'project')").bind(d.arch).all<{ kind: string }>();
-      const wanted = new Set(kinds.results.map((k) => k.kind));
-      for (const workflow of [wanted.has("build") ? "factory-worker.yml" : "", [...wanted].some((k) => k !== "build") ? "pool-worker.yml" : ""].filter(Boolean)) {
-        const runs = await recentRuns(env, workflow);
-        const busy = runs.find((r) => (r.display_title ?? "").includes(d.arch) && ["queued", "in_progress", "waiting", "pending"].includes(r.status));
-        if (busy) {
-          log.push(`${workflow} ${d.arch}: a hosted worker is ${busy.status}`);
-          continue;
-        }
-        await dispatch(env, workflow, { arch: d.arch });
-        log.push(`${workflow} ${d.arch}: hosted worker dispatched for ${d.queued} queued task(s)`);
-        await env.DB.prepare("INSERT INTO events (kind, ring, source, status, summary, payload) VALUES ('dispatch', NULL, 'factory', 'ok', ?, ?)")
-          .bind(`hosted ${d.arch} ${workflow === "pool-worker.yml" ? "pool" : "build"} worker started by the pool scheduler — ${d.queued} task(s) queued, no idle project worker`, JSON.stringify({ workflow, arch: d.arch, queued: d.queued }))
-          .run();
+      // Only pool jobs get a hosted fallback. Builds — contributors' on their
+      // own workers, the project's on its trusted machines — never start a
+      // GitHub runner: the project's compute is not for building packages.
+      const pending = await env.DB.prepare("SELECT COUNT(*) AS n FROM build_tasks WHERE status = 'queued' AND arch = ? AND kind != 'build' AND trust = 'project'").bind(d.arch).first<{ n: number }>();
+      if (!pending?.n) {
+        log.push(`factory ${d.arch}: ${d.queued} queued build(s) wait for a project worker (no hosted build workers)`);
+        continue;
       }
+      const runs = await recentRuns(env, "pool-worker.yml");
+      const busy = runs.find((r) => (r.display_title ?? "").includes(d.arch) && ["queued", "in_progress", "waiting", "pending"].includes(r.status));
+      if (busy) {
+        log.push(`pool-worker.yml ${d.arch}: a hosted worker is ${busy.status}`);
+        continue;
+      }
+      await dispatch(env, "pool-worker.yml", { arch: d.arch });
+      log.push(`pool-worker.yml ${d.arch}: hosted worker dispatched for ${pending.n} queued pool job(s)`);
+      await env.DB.prepare("INSERT INTO events (kind, ring, source, status, summary, payload) VALUES ('dispatch', NULL, 'factory', 'ok', ?, ?)")
+        .bind(`hosted ${d.arch} pool worker started by the pool scheduler — ${pending.n} pool job(s) queued, no idle project worker`, JSON.stringify({ workflow: "pool-worker.yml", arch: d.arch, queued: pending.n }))
+        .run();
     }
   } catch (e) {
     log.push(`factory workers: ${String(e)}`);

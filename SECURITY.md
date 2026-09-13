@@ -35,7 +35,7 @@ please do not file a public issue for it.
 | Job token `omj.…` | the worker running one task, for the lease | the routes that task needs — e.g. `sync`: upload objects, index, create a release in one ring, store that ring's databases; community `build`: upload to that task's staging folder | anything outside its scopes (403, journaled); anything after the lease (30 min, renewed by heartbeat) | live |
 | Maintainer / admin role | a contributor promoted by an admin | promote a worker to project trust; approve or reject staged builds of their areas (recorded); set roles (admin) | operate as a worker | live |
 | Publish token | GitHub Actions (pipeline), maintainers on the command line | everything a job can, on any ring | — | live; **retiring** as each job kind moves to pulled jobs |
-| `FACTORY_TOKEN` | project workers on GitHub-hosted runners | claim any task | write without a job token | live; **retiring** in favour of registered project workers |
+| `FACTORY_TOKEN` | the hosted pool-worker fallback | claim pool jobs | write without a job token; take a contributor's build | live; **retiring** in favour of registered project workers |
 | Signing key (OpenPGP) | GitHub secret and project workers, for `render` and factory builds | sign databases and factory-built packages | — | live; **moving into the pool's Worker** (secret, never exported) |
 | `CLOUDFLARE_API_TOKEN` | GitHub Actions release workflow | deploy the Worker, apply migrations | — | live; the only secret GitHub will keep |
 | GitHub PAT on the Worker | the scheduler | dispatch workflows | — | live; removed once no rule dispatches a workflow |

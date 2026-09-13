@@ -168,15 +168,13 @@ armored private key) replaces `GNUPGHOME` on hosts with no keyring. A build
 container gets `[omarchy-factory-edge]` in its `pacman.conf` once that
 database exists, so a package can depend on an earlier factory build.
 
-**Free compute.** On a public repository GitHub-hosted runners cost nothing,
-x86_64 and aarch64 alike (`ubuntu-24.04-arm`). `factory-worker.yml` runs the
-same script there; the pool's scheduler starts one when tasks are queued and
-no worker of that architecture has reported in ten minutes. It is a worker,
-not an orchestrator: the queue, the lease and the result live in the pool. Its
-limits: six hours per job, 4 vCPU / 16 GB — a browser does not fit; a laptop,
-an Oracle free-tier Ampere VM or a Droplet running the same script does.
-Cloudflare Containers can host an x86_64 worker the same way (Workers Paid
-plan, billed per vCPU-second, no aarch64) — not wired up.
+**Whose compute.** Contributors build on their own workers (or a shared
+community worker someone else runs); project builds — the rebuild after an
+approval, the packages in `factory/pkgbuilds` — run on machines the project
+trusts. No GitHub runner ever builds a package: the project's compute is
+not for building everyone's software. The pool's own jobs (sync, promote,
+health, gc) do get a hosted fallback when no project worker is idle
+(`pool-worker.yml`), so operations never stop.
 
 ## The contract
 
@@ -226,7 +224,6 @@ factory/
   bin/pkgbuild-meta               PKGBUILD → arches and version, without executing it as you
   pkgbuilds/<group>/<name>/       reviewed PKGBUILDs; CODEOWNERS per group
 .github/workflows/factory-enqueue.yml   merged PKGBUILD → tasks
-.github/workflows/factory-worker.yml    a worker on a hosted runner, started on demand
 .github/workflows/factory-request.yml   issue with a URL → drafted PKGBUILD → dry-run builds → pull request
 .github/workflows/factory-update.yml    daily: bump approved packages to their latest upstream release
   bin/draft-pkgbuild              project URL → PKGBUILD (Claude, or a template), checksums left to updpkgsums
