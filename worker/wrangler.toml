@@ -44,6 +44,9 @@ bucket_name = "omarchy-factory-staging"
 
 [vars]
 DEFAULT_RING = "stable"
+# Task kinds the scheduler creates as pulled jobs (pkg-repo work) instead of
+# GitHub workflows: sync, promote, render, health, security, metrics, gc.
+JOB_KINDS = "gc,health"
 # Static origin for packages and databases (the R2 bucket's custom domain).
 POOL_URL = "https://pool.firemanxbr.org"
 # Overridden by the Release workflow (`wrangler deploy --var POOL_VERSION:v0.0.1 ...`).
