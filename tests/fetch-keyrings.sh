@@ -11,6 +11,8 @@
 #
 # Usage: tests/fetch-keyrings.sh <out dir>
 set -euo pipefail
+# GNU tar needs --wildcards for patterns; bsdtar (macOS) matches them by default.
+TARW=(); [[ "$(tar --version 2>/dev/null)" == *GNU* ]] && TARW=(--wildcards)
 
 OUT="$1"
 mkdir -p "$OUT"
@@ -20,7 +22,7 @@ trap 'rm -rf "$TMP"' EXIT
 latest() { # base-url db-name package-name → filename from the sync db
   # GNU tar detects gzip/xz/zstd on its own; %FILENAME% precedes %NAME% in a desc.
   curl -sfL -A "pkg-repo" "$1/$2.db" -o "$TMP/$2.db"
-  tar -xOf "$TMP/$2.db" --wildcards '*/desc' 2>/dev/null \
+  tar -xOf "$TMP/$2.db" ${TARW[@]+"${TARW[@]}"} '*/desc' 2>/dev/null \
     | awk -v want="$3" '/^%FILENAME%$/ { getline f } /^%NAME%$/ { getline n; if (n == want) { print f; exit } }'
 }
 extract_keyring() { # base-url filename path-in-archive out
