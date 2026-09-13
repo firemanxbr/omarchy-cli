@@ -7,7 +7,7 @@
 # check on them in batches. Posts an `abi` event; exits 2 on any blocker.
 #
 # Usage: tests/abi-gate.sh <ring> [arch]   (arch: x86_64 | aarch64)
-# Env:   OMARCHY_API, OMARCHY_POOL, OMARCHY_PUBLISH_TOKEN
+# Env:   OMARCHY_API, OMARCHY_POOL, OMARCHY_TOKEN
 set -uo pipefail
 
 RING="$1"

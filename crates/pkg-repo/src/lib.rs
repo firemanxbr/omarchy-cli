@@ -10,6 +10,7 @@ pub mod client;
 pub mod desc;
 pub mod gate;
 pub mod ops;
+pub mod reconcile;
 pub mod security;
 pub mod sign;
 pub mod sync;

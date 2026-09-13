@@ -154,7 +154,6 @@ jobs:
       VERSION: ${{ needs.version.outputs.version }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       OMARCHY_API: ${{ vars.OMARCHY_API }}
-      OMARCHY_PUBLISH_TOKEN: ${{ secrets.OMARCHY_PUBLISH_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -185,15 +184,17 @@ jobs:
           done
           echo "expected $VERSION, got ${running:-nothing}"; exit 1
       - name: Record the deploy
+        # Straight into the index with the same Cloudflare token that deployed:
+        # the release workflow holds no credential of the pool's API.
         if: env.CLOUDFLARE_API_TOKEN != ''
+        working-directory: worker
         run: |
-          curl -sf -X POST "$OMARCHY_API/api/v1/events" \
-            -H "authorization: Bearer $OMARCHY_PUBLISH_TOKEN" -H "content-type: application/json" \
-            -d "$(jq -nc --arg v "$VERSION" --arg sha "$GITHUB_SHA" --arg bump "${{ needs.version.outputs.bump }}" \
+          payload="$(jq -nc --arg v "$VERSION" --arg sha "$GITHUB_SHA" --arg bump "${{ needs.version.outputs.bump }}" \
                   --arg run "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
                   --arg rel "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$VERSION" \
-                  '{kind: "deploy", status: "ok", summary: ("omarchy-pool " + $v + " deployed"),
-                    payload: {version: $v, commit: $sha, bump: $bump, run_url: $run, release_url: $rel}}')" >/dev/null
+                  '{version: $v, commit: $sha, bump: $bump, run_url: $run, release_url: $rel}' | sed "s/'/''/g")"
+          npx wrangler d1 execute omarchy-repo --remote --command \
+            "INSERT INTO events (kind, status, summary, payload) VALUES ('deploy', 'ok', 'omarchy-pool $VERSION deployed', '$payload')" >/dev/null
       - name: Not deployed
         if: env.CLOUDFLARE_API_TOKEN == ''
         run: echo "::warning::CLOUDFLARE_API_TOKEN is not set — release $VERSION was published but the worker was not deployed (docs/RUNBOOK.md, Releasing)."

@@ -57,8 +57,6 @@ placeholders now and fill them as you go. All names are what the workflows read.
 ```bash
 gh variable set OMARCHY_API  -b "https://pkgs.example.org" -R NEWORG/omarchy-pool
 gh variable set OMARCHY_POOL -b "https://pool.example.org" -R NEWORG/omarchy-pool
-openssl rand -hex 32 > publish-token                       # keep it: the worker gets the same value (B5)
-gh secret set OMARCHY_PUBLISH_TOKEN  < publish-token   -R NEWORG/omarchy-pool
 gh secret set CLOUDFLARE_API_TOKEN   < cloudflare-token -R NEWORG/omarchy-pool   # B6
 for e in automatic pool stable; do gh api -X PUT "repos/NEWORG/omarchy-pool/environments/$e" >/dev/null; done
 ```
@@ -130,8 +128,8 @@ this one.) The worker's two hostnames are created by the first deploy from the
 ### B5. Worker secrets
 
 ```bash
-npx wrangler secret put PUBLISH_TOKEN < ../publish-token   # same value as OMARCHY_PUBLISH_TOKEN
-npx wrangler secret put GITHUB_TOKEN  < ../github-token    # part C
+openssl rand -hex 32 | npx wrangler secret put JOB_TOKEN_SECRET   # signs the per-job tokens; nobody else needs it
+npx wrangler secret put GITHUB_TOKEN  < ../github-token           # part C
 ```
 
 ### B6. An API token for the release workflow

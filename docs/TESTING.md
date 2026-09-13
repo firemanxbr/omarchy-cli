@@ -116,10 +116,10 @@ and pacman consumes the generated database exactly as it would a `repo-add` one.
 Publisher commands used by the script, for manual runs against any worker:
 
 ```bash
-export OMARCHY_API=http://127.0.0.1:8787 OMARCHY_PUBLISH_TOKEN=dev-token
+export OMARCHY_API=http://127.0.0.1:8787 OMARCHY_TOKEN=<a job token>   # tests/e2e-worker.sh shows how one is minted from JOB_TOKEN_SECRET
 pkg-repo publish --ring edge foo-1.0-1-x86_64.pkg.tar.zst   # pool + index + new edge release
 pkg-repo promote --from edge --to rc
-pkg-repo render --ring rc --sign <gpg key id>               # databases for the ring head
+pkg-repo render --ring rc                                   # databases for the ring head (the pool signs them)
 pkg-repo releases --ring rc                                 # history, newest first
 pkg-repo rollback --ring rc --to <release id>               # then render again
 ```
@@ -161,7 +161,7 @@ repo-add mechanics at the same package count — live in `poc/bench/`
 ## Health check
 
 ```bash
-OMARCHY_API=… OMARCHY_POOL=… OMARCHY_PUBLISH_TOKEN=… tests/health-check.sh stable
+OMARCHY_API=… OMARCHY_POOL=… OMARCHY_TOKEN=… tests/health-check.sh stable
 ```
 
 Second argument selects the architecture (`x86_64` default, `aarch64` uses the Arch
@@ -176,7 +176,7 @@ ring before the gate and for the target ring after the promotion.
 ## ABI gate
 
 ```bash
-OMARCHY_API=… OMARCHY_POOL=… OMARCHY_PUBLISH_TOKEN=… tests/abi-gate.sh rc x86_64
+OMARCHY_API=… OMARCHY_POOL=… OMARCHY_TOKEN=… tests/abi-gate.sh rc x86_64
 ```
 
 Exports the pacman database and shared libraries of the official base image
@@ -246,16 +246,21 @@ To try dashboard or API changes against the real data without deploying,
 `npx wrangler dev --remote --port 8799` runs the local code with the remote D1
 and R2 bindings (reads only, unless you publish to it).
 
-Publishing needs the token stored as the worker's `PUBLISH_TOKEN` secret:
+Writing to the production pool is what jobs do, with the per-job token a
+worker gets at claim time; there is no shared secret to export. A maintainer
+runs any of them by hand by queueing the job (`pkg-repo job`, or
+`POST /api/v1/factory/jobs` with their contributor token):
 
 ```bash
-export OMARCHY_API=https://pkgs.firemanxbr.org OMARCHY_PUBLISH_TOKEN=...
-pkg-repo sync --source core --limit 200            # import from mirror.omarchy.org → edge
-pkg-repo publish --ring edge --source packages <archives>
-pkg-repo promote --from edge --to rc && pkg-repo promote --from rc --to stable
-pkg-repo render --ring stable --sign <key id>      # one omarchy-<source>-stable db per source
-pkg-repo gc --keep 3                               # add --delete to actually free the pool
+export OMARCHY_API=https://pkgs.firemanxbr.org OMARCHY_TOKEN=omc_…   # a maintainer's token
+pkg-repo job sync --param source=core --param arch=x86_64             # import from mirror.omarchy.org → edge
+pkg-repo job promote --param from=edge --param to=rc
+pkg-repo job render --param ring=stable --param arch=x86_64           # one omarchy-<source>-stable db per source
+pkg-repo job gc --param keep=3
 ```
+
+The same commands run directly (`pkg-repo sync|publish|promote|render|gc`)
+against a local pool with a job token (`tests/e2e-worker.sh` mints one).
 
 With `--keyring <file>` the sync rejects any package whose upstream `.sig` does
 not verify against that keyring; `tests/fetch-keyrings.sh <dir>` builds
@@ -263,10 +268,9 @@ not verify against that keyring; `tests/fetch-keyrings.sh <dir>` builds
 have their own layouts: `--base-url http://os.archlinuxarm.org/aarch64/core --arch aarch64`,
 `--base-url https://pkgs.omarchy.org/edge/x86_64 --db-name omarchy --source packages`.
 
-The GitHub workflows (`sync`, `promote`, `health`, `gc`) run exactly these; they need
-the repository variables `OMARCHY_API`, `OMARCHY_POOL` and the secrets
-`OMARCHY_PUBLISH_TOKEN`, `OMARCHY_GPG_KEY` (armored private key), `OMARCHY_GPG_KEYID`.
-Promotions into `stable` wait in the `stable` GitHub environment for a reviewer.
+The scheduler queues exactly these as jobs (sync hourly, promote daily,
+health daily, security every 3 h, gc weekly, enqueue hourly); project workers
+run them. No GitHub workflow writes to the pool.
 
 To validate with pacman, use the same container recipe as the local scripts with
 

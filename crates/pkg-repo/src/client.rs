@@ -630,6 +630,23 @@ impl Api {
         })
     }
 
+    /// `PATCH` a JSON body to an authenticated endpoint, retrying on 5xx.
+    pub fn patch_json(
+        &self,
+        path: &str,
+        body: &serde_json::Value,
+    ) -> Result<serde_json::Value, RepoError> {
+        with_retry("patch_json", || {
+            let resp = self
+                .http
+                .patch(self.url(path))
+                .bearer_auth(&self.token)
+                .json(body)
+                .send()?;
+            Ok(Self::check(resp)?.json()?)
+        })
+    }
+
     /// `POST` a JSON body to an authenticated endpoint, retrying on 5xx.
     pub fn post_json(
         &self,

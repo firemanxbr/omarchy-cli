@@ -342,7 +342,7 @@ export async function handleStagingList(taskId: number, env: Env): Promise<Respo
   return json({ task: taskId, objects: rows.results });
 }
 
-/** Text evidence of a community build: build.log and PKGBUILD are public; packages are for maintainers (publish token). */
+/** Text evidence of a community build: build.log and PKGBUILD are public; packages are for maintainers. */
 export async function handleStagingGet(taskId: number, filename: string, env: Env, maintainer: boolean): Promise<Response> {
   const row = await env.DB.prepare("SELECT key FROM staging_objects WHERE task_id = ? AND key LIKE ?").bind(taskId, `%/${filename}`).first<{ key: string }>();
   if (!row) return json({ error: "no such object" }, 404);

@@ -6,7 +6,8 @@
  * plain R2 objects served from the bucket's custom domain (POOL_URL):
  *   <arch>/<filename>            <arch>/omarchy-<source>-<ring>.db (.files, .sig)
  *
- * API (JSON; mutations need `Authorization: Bearer <PUBLISH_TOKEN>`):
+ * API (JSON; writes need a per-job token — issued when a worker claims a
+ * task — or, for the factory's maintainer actions, a maintainer's own token):
  *   PUT  /api/v1/pool/:sha256?filename=            raw archive → R2 (integrity-checked)
  *   PUT  /api/v1/pool/:sha256/sig?filename=        detached signature
  *   POST /api/v1/pool/:sha256/multipart?filename=  large archives: create / parts / complete
@@ -45,7 +46,7 @@ import {
   handleApproveRequest, handleCancelTask, handleClaim, handleComplete, handleCreateRequest, handleEnqueue, handleFactory, handleFail,
   handleHeartbeat, handleRejectRequest, handleTask, handleBuilt, handleUpdateRequest,
 } from "./routes/factory";
-import { requireAuthOk, authorize, authorizeRelease, authorizeArtifacts } from "./auth";
+import { authorize, authorizeRelease, authorizeArtifacts, authorizeJobOrMaintainer, maintainerOf } from "./auth";
 import {
   contributorOf, workerOf, handleRegister, handleMe, handleRegisterPackage, handleDeletePackage, handleBuildPackage, handleRegisterWorker,
   handleRevokeWorker, handleListPackages, handleStagingPut, handleStagingMultipart, handleStagingList, handleStagingGet,
@@ -54,6 +55,8 @@ import type { Actor } from "./routes/factory";
 import { jobOf } from "./jobtoken";
 import { handleTrustWorker, handleTrustList, handleNewToken } from "./routes/contributors";
 import { groupsOf, GOVERNANCE_FILE } from "./governance";
+import { handleQueueJob } from "./jobs";
+import { isMaintainer } from "./routes/contributors";
 import { handleReviewList, handleApprove, handleReject, handleApprovals } from "./routes/review";
 import { handleAuthStart, handleAuthCallback, handleLogout } from "./routes/auth";
 import { handleSignPool } from "./routes/pool";
@@ -74,7 +77,6 @@ import { factoryHtml } from "./pages/factory";
 import { contributeHtml } from "./pages/contribute";
 import { DASHBOARD_HOST, LEGACY_DASHBOARD_HOST, version } from "./meta";
 import { handleStatic } from "./routes/static";
-import { requireAuth } from "./auth";
 import { runScheduler } from "./scheduler";
 
 export interface Env {
@@ -84,7 +86,6 @@ export interface Env {
   STAGING: R2Bucket;
   DEFAULT_RING: string;
   POOL_URL: string;
-  PUBLISH_TOKEN: string;
   /** Set by the Release workflow at deploy time (`wrangler deploy --var`); "dev" otherwise. */
   POOL_VERSION?: string;
   POOL_COMMIT?: string;
@@ -170,8 +171,8 @@ export default {
 } satisfies ExportedHandler<Env>;
 
 /**
- * The factory's writes. Three kinds of caller: the project (publish token —
- * maintainers, the pipeline), a registered worker (its own token; project
+ * The factory's writes. Three kinds of caller: a maintainer (their own token
+ * or session, for what maintainers decide), a registered worker (its own token; project
  * trust is a maintainer's decision on the registration) or a job (its
  * per-task token), and a contributor (their token).
  */
@@ -312,19 +313,26 @@ async function api(method: string, path: string, url: URL, request: Request, env
     return c ? handleMe(c, env) : json({ error: "a contributor token is required (POST /factory/register)" }, 401);
   }
   if ((m = path.match(/^\/factory\/tasks\/(\d+)\/artifacts$/)) && method === "GET") return handleStagingList(Number(m[1]), env);
-  if ((m = path.match(/^\/factory\/tasks\/(\d+)\/artifacts\/([A-Za-z0-9][A-Za-z0-9._:+-]{0,200})$/)) && method === "GET") return handleStagingGet(Number(m[1]), m[2], env, requireAuthOk(request, env));
+  if ((m = path.match(/^\/factory\/tasks\/(\d+)\/artifacts\/([A-Za-z0-9][A-Za-z0-9._:+-]{0,200})$/)) && method === "GET") { const c = await contributorOf(request, env); return handleStagingGet(Number(m[1]), m[2], env, !!c && isMaintainer(c)); }
   if ((m = path.match(/^\/factory\/tasks\/(\d+)$/)) && method === "GET") return handleTask(Number(m[1]), env);
   if (path.startsWith("/factory/") && (method === "POST" || method === "PUT" || method === "DELETE" || method === "PATCH")) {
     const r = await factoryRoutes(method, path, url, request, env);
     if (r) return r;
   }
-  if ((m = path.match(/^\/factory\/tasks\/(\d+)\/cancel$/)) && method === "POST") return requireAuth(request, env) ?? handleCancelTask(Number(m[1]), env);
-  if (method === "POST" && path === "/factory/requests") return requireAuth(request, env) ?? handleCreateRequest(request, env);
-  if ((m = path.match(/^\/factory\/requests\/(\d+)\/approve$/)) && method === "POST") return requireAuth(request, env) ?? handleApproveRequest(Number(m[1]), request, env);
-  if ((m = path.match(/^\/factory\/requests\/(\d+)$/)) && method === "PATCH") return requireAuth(request, env) ?? handleUpdateRequest(Number(m[1]), request, env);
-  if ((m = path.match(/^\/factory\/requests\/name\/([a-z0-9@._+-]+)$/)) && method === "PATCH") return requireAuth(request, env) ?? handleUpdateRequest(m[1], request, env);
-  if ((m = path.match(/^\/factory\/requests\/(\d+)\/reject$/)) && method === "POST") return requireAuth(request, env) ?? handleRejectRequest(Number(m[1]), request, env);
-  if (method === "POST" && path === "/factory/enqueue") return requireAuth(request, env) ?? handleEnqueue(request, env);
+  // The factory's writes: the enqueue job (its token carries factory:write) or a maintainer by hand.
+  const factoryWrite = () => authorizeJobOrMaintainer(request, env, "factory:write");
+  if ((m = path.match(/^\/factory\/tasks\/(\d+)\/cancel$/)) && method === "POST") return (await factoryWrite()) ?? handleCancelTask(Number(m[1]), env);
+  if (method === "POST" && path === "/factory/requests") return (await factoryWrite()) ?? handleCreateRequest(request, env);
+  if ((m = path.match(/^\/factory\/requests\/(\d+)\/approve$/)) && method === "POST") return (await factoryWrite()) ?? handleApproveRequest(Number(m[1]), request, env);
+  if ((m = path.match(/^\/factory\/requests\/(\d+)$/)) && method === "PATCH") return (await factoryWrite()) ?? handleUpdateRequest(Number(m[1]), request, env);
+  if ((m = path.match(/^\/factory\/requests\/name\/([a-z0-9@._+-]+)$/)) && method === "PATCH") return (await factoryWrite()) ?? handleUpdateRequest(m[1], request, env);
+  if ((m = path.match(/^\/factory\/requests\/(\d+)\/reject$/)) && method === "POST") return (await factoryWrite()) ?? handleRejectRequest(Number(m[1]), request, env);
+  if (method === "POST" && path === "/factory/enqueue") return (await factoryWrite()) ?? handleEnqueue(request, env);
+  // A maintainer runs a pool job by hand: queued like the scheduler's, executed by a project worker.
+  if (method === "POST" && path === "/factory/jobs") {
+    const c = await maintainerOf(request, env);
+    return c instanceof Response ? c : handleQueueJob(c, request, env);
+  }
   if (method === "PUT" && path === "/security/advisories") return (await authorize(request, env, "security:write")) ?? handlePutAdvisories(request, env);
   if (method === "PUT" && path === "/security/matches") return (await authorize(request, env, "security:write")) ?? handlePutMatches(request, env);
   if (method === "POST" && path === "/security/prune") return (await authorize(request, env, "security:write")) ?? handlePrune(url, env);
@@ -333,7 +341,7 @@ async function api(method: string, path: string, url: URL, request: Request, env
   if (method === "GET" && path === "/events") return handleGetEvents(url, env);
   if (method === "GET" && path === "/pool/unreferenced") return handleUnreferenced(url, env);
   if (method === "POST" && path === "/pool/gc") return (await authorize(request, env, "gc")) ?? handleGc(url, env);
-  if (method === "POST" && path === "/events") return (await authorize(request, env, "events")) ?? handlePostEvent(request, env);
+  if (method === "POST" && path === "/events") return (await authorizeJobOrMaintainer(request, env, "events")) ?? handlePostEvent(request, env);
 
   if ((m = path.match(/^\/pool\/([0-9a-f]{64})$/)) && method === "PUT") {
     return (await authorize(request, env, "pool:write")) ?? handlePutPool(m[1], url, request, env);

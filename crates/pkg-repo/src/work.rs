@@ -190,6 +190,7 @@ fn task_label(t: &Task) -> String {
         ),
         "promote" => format!("promote {} → {}", s(p, "from"), s(p, "to")),
         "security" => "security: advisories, matches, fast-track".to_owned(),
+        "enqueue" => "enqueue: PKGBUILDs on main → the queue".to_owned(),
         "render" | "health" => format!("{} {}/{}", t.kind, s(p, "ring"), s(p, "arch")),
         _ => format!("{} {}", t.kind, t.name),
     }
@@ -258,6 +259,24 @@ fn execute(opts: &WorkOptions, task: &Task, token: &Arc<Mutex<String>>) -> Resul
         }
         "promote" => promote_job(opts, &job, task, token),
         "security" => security_job(opts, &job, token),
+        "enqueue" => {
+            let r = crate::reconcile::run(&job, &opts.work_dir, &opts.arch)?;
+            Ok(Outcome {
+                summary: format!(
+                    "main@{}: {} queued, {} skipped, {} up to date{}",
+                    &r.commit[..r.commit.len().min(7)],
+                    r.queued.len(),
+                    r.skipped.len(),
+                    r.up_to_date,
+                    if r.queued.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" — {}", r.queued.join("; "))
+                    }
+                ),
+                result: serde_json::json!({ "commit": r.commit, "queued": r.queued, "skipped": r.skipped, "up_to_date": r.up_to_date }),
+            })
+        }
         "health" => {
             let ring = s(&task.params, "ring");
             let arch = s(&task.params, "arch");
@@ -425,7 +444,7 @@ fn script(
         .args(args)
         .env("OMARCHY_API", &opts.api)
         .env("OMARCHY_POOL", &opts.pool)
-        .env("OMARCHY_PUBLISH_TOKEN", token.lock().unwrap().clone())
+        .env("OMARCHY_TOKEN", token.lock().unwrap().clone())
         .env("PKG_REPO", &exe)
         .env("OMARCHY_KEYRINGS", opts.work_dir.join("keyrings"))
         .env("OMARCHY_CLI", bin.join("omarchy-cli"))

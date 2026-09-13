@@ -1,9 +1,9 @@
 # Runbook
 
 Operating the staging environment. Nothing here is done by hand on the servers:
-every write goes through the worker with the publish token, which lives only in
-GitHub Actions secrets; humans and agents operate the pipeline through the
-workflows and the publisher.
+every write goes through the Worker with a per-job token a worker got at claim
+time; there is no shared secret. Humans operate the pipeline by queueing jobs
+(`pkg-repo job`, or the API with a maintainer's token) that project workers run.
 
 | | |
 |---|---|
@@ -34,8 +34,9 @@ workflows and the publisher.
   selection; history is never rewritten. Every action posts an event.
 * **stable needs a human.** Promotions into `stable` run in the GitHub environment
   `stable`, which requires a reviewer's approval; edge → rc is automatic.
-* **Nobody holds R2 credentials.** Reads are public objects; writes go through
-  the worker with `PUBLISH_TOKEN` (GitHub secret); the R2 bucket has no API tokens.
+* **Nobody holds R2 credentials, and nobody holds a pool credential.** Reads
+  are public objects; writes go through the Worker with the per-job token of
+  a task a project worker claimed; the R2 bucket has no API tokens.
 
 ## Everyday operations
 
@@ -71,7 +72,8 @@ pkg-repo head --ring stable                                    # current release
 tests/abi-gate.sh rc x86_64                                    # ABI check of rc's upgrades, exit 2 on blockers
 ```
 
-Locally, with `OMARCHY_API` and `OMARCHY_PUBLISH_TOKEN` set:
+By hand, as a maintainer (`OMARCHY_API` and `OMARCHY_TOKEN=omc_…` set): the
+reads run directly, the writes are queued as jobs a project worker executes.
 
 ```bash
 pkg-repo releases --ring stable                    # history, head marked *
@@ -158,7 +160,7 @@ The worker is registered like any other (`POST /factory/workers`) and a
 maintainer promotes it: `POST /factory/workers/<id>/trust {"trust":"project"}`
 with a maintainer's contributor token; an admin names maintainers with
 `PATCH /factory/contributors/<login> {"role":"maintainer","areas":[…]}`
-(the publish token works for that while the transition lasts). Every task
+Every task
 runs with a per-job token the pool issues at claim time (SECURITY.md);
 the worker's own token only claims. Kinds not listed in `JOB_KINDS` would
 run as GitHub workflows, dispatched by the same scheduler; today `sync`,
@@ -240,7 +242,7 @@ tasks from the pool ([factory/README.md](../factory/README.md)). Day to day:
 - **Contributors' builds** land in the `omarchy-factory-staging` bucket
   (`staging/<login>/<package>/<task>/`, lifecycle rule: 30 days), listed on
   the Factory page with their PKGBUILD and log; the packages themselves are
-  readable with the publish token (`GET /api/v1/factory/tasks/:id/artifacts/<file>`).
+  readable by maintainers (`GET /api/v1/factory/tasks/:id/artifacts/<file>`).
   Quotas per contributor: 10 tasks queued or building, 2 GB staged. A
   contributor token (`omc_…`) or worker token (`omw_…`) is a random secret
   hashed in D1; revoke a worker with `DELETE /factory/workers/<id>` as its
@@ -268,12 +270,12 @@ tasks from the pool ([factory/README.md](../factory/README.md)). Day to day:
 ## Kill switch
 
 ```bash
-for w in sync promote health gc; do gh workflow disable "$w.yml"; done   # stop all writes
-cd worker && npx wrangler secret put PUBLISH_TOKEN                       # or rotate the token
+cd worker && npx wrangler secret put JOB_TOKEN_SECRET   # a new value: every job token in flight stops working
+# then set JOB_KINDS = "" in wrangler.toml and deploy: the scheduler queues nothing
 ```
 
-Reads keep working (static objects); nothing changes until the workflows are
-enabled again.
+Reads keep working (static objects); workers find no work and their tokens
+buy nothing. Revoke a single worker with `DELETE /factory/workers/<id>`.
 
 ## Reset (ephemeral by design)
 

@@ -3,7 +3,7 @@
 # One container, one task: it asks the pool for a build of the contributor's
 # package, builds it here with makepkg as an unprivileged user, uploads the
 # result to the contributor's staging workspace and exits. The image carries
-# no key and no publish token; whoever runs it brings only a worker token
+# no key and no pool credential; whoever runs it brings only a worker token
 # (POST /api/v1/factory/workers) and, if they want an agent to draft and fix
 # PKGBUILDs, their own ANTHROPIC_API_KEY.
 #

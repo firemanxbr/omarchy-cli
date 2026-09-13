@@ -1,46 +1,42 @@
 import { json, type Env } from "./index";
-import { jobHas, jobOf } from "./jobtoken";
-
-/** Returns a 401 response when the bearer token is missing or wrong, else null. */
-export function requireAuth(request: Request, env: Env): Response | null {
-  const header = request.headers.get("authorization") ?? "";
-  const token = header.startsWith("Bearer ") ? header.slice(7) : "";
-  if (!env.PUBLISH_TOKEN || !timingSafeEqual(token, env.PUBLISH_TOKEN)) {
-    return json({ error: "unauthorized" }, 401);
-  }
-  return null;
-}
-
-function timingSafeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return diff === 0;
-}
-
-/** True when the bearer token is the publish token (a maintainer / the pipeline). */
-export function requireAuthOk(request: Request, env: Env): boolean {
-  return requireAuth(request, env) === null;
-}
+import { jobOf } from "./jobtoken";
+import { contributorOf, isMaintainer, type Contributor } from "./routes/contributors";
 
 /**
- * A write is allowed with the publish token (a maintainer, the pipeline —
- * the transition credential) or with a job token that carries the scope.
- * Returns the 401/403 to send, or null when allowed.
+ * Who may write. Two credentials, nothing else: a per-job token (issued at
+ * claim time with exactly the scopes that task needs) and a maintainer —
+ * the operator, signed in with GitHub or holding their contributor token.
+ * There is no shared secret: the publish token is gone.
  */
+
+/** A job token carrying the scope: null when allowed, else the 401/403 to send. */
 export async function authorize(request: Request, env: Env, scope: string): Promise<Response | null> {
-  if (requireAuth(request, env) === null) return null;
   const job = await jobOf(request, env);
-  if (!job) return json({ error: "unauthorized" }, 401);
+  if (!job) return json({ error: "unauthorized: a job token is required" }, 401);
   if (!job.s.includes(scope) && !job.s.some((s) => s.endsWith(":*") && scope.startsWith(s.slice(0, -1)))) {
     return json({ error: `job ${job.t} (${job.k}) may not ${scope}`, scopes: job.s }, 403);
   }
   return null;
 }
 
+/** The signed-in maintainer, or the 401/403 to send. */
+export async function maintainerOf(request: Request, env: Env): Promise<Contributor | Response> {
+  const c = await contributorOf(request, env);
+  if (!c) return json({ error: "unauthorized: sign in, or use a contributor token" }, 401);
+  if (!isMaintainer(c)) return json({ error: `${c.login} is not a maintainer (factory/MAINTAINERS.toml)` }, 403);
+  return c;
+}
+
+/** A job with the scope, or a maintainer: what an operator may also do by hand. */
+export async function authorizeJobOrMaintainer(request: Request, env: Env, scope: string): Promise<Response | null> {
+  const job = await jobOf(request, env);
+  if (job) return authorize(request, env, scope);
+  const m = await maintainerOf(request, env);
+  return m instanceof Response ? m : null;
+}
+
 /** POST /releases: the scope depends on the ring in the body. */
 export async function authorizeRelease(request: Request, env: Env): Promise<Response | null> {
-  if (requireAuth(request, env) === null) return null;
   let ring = "";
   try {
     ring = String(((await request.clone().json()) as { ring?: string }).ring ?? "");
@@ -52,9 +48,9 @@ export async function authorizeRelease(request: Request, env: Env): Promise<Resp
 
 /** PUT /releases/:id/artifacts: the scope names the ring the release belongs to. */
 export async function authorizeArtifacts(request: Request, env: Env, releaseId: number): Promise<Response | null> {
-  if (requireAuth(request, env) === null) return null;
   const row = await env.DB.prepare("SELECT ring FROM releases WHERE id = ?").bind(releaseId).first<{ ring: string }>();
   if (!row) return json({ error: "no such release" }, 404);
-  const ok = (await jobHas(request, env, `artifacts:*:${row.ring}`)) ?? (await jobHas(request, env, `artifacts:${releaseId}`));
-  return ok ? null : authorize(request, env, `artifacts:*:${row.ring}`);
+  const job = await jobOf(request, env);
+  if (job && job.s.includes(`artifacts:${releaseId}`)) return null;
+  return authorize(request, env, `artifacts:*:${row.ring}`);
 }

@@ -2,6 +2,7 @@ import type { Env } from "./index";
 import { requeueExpiredLeases, pruneWorkers } from "./routes/factory";
 import { snapshotMetrics } from "./metrics";
 import { syncGovernance } from "./governance";
+import { syncRequests } from "./requests";
 
 /**
  * The pool's own scheduler. GitHub's cron is best-effort — on 2026-09-12 it
@@ -54,7 +55,7 @@ export const SYNC_SOURCES: { source: string; arch: string; ring: string; base_ur
 export const RULES: Rule[] = [
   { workflow: "sync.yml", every: 60, job: { kind: "sync", params: {} } },
   { workflow: "security.yml", every: 180, job: { kind: "security", params: {} } },
-  { workflow: "factory-enqueue.yml", every: 60 },
+  { workflow: "factory-enqueue.yml", every: 60, job: { kind: "enqueue", params: {} } },
   { workflow: "promote.yml", at: { hour: 6, minute: 0 }, inputs: { from: "edge", to: "rc", note: "daily rc" }, job: { kind: "promote", params: { from: "edge", to: "rc", note: "daily rc" } } },
   { workflow: "promote.yml", at: { hour: 9, minute: 0 }, inputs: { from: "rc", to: "stable", note: "daily stable" }, job: { kind: "promote", params: { from: "rc", to: "stable", note: "daily stable" } } },
   { workflow: "health.yml", at: { hour: 8, minute: 30 }, job: { kind: "health", params: {} } },
@@ -87,11 +88,11 @@ async function recentJobs(env: Env, kind: string, params: Record<string, string>
   return rows.results.map((r) => ({ created_at: r.created_at, status: r.status === "queued" || r.status === "leased" ? "in_progress" : "completed", event: "schedule" }));
 }
 
-async function createJob(env: Env, job: { kind: string; params: Record<string, string>; arch: string }): Promise<number> {
+export async function createJob(env: Env, job: { kind: string; params: Record<string, string>; arch: string }, reason = "scheduled"): Promise<number> {
   const row = await env.DB.prepare(
-    `INSERT INTO build_tasks (name, "group", arch, pkgbuild_ref, reason, priority, status, publish, trust, kind, params) VALUES (?, 'pool', ?, '-', 'scheduled', 50, 'queued', 1, 'project', ?, ?) RETURNING id`,
+    `INSERT INTO build_tasks (name, "group", arch, pkgbuild_ref, reason, priority, status, publish, trust, kind, params) VALUES (?, 'pool', ?, '-', ?, 50, 'queued', 1, 'project', ?, ?) RETURNING id`,
   )
-    .bind(job.kind, job.arch, job.kind, JSON.stringify(job.params))
+    .bind(job.kind, job.arch, reason, job.kind, JSON.stringify(job.params))
     .first<{ id: number }>();
   return row?.id ?? 0;
 }
@@ -188,6 +189,13 @@ export async function runScheduler(env: Env, now = new Date()): Promise<string[]
     if (g !== "governance: unchanged") log.push(g);
   } catch (e) {
     log.push(`governance: ${String(e)}`);
+  }
+  // Package requests: open issues become community build tasks.
+  try {
+    const r = await syncRequests(env);
+    if (!r.endsWith("nothing new")) log.push(r);
+  } catch (e) {
+    log.push(`requests: ${String(e)}`);
   }
   // The metrics snapshot is the brain's own bookkeeping: no worker needed.
   if (jobMode(env, "metrics")) {
