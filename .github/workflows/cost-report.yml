@@ -20,6 +20,7 @@ permissions:
 env:
   OMARCHY_API: ${{ vars.OMARCHY_API }}
   GH_TOKEN: ${{ github.token }}
+  GH_REPO: ${{ github.repository }}
   WARN_USD: "15"
 
 jobs:
