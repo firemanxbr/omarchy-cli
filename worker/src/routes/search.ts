@@ -1,6 +1,7 @@
 import { isRing, json, RINGS, type Env, type Ring } from "../index";
 import { isRepoArch } from "../r2";
 import { ringHead } from "../db";
+import { maintenanceOf } from "./users";
 import { gunzipJson } from "../gzip";
 
 /**
@@ -206,6 +207,7 @@ export async function handlePackage(name: string, url: URL, env: Env): Promise<R
         exposed,
       },
       rings: inRings,
+      maintenance: await maintenanceOf(env, chosen.name, chosen.source, manifest.pkginfo?.packager),
       package: { version: chosen.version, arch: chosen.arch, source: chosen.source, filename: chosen.filename, sha256: chosen.sha256, size_download: chosen.size_download, size_installed: chosen.size_installed, has_signature: chosen.has_signature === 1, created_at: chosen.created_at },
       manifest,
       depends,

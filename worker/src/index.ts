@@ -65,6 +65,8 @@ import { reviewHtml } from "./pages/review";
 import { governanceHtml } from "./pages/governance";
 import { docsHtml } from "./pages/docs";
 import { workersHtml } from "./pages/workers";
+import { userHtml } from "./pages/user";
+import { handleUser } from "./routes/users";
 import { handleGetEvents, handlePostEvent } from "./routes/events";
 import { handleServiceStatus, handleStats } from "./routes/stats";
 import { handleGc, handleUnreferenced } from "./routes/gc";
@@ -169,6 +171,8 @@ export default {
       if (path === "/factory") return html(factoryHtml(env.POOL_URL, version(env)));
       if (path === "/contribute") return html(contributeHtml(env.POOL_URL, version(env)));
       if (path === "/review") return html(reviewHtml(env.POOL_URL, version(env)));
+      const user = path.match(/^\/user\/([A-Za-z0-9-]{1,39})$/);
+      if (user) return html(userHtml(user[1], env.POOL_URL, version(env)));
       if (path.startsWith("/package/")) return html(packageHtml(decodeURIComponent(path.slice("/package/".length)), env.POOL_URL, version(env)));
       return json({ error: "not found" }, 404);
     } catch (err) {
@@ -321,6 +325,7 @@ async function api(method: string, path: string, url: URL, request: Request, env
   if (method === "GET" && path === "/factory/built") return handleBuilt(env);
   if (method === "GET" && path === "/factory/packages") return handleListPackages(env);
   if (method === "GET" && path === "/factory/trust") return handleTrustList(env);
+  if ((m = path.match(/^\/users\/([A-Za-z0-9-]{1,39})$/)) && method === "GET") return handleUser(m[1], env);
   if (method === "GET" && path === "/factory/groups") {
     const synced = await env.DB.prepare("SELECT updated_at FROM settings WHERE key = 'governance_sha256'").first<{ updated_at: string }>();
     return json({ groups: await groupsOf(env), source: GOVERNANCE_FILE, synced_at: synced?.updated_at ?? null }, 200, { "cache-control": "public, max-age=60" });

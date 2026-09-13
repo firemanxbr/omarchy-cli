@@ -93,7 +93,7 @@ const SCRIPT = String.raw`
   function took(ms) { if (ms == null) return "—"; var s = Math.round(ms / 1000); return s < 60 ? s + " s" : Math.floor(s / 60) + " min " + (s % 60) + " s"; }
   var role = null, areas = [];
   function showSigned() {
-    $("#signin-state").innerHTML = 'Signed in as <b>' + esc(login) + '</b>' + (role ? ' · ' + esc(role) + (areas.length ? ' of ' + esc(areas.join(", ")) : '') : '') + ' · <a href="#" id="signout">sign out</a>' + (role === "maintainer" ? ' · <a href="/review">Review</a>' : '');
+    $("#signin-state").innerHTML = 'Signed in as <a href="/user/' + encodeURIComponent(login) + '"><b>' + esc(login) + '</b></a>' + (role ? ' · ' + esc(role) + (areas.length ? ' of ' + esc(areas.join(", ")) : '') : '') + ' · <a href="#" id="signout">sign out</a>' + (role === "maintainer" ? ' · <a href="/review">Review</a>' : '');
     $("#oauth-link").hidden = true; $("#token-alt").hidden = true; $("#signed").hidden = false;
     $("#signout").onclick = function () { try { localStorage.removeItem("omc_token"); localStorage.removeItem("omc_login"); } catch (e) {} location.href = "/auth/logout"; return false; };
     refresh();

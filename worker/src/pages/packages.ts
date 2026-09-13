@@ -59,6 +59,7 @@ const PACKAGE_BODY = String.raw`
   <h1 id="title">…</h1>
   <p class="lede" id="desc"></p>
   <div class="meta" id="meta"></div>
+  <p class="sub" id="maint" style="margin-top:6px"></p>
 
   <section id="sec-section">
     <h2>Security <span id="sec-badge"></span></h2>
@@ -151,8 +152,21 @@ const PACKAGE_SCRIPT = String.raw`
       '<a href="' + esc(d.pool_url) + '">download</a> · <a href="' + esc(d.pool_url) + '.sig">.sig</a>',
       bytes(p.size_download) + " download · " + bytes(p.size_installed) + " installed",
       m.pkginfo && m.pkginfo.builddate ? "built " + new Date(m.pkginfo.builddate * 1000).toISOString().slice(0, 10) : "",
-      m.pkginfo && m.pkginfo.packager ? "by " + esc(m.pkginfo.packager.replace(/<.*>/, "").trim()) : ""
+      m.pkginfo && m.pkginfo.packager && p.source !== "factory" ? "packaged by " + esc(m.pkginfo.packager.replace(/<.*>/, "").trim()) : ""
     ].filter(Boolean).map(function (x) { return "<span>" + x + "</span>"; }).join('<span class="sep">·</span>');
+    // Who stands behind it: upstream's packager, or — for what the factory
+    // built — the contributor who brought it, the group's maintainers and
+    // the maintainer who approved it, each with a public page.
+    var mt = d.maintenance || {}, f = mt.factory, person = function (l) { return '<a href="/user/' + encodeURIComponent(l) + '">' + esc(l) + '</a>'; };
+    if (f) {
+      var parts = [];
+      if (f.owner) parts.push("brought by " + person(f.owner));
+      if (f.maintainers && f.maintainers.length) parts.push("maintained by " + f.maintainers.map(person).join(", ") + (f.group ? ' (<a href="/docs/governance">' + esc(f.group) + '</a>)' : ''));
+      if (f.approved_by) parts.push("approved by " + person(f.approved_by) + (f.approved_version ? " at " + esc(f.approved_version) : "") + " " + ago(f.approved_at));
+      $("#maint").innerHTML = parts.join(" · ") + ' · <span class="muted">built and signed by the project; the contributor\'s build was the evidence</span>';
+    } else if (mt.packager) {
+      $("#maint").innerHTML = 'Packaged upstream by ' + esc(mt.packager.replace(/<.*>/, "").trim()) + ' (' + esc(p.source) + '); the pool serves the file as built and signed there.';
+    }
     $("#rings tbody").innerHTML = ["stable", "rc", "edge"].map(function (r) {
       var row = (d.rings || []).filter(function (x) { return x.ring === r; })[0];
       if (!row) return '<tr><td>' + r + '</td><td colspan="5" class="muted">not in ' + r + ' for ' + arch + '</td></tr>';
