@@ -119,7 +119,8 @@ job token and its evidence served, the audit it queues (a community worker
 never gets it; the builder cannot write `audit.*`; a project worker declaring
 the `audit` kind attaches the report with the audit's own token, and only
 that; Review shows the verdict), a shared worker waiting for `shared_after`,
-the governance table and groups API, the profile page and API, the browser session (`/auth/me` with the
+the governance table and groups API, the profile page and API (with the
+track record per group), the browser session (`/auth/me` with the
 cookie, sign-out invalidating it on the server while the CLI token keeps
 working), `workers/self`, and the approval rules (nobody approves their own
 package; the bootstrap exception with a single maintainer).

@@ -59,6 +59,7 @@ const BODY = String.raw`
   <section>
     <h2>The record</h2>
     <p class="sub">Every role change is a <code>role</code> line in the <a href="/">journal</a>, every approval an <code>approvals</code> row a maintainer signed with their login, every trust decision a <code>trust</code> line. The file's history on GitHub is the history of who decided what.</p>
+    <p class="sub"><b>Track record, per group.</b> A profile sums that record per group — as a contributor: packages a maintainer let in, builds staged, bumps, builds done for others, rejections; as a maintainer: approvals, rejections, approvals whose rebuild then failed — into one number with a public, dull formula: <code>3·let in + staged + bumps + for others − 2·rejected + 2·approvals + rejections − 3·rebuilds failed</code>. It says where the work was done, orders the groups on the profile, and nothing else: no rank, no badge, no threshold.</p>
     <div class="table-wrap"><table id="roles"><thead><tr><th>When</th><th>What</th></tr></thead><tbody></tbody></table></div>
   </section>
 `;

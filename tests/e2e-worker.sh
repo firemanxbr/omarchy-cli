@@ -278,6 +278,9 @@ mine=$(curl -s "$OMARCHY_API/api/v1/factory/review" | python3 -c 'import json,sy
 (cd "$ROOT/worker" && npx wrangler d1 execute omarchy-repo --local --persist-to "$WRANGLER_STATE" --command "UPDATE factory_groups SET maintainers = '[\"e2e\"]' WHERE name = 'community'" >/dev/null)
 boot=$(curl -s -X POST "$OMARCHY_API/api/v1/factory/tasks/$mine/approve" "${mauth[@]}" -d '{}'); grep -q '"rebuild_task"' <<<"$boot" || { echo "the sole maintainer must be able to approve (bootstrap): $boot"; exit 1; }
 apr=$(curl -s "$OMARCHY_API/api/v1/factory/approvals"); grep -q "bootstrap: e2e is the sole maintainer" <<<"$apr" || { echo "the bootstrap approval must say so: $(head -c 300 <<<"$apr")"; exit 1; }
+# The track record per group on the profile: e2e brought 'mine' (staged, then let in) and signed the approval.
+rec=$(curl -s "$OMARCHY_API/api/v1/users/e2e?after=approval")   # a fresh key: the profile is edge-cached for a minute
+python3 -c 'import json,sys; r=[g for g in json.load(sys.stdin)["record"] if g["group"]=="community"][0]; assert r["contributed"]["approved"]==1 and r["contributed"]["staged"]==1 and r["maintained"]["approvals"]==1 and r["score"]==6, r' <<<"$rec" || { echo "the profile record is off: $(python3 -c 'import json,sys; print(json.load(sys.stdin)["record"])' <<<"$rec")"; exit 1; }
 rpage=$(curl -s "$OMARCHY_API/review"); grep -q "Review" <<<"$rpage" || { echo "review page not served"; exit 1; }
 # A signature for bytes the pool does not serve under that filename is refused.
 [[ "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$OMARCHY_API/api/v1/pool/$(printf 'a%.0s' {1..64})/sig?filename=xz-5.8.4-1-x86_64.pkg.tar.zst&arch=x86_64" -H "authorization: Bearer $OMARCHY_TOKEN" --data-binary "@$E2E/pkgs/xz-5.8.4-1-x86_64.pkg.tar.zst.sig")" == 409 ]] || { echo "a mismatching signature must be refused"; exit 1; }
