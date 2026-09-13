@@ -56,10 +56,6 @@ request (see [CONTRIBUTING.md](CONTRIBUTING.md)), and keep
       package from a clean version to one with an open advisory (exact
       confidence) when the source ring also serves a clean one.
 
-- [ ] **Worker unit tests.** Cover `POST /api/v1/releases` (promote, rollback,
-      add/remove, per-arch), the paged release view, `/graph?arch=` and `/stats`
-      with `@cloudflare/vitest-pool-workers` + `applyD1Migrations`, so the release
-      logic is tested in seconds instead of only by the end-to-end scripts.
 - [ ] **Package provenance.** Record, per OPR package, the PKGBUILD commit and
       whether it is AUR-synced or Omarchy's own (`omarchy-pkgs` has
       `.omarchy/package.json`), and show on the dashboard how many packages in
@@ -141,7 +137,8 @@ releasing · signing inside the Worker · governance from a file, two roles ·
 the cost estimate, the guard and the daily report · one worker image for
 everyone, nobody approves their own package · the second agent (the audit
 of a staged build, attached to its evidence) · the track record per group
-on profiles.
+on profiles · any agent provider on a worker · Worker tests inside workerd
+(releases, the factory).
 
 ## Factory findings (2026-09-12)
 
