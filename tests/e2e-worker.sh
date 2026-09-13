@@ -37,6 +37,13 @@ export OMARCHY_TOKEN="$(job_token)"
 
 step() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
 cleanup() {
+  local code=$?
+  # What the local pool said, when a step failed: the Worker's own log is
+  # the only place a 'Network connection lost' or a D1 error shows up.
+  if [[ $code -ne 0 && -f "$E2E/wrangler.log" ]]; then
+    printf '\n\033[1;31m==> the local pool (wrangler dev) log, last 80 lines:\033[0m\n' >&2
+    tail -n 80 "$E2E/wrangler.log" >&2
+  fi
   if [[ -n "${WRANGLER_PID:-}" ]]; then kill "$WRANGLER_PID" 2>/dev/null || true; fi
 }
 trap cleanup EXIT
