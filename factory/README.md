@@ -85,17 +85,19 @@ curl -s -X POST $API/factory/register -H 'content-type: application/json' \
 # 2. Register the package: the pool checks nobody ships it, detects what it is.
 curl -s -X POST $API/factory/packages -H "authorization: Bearer $OMC" -H 'content-type: application/json' \
   -d '{"url":"https://github.com/you/project"}'
-#    optional: "name", "group" (community|omarchy), "arches", "release" (a tag), "pkgbuild_path" (a PKGBUILD in your repo)
+#    optional: "name", "group" (one of GET $API/factory/groups — who reviews it), "arches", "release" (a tag), "pkgbuild_path" (a PKGBUILD in your repo)
 
-# 3. Register a worker — dedicated to your packages, or shared with everyone.
+# 3. Register a worker. It builds your packages; WORKER_SHARED=1 at start makes it build anyone's.
 curl -s -X POST $API/factory/workers -H "authorization: Bearer $OMC" -H 'content-type: application/json' \
-  -d '{"name":"laptop","arch":"aarch64","mode":"dedicated"}'
+  -d '{"name":"laptop","arch":"aarch64"}'
 #    → {"worker":"you-laptop-ab12","token":"omw_…"}   shown once
 
 # 4. Queue the build(s).
 curl -s -X POST $API/factory/packages/project/build -H "authorization: Bearer $OMC"
 
 # 5. Run the worker: the project's signed image, one fresh container per task.
+#    ANTHROPIC_API_KEY is *your* agent key, on your machine: the pool never holds one.
+#    WORKER_SHARED=1 donates the worker to other contributors' packages too.
 WORKER_ID=you-laptop-ab12 OMARCHY_WORKER_TOKEN=omw_… ANTHROPIC_API_KEY=sk-… \
   podman compose -f factory/image/compose.yml up -d        # or docker compose
 #    or, one task by hand:
@@ -128,6 +130,10 @@ token. `cosign verify ghcr.io/firemanxbr/omarchy-packaging:latest
 --certificate-identity-regexp github.com/firemanxbr/omarchy-pool
 --certificate-oidc-issuer https://token.actions.githubusercontent.com` checks
 the image is the project's.
+
+Who approves, and how one becomes a maintainer, is
+[docs/GOVERNANCE.md](../docs/GOVERNANCE.md): a file in this repository,
+`factory/MAINTAINERS.toml`, changed by pull requests other maintainers review.
 
 ## Sizing a package before committing to it
 

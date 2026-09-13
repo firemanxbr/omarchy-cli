@@ -239,44 +239,46 @@ export async function handleCancelTask(id: number, env: Env): Promise<Response> 
 
 // ---------- workers ----------
 
-async function touchWorker(env: Env, w: { worker: string; arch: string; hostname?: string; labels?: unknown; version?: string }, currentTask: number | null): Promise<void> {
+async function touchWorker(env: Env, w: { worker: string; arch: string; hostname?: string; labels?: unknown; version?: string; mode?: string }, currentTask: number | null): Promise<void> {
   await env.DB.prepare(
     `INSERT INTO build_workers (id, arch, hostname, labels, version, last_seen, current_task) VALUES (?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (id) DO UPDATE SET arch = excluded.arch, hostname = COALESCE(excluded.hostname, hostname), labels = COALESCE(excluded.labels, labels),
-       version = COALESCE(excluded.version, version), last_seen = excluded.last_seen, current_task = excluded.current_task`,
+       version = COALESCE(excluded.version, version), last_seen = excluded.last_seen, current_task = excluded.current_task, mode = COALESCE(?, mode)`,
   )
-    .bind(w.worker, w.arch, w.hostname ?? null, w.labels ? JSON.stringify(w.labels) : null, w.version ?? null, now(), currentTask)
+    .bind(w.worker, w.arch, w.hostname ?? null, w.labels ? JSON.stringify(w.labels) : null, w.version ?? null, now(), currentTask, w.mode ?? null)
     .run();
 }
 
 const ALL_KINDS = ["build", "sync", "promote", "render", "health", "security", "metrics", "gc"];
 
 export async function handleClaim(request: Request, env: Env, actor: Actor): Promise<Response> {
-  const b = (await request.json()) as { arch?: string; hostname?: string; labels?: unknown; version?: string; kinds?: unknown };
+  const b = (await request.json()) as { arch?: string; hostname?: string; labels?: unknown; version?: string; kinds?: unknown; shared?: unknown };
   if (!b.arch || !isRepoArch(b.arch)) return json({ error: "arch (x86_64|aarch64) is required" }, 400);
   if (actor.kind === "job") return json({ error: "a job token cannot claim; use the worker token" }, 403);
   // A worker is its registration: id, owner, trust and what it may build.
   const workerId = actor.w.id;
   if (actor.w.arch !== b.arch) return json({ error: `this worker is registered for ${actor.w.arch}` }, 400);
   const trust = actor.w.trust === "project" ? "project" : "community";
-  // What this worker may claim. Project trust takes any kind it declares;
-  // community trust takes community builds only — a shared worker anyone's,
-  // a dedicated one its owner's packages. Community results never reach the
-  // pool, so a contributor's worker can never build for the project by accident.
+  // What this worker may claim. Project trust takes any kind it declares,
+  // but never a contributor's build: project workers do the work a
+  // maintainer would — pool jobs and the rebuild of an approved package —
+  // and nothing that has no evidence and no review yet. Community trust
+  // takes community builds only, and by default only its owner's: a worker
+  // started with --shared (the claim says so) donates its compute to
+  // anyone's, so a contributor never ends up building strangers' packages
+  // by accident. Community results never reach the pool either way.
   const wanted = (Array.isArray(b.kinds) ? b.kinds.filter((k): k is string => typeof k === "string" && ALL_KINDS.includes(k)) : trust === "project" ? ALL_KINDS : ["build"]);
   const kinds = trust === "project" ? wanted : ["build"];
+  const shared = trust === "community" && b.shared === true;
   let scope = `kind IN (SELECT value FROM json_each(?))`;
   const binds: unknown[] = [JSON.stringify(kinds)];
   if (trust === "project") {
-    // Contributors' builds are contributors' business (their workers, or a
-    // shared community worker): a project worker never spends the project's
-    // compute on them. It takes pool jobs and project builds only.
     scope += ` AND (kind != 'build' OR trust = 'project')`;
   } else {
     scope += ` AND trust = 'community'`;
-    if (actor.w.mode === "dedicated") {
-      scope += ` AND name IN (SELECT value FROM json_each(?))`;
-      binds.push(JSON.stringify(actor.w.packages.length ? actor.w.packages : ["-"]));
+    if (!shared) {
+      scope += ` AND owner = ?`;
+      binds.push(actor.w.owner ?? "-");
     }
   }
   // One statement claims the next queued task of this architecture: D1
@@ -288,7 +290,7 @@ export async function handleClaim(request: Request, env: Env, actor: Actor): Pro
   )
     .bind(workerId, plusMinutes(LEASE_MINUTES), now(), b.arch, ...binds)
     .first<TaskRow>();
-  await touchWorker(env, { worker: workerId, arch: b.arch, hostname: b.hostname, labels: b.labels, version: b.version }, task?.id ?? null);
+  await touchWorker(env, { worker: workerId, arch: b.arch, hostname: b.hostname, labels: b.labels, version: b.version, mode: trust === "community" ? (shared ? "shared" : "dedicated") : undefined }, task?.id ?? null);
   if (!task) return new Response(null, { status: 204 });
   if (task.trust === "community" && task.kind === "build") {
     await env.DB.prepare("UPDATE factory_packages SET status = 'building', detail = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE name = ?").bind(`building on ${workerId} (${task.arch})`, task.name).run();

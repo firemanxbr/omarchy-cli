@@ -1,5 +1,5 @@
 import { json, type Env } from "../index";
-import { isMaintainer, type Contributor } from "./contributors";
+import { maintains, type Contributor } from "./contributors";
 
 /**
  * Review: what maintainers do with staged builds.
@@ -52,7 +52,7 @@ export async function handleReviewList(env: Env): Promise<Response> {
 }
 
 function canReview(c: Contributor, group: string): boolean {
-  return c.role === "admin" || (isMaintainer(c) && (c.areas.length === 0 || c.areas.includes(group)));
+  return maintains(c, group);
 }
 
 export async function handleApprove(c: Contributor, id: number, request: Request, env: Env): Promise<Response> {

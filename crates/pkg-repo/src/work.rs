@@ -35,6 +35,8 @@ pub struct WorkOptions {
     pub worker_token: String,
     pub arch: String,
     pub kinds: Vec<String>,
+    /// A community worker that builds anyone's packages, not only its owner's.
+    pub shared: bool,
     pub labels: serde_json::Value,
     pub once: bool,
     /// Exit after this many seconds without work (0 = never).
@@ -100,7 +102,7 @@ pub fn run(opts: &WorkOptions) -> Result<()> {
     let mut done = 0u32;
     loop {
         let body = serde_json::json!({
-            "arch": opts.arch, "hostname": hostname, "version": version, "labels": opts.labels, "kinds": opts.kinds,
+            "arch": opts.arch, "hostname": hostname, "version": version, "labels": opts.labels, "kinds": opts.kinds, "shared": opts.shared,
         });
         let claimed = match claimer.post_json_as(&opts.worker_token, "/factory/claim", &body) {
             Ok(Some(v)) => serde_json::from_value::<Claimed>(v).context("claim response")?,

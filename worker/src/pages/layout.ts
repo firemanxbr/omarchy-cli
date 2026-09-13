@@ -316,7 +316,7 @@ export interface PageOptions {
   title: string;
   description: string;
   /** Which nav entry is highlighted. */
-  active: "overview" | "packages" | "security" | "factory" | "contribute" | "review" | "get-started" | "pipeline" | "how-it-works";
+  active: "overview" | "packages" | "security" | "factory" | "contribute" | "review" | "get-started" | "pipeline" | "how-it-works" | "governance";
   body: string;
   script?: string;
   poolUrl: string;
@@ -378,6 +378,7 @@ ${o.body}
   <span>omarchy-pool</span><span class="sep">·</span>
   <a href="https://github.com/firemanxbr/omarchy-pool/blob/main/LICENSE">MIT license</a><span class="sep">·</span>
   <a class="gh" href="https://github.com/firemanxbr/omarchy-pool">${GITHUB_ICON} GitHub</a><span class="sep">·</span>
+  <a href="/governance">Governance</a><span class="sep">·</span>
   <a href="/api">API</a><span class="sep">·</span>
   <a href="/status">Status</a><span class="sep">·</span>
   <span>running ${v.release_url ? `<a href="${escapeHtml(v.release_url)}">${tag}</a>` : tag}${v.commit && v.commit_url ? ` · <a href="${escapeHtml(v.commit_url)}">${escapeHtml(v.commit.slice(0, 7))}</a>` : ""}</span>

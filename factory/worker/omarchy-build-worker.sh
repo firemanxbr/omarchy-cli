@@ -25,6 +25,8 @@
 #   WORKER_ARCH            architecture to build for (default: this host's; another one runs emulated)
 #   WORKER_ID              default <hostname>-<arch>-<random>
 #   WORKER_LABELS          JSON shown on the Factory page, e.g. {"where":"laptop"}
+#   WORKER_SHARED          1 = build anyone's community packages (donated compute); default: the owner's only
+#   ANTHROPIC_API_KEY      the worker owner's agent key, if any: drafts and corrects PKGBUILDs here, on this machine
 #   IDLE_EXIT              exit after this many seconds without work (0 = never; default 0)
 #   MAX_TASKS              exit after this many tasks (0 = unlimited; default 0)
 #   PKG_REPO               path to a pkg-repo binary (default: installed from the pool's releases)
@@ -181,7 +183,7 @@ container_worker() {
   add_pool_repos "$ARCH" "$OMARCHY_POOL"
   local idle=0 out code body task id name group ref version
   while :; do
-    out="$(api POST /factory/claim "$(jq -n --arg a "$ARCH" --arg h "$(hostname -s 2>/dev/null || echo ?)" --arg v "container" --argjson l "${WORKER_LABELS:-{\}}" '{arch:$a,hostname:$h,version:$v,labels:$l}')")" \
+    out="$(api POST /factory/claim "$(jq -n --arg a "$ARCH" --arg h "$(hostname -s 2>/dev/null || echo ?)" --arg v "container" --argjson l "${WORKER_LABELS:-{\}}" --argjson s "$( [[ "${WORKER_SHARED:-0}" == 1 ]] && echo true || echo false)" '{arch:$a,hostname:$h,version:$v,labels:$l,shared:$s}')")" \
       || { log "claim failed: ${out##*$'\n'}"; sleep 60; continue; }
     code="${out##*$'\n'}"; body="${out%$'\n'*}"
     if [[ "$code" == "204" ]]; then

@@ -8,6 +8,8 @@ services:
       WORKER_ID: ${WORKER_ID:?from POST /api/v1/factory/workers}
       OMARCHY_WORKER_TOKEN: ${OMARCHY_WORKER_TOKEN:?the worker token, shown once}
       WORKER_LABELS: '{"where":"${WHERE:-my-machine}"}'
+      # 1 = also build other contributors' packages (donated compute); default: yours only.
+      WORKER_SHARED: ${WORKER_SHARED:-0}
       # Optional: your own agent drafts and corrects PKGBUILDs (your tokens, your cost).
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       # Optional: raises GitHub API limits when drafting.

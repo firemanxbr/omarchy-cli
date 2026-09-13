@@ -21,8 +21,10 @@ please do not file a public issue for it.
    "does everything". A worker's token can only ask for work; each job gets
    a credential scoped to the routes it needs, valid for its lease.
 4. **Trust is granted per machine and per person, recorded and revocable.**
-   Project workers are promoted by a maintainer; maintainers are named by an
-   admin; every grant and every approval is a journal line with a name.
+   Project workers are promoted by a maintainer; maintainers are named by
+   `factory/MAINTAINERS.toml` — a pull request another maintainer approves,
+   never a database write (docs/GOVERNANCE.md); every grant and every
+   approval is a journal line with a name.
 5. **GitHub hosts code and cuts releases.** It runs none of the pool's
    operations and holds none of its keys.
 
@@ -33,7 +35,7 @@ please do not file a public issue for it.
 | Contributor token `omc_…` | one person (GitHub identity read once, never stored) | register packages under their name, queue community builds, register and revoke their workers, read their own state | write to the pool, claim jobs, approve | live |
 | Worker token `omw_…` | one machine, registered by a contributor | claim tasks its trust allows (community: its owner's or shared builds; project: pool jobs too); heartbeat | write to the pool or staging directly | live |
 | Job token `omj.…` | the worker running one task, for the lease | the routes that task needs — e.g. `sync`: upload objects, index, create a release in one ring, store that ring's databases; community `build`: upload to that task's staging folder | anything outside its scopes (403, journaled); anything after the lease (30 min, renewed by heartbeat) | live |
-| Maintainer / admin role | a contributor promoted by an admin | promote a worker to project trust; approve or reject staged builds of their areas (recorded); set roles (admin) | operate as a worker | live |
+| Maintainer role | a contributor listed under a group in `factory/MAINTAINERS.toml` on `main` (applied by the brain every ten minutes) | promote a worker to project trust; approve or reject staged builds of their groups (recorded); review the group's PKGBUILDs and governance pull requests | operate as a worker; grant a role | live |
 | Publish token | GitHub Actions (pipeline), maintainers on the command line | everything a job can, on any ring | — | live; **retiring** as each job kind moves to pulled jobs |
 | Signing key (OpenPGP) | the pool's Worker only (`SIGNING_KEY` secret, `worker/src/signing.ts`) | sign the databases it stores and the packages the factory builds (`POST /pool/:sha256/sign`) | — | live; no worker, runner or repository holds it |
 | `CLOUDFLARE_API_TOKEN` | GitHub Actions release workflow | deploy the Worker, apply migrations | — | live; the only secret GitHub will keep |
@@ -48,9 +50,10 @@ secret). Everything travels in the `Authorization` header over TLS only.
 | Who | Gets | How |
 |---|---|---|
 | Contributor | register packages, run community workers | GitHub account |
-| Community worker | community builds of its owner's packages (dedicated) or anyone's (shared); results go to a separate staging bucket in the owner's workspace | registered by its owner |
-| Project worker | pool jobs (sync, render, promote, health, gc) and project builds | a maintainer sets `trust = project` on the worker (`POST /factory/workers/:id/trust`) |
-| Maintainer | approve staged builds of their areas, promote workers | an admin sets the role (`PATCH /factory/contributors/:login`) |
+| Community worker | community builds of its owner's packages; anyone's only when started with `--shared` / `WORKER_SHARED=1`; results go to a separate staging bucket in the owner's workspace | registered by its owner |
+| Project worker | pool jobs (sync, render, promote, health, security, gc) and the rebuild of approved packages — never a build without evidence and review | a maintainer sets `trust = project` on the worker (`POST /factory/workers/:id/trust`) |
+| Maintainer | approve staged builds of their groups, promote workers, review governance | listed in `factory/MAINTAINERS.toml`, merged with another maintainer's review |
+| Agent key | drafts and corrects PKGBUILDs on a worker | the worker owner's own `ANTHROPIC_API_KEY`, set in the container's environment; the pool and GitHub hold none |
 
 ## Isolation
 
@@ -88,7 +91,7 @@ check, and the security layer's advisories.
 | a community worker's token | claims of that owner's tasks; uploads to those tasks' staging | owner revokes the worker |
 | a job token | that task's writes, until its lease ends | expires by itself; the task can be cancelled |
 | a project worker's token | claims of pool jobs — each still executed with a scoped job token — until revoked | a maintainer revokes the worker |
-| a maintainer's token | approvals in their areas, worker trust | admin resets the role; approvals are journaled and reversible (rollback) |
+| a maintainer's token | approvals in their groups, worker trust | a governance pull request removes the login; approvals are journaled and reversible (rollback) |
 | the publish token (transition) | any write to the pool | rotate the secret and the GitHub secret; retire it sooner |
 | the signing key | signatures on bad content — only through the Worker's own routes, since the key is a secret of the service | rotate: `wrangler secret put SIGNING_KEY`, re-render every ring, users import the new public key (RUNBOOK) |
 

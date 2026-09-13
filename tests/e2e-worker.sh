@@ -55,10 +55,15 @@ npx wrangler d1 migrations apply omarchy-repo --local --persist-to "$WRANGLER_ST
 # trust produce), seeded straight into the local index: their tokens are
 # omw_e2e_w1 and omw_e2e_w2.
 W1_HASH=$(printf %s omw_e2e_w1 | sha256sum | cut -d' ' -f1); W2_HASH=$(printf %s omw_e2e_w2 | sha256sum | cut -d' ' -f1)
+# …and the governance the brain would have applied from factory/MAINTAINERS.toml:
+# one group, whose maintainer is the contributor 'e2e' (token omc_e2e).
+C_HASH=$(printf %s omc_e2e | sha256sum | cut -d' ' -f1)
 npx wrangler d1 execute omarchy-repo --local --persist-to "$WRANGLER_STATE" --command \
   "INSERT INTO build_workers (id, arch, owner, token_hash, mode, trust, trusted_by, last_seen) VALUES
      ('w1', 'aarch64', 'e2e', '$W1_HASH', 'shared', 'project', 'e2e', '2000-01-01T00:00:00Z'),
-     ('w2', 'aarch64', 'e2e', '$W2_HASH', 'shared', 'project', 'e2e', '2000-01-01T00:00:00Z')" >/dev/null
+     ('w2', 'aarch64', 'e2e', '$W2_HASH', 'shared', 'project', 'e2e', '2000-01-01T00:00:00Z');
+   INSERT INTO factory_groups (name, description, maintainers) VALUES ('community', 'everything else', '[\"e2e\"]');
+   INSERT INTO contributors (login, token_hash, role, areas) VALUES ('e2e', '$C_HASH', 'maintainer', '[\"community\"]')" >/dev/null
 npx wrangler dev --ip 0.0.0.0 --port "$PORT" --persist-to "$WRANGLER_STATE" \
   --env-file "$E2E/.dev.vars" --var "POOL_URL:http://$HOST_FROM_CONTAINER:$PORT/pool" > "$E2E/wrangler.log" 2>&1 &
 WRANGLER_PID=$!
@@ -189,6 +194,9 @@ reg=$(curl -s "$OMARCHY_API/api/v1/factory/packages"); grep -q '"packages"' <<<"
 [[ "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$OMARCHY_API/api/v1/factory/tasks/$tid/artifacts/x.log" "${auth[@]}" --data 'x')" == 401 ]] || { echo "the publish token must not write to staging"; exit 1; }
 [[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/tasks/$tid/approve" "${auth[@]}" -d '{}')" == 401 ]] || { echo "approving needs a maintainer's contributor token"; exit 1; }
 review=$(curl -s "$OMARCHY_API/api/v1/factory/review"); grep -q '"staged"' <<<"$review" || { echo "review list not served: $review"; exit 1; }
+groups=$(curl -s "$OMARCHY_API/api/v1/factory/groups"); grep -q '"maintainers":\["e2e"\]' <<<"$groups" || { echo "groups not served from the governance table: $groups"; exit 1; }
+me=$(curl -s "$OMARCHY_API/api/v1/factory/me" -H "authorization: Bearer omc_e2e"); grep -q '"role":"maintainer"' <<<"$me" || { echo "the seeded maintainer is not one: $me"; exit 1; }
+gpage=$(curl -s "$OMARCHY_API/governance"); grep -q "Becoming a maintainer" <<<"$gpage" || { echo "governance page not served"; exit 1; }
 rpage=$(curl -s "$OMARCHY_API/review"); grep -q "Review" <<<"$rpage" || { echo "review page not served"; exit 1; }
 # A signature for bytes the pool does not serve under that filename is refused.
 [[ "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$OMARCHY_API/api/v1/pool/$(printf 'a%.0s' {1..64})/sig?filename=xz-5.8.4-1-x86_64.pkg.tar.zst&arch=x86_64" -H "authorization: Bearer $OMARCHY_PUBLISH_TOKEN" --data-binary "@$E2E/pkgs/xz-5.8.4-1-x86_64.pkg.tar.zst.sig")" == 409 ]] || { echo "a mismatching signature must be refused"; exit 1; }

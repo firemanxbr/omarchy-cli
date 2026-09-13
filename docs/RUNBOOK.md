@@ -173,8 +173,8 @@ worker is idle, the scheduler starts one on a GitHub-hosted runner
 
 The **Review** page lists staged builds (a contributor's package built on
 their worker, with PKGBUILD, log and PKGINFO). A maintainer of the package's
-group — signed in on Contribute with a contributor token that carries the
-role — approves or rejects:
+group — a login listed under that group in `factory/MAINTAINERS.toml`, signed
+in with GitHub — approves or rejects:
 
 - **Approve** records the decision (`approvals`, with your login and note)
   and queues a **project build** of the staged PKGBUILD (`pkgbuild_ref =
@@ -199,11 +199,14 @@ The session is an HttpOnly cookie on the dashboard's origin; the pages call
 the API same-origin. Without the app, the Contributors page still accepts a
 GitHub token used once.
 
-Roles: an admin names maintainers and their areas —
-`PATCH /api/v1/factory/contributors/<login> {"role":"maintainer","areas":["community"]}`
-(the publish token also works during the transition). An empty `areas`
-list means every group. `GET /api/v1/factory/approvals` is the public
-record.
+Roles come from the repository, not from an API: `factory/MAINTAINERS.toml`
+names the groups and their maintainers, the brain reads `main` every ten
+minutes (`worker/src/governance.ts`) and sets each contributor's role and
+areas from it — every change a `role` line in the journal. Changing the file
+is a pull request another maintainer approves (`.github/CODEOWNERS` is
+generated from it by `factory/bin/check-governance --write`; CI checks they
+agree). See [GOVERNANCE.md](GOVERNANCE.md). `GET /api/v1/factory/groups` and
+`/factory/approvals` are the public record.
 
 ## The factory
 

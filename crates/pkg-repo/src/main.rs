@@ -233,6 +233,10 @@ enum Command {
         /// Architecture to work for (default: this machine's).
         #[arg(long, default_value = std::env::consts::ARCH)]
         arch: String,
+        /// Build anyone's community packages, not only this worker owner's
+        /// (donated compute; a community worker only).
+        #[arg(long)]
+        shared: bool,
         /// Job kinds to pull (repeatable).
         #[arg(long = "kind", default_values_t = ["build".to_owned(), "sync".to_owned(), "render".to_owned(), "promote".to_owned(), "health".to_owned(), "security".to_owned(), "gc".to_owned()])]
         kinds: Vec<String>,
@@ -440,6 +444,7 @@ fn main() -> Result<()> {
             worker_token,
             arch,
             kinds,
+            shared,
             labels,
             once,
             idle_exit,
@@ -456,6 +461,7 @@ fn main() -> Result<()> {
                 arch
             },
             kinds,
+            shared,
             labels: serde_json::from_str(&labels).context("--labels must be JSON")?,
             once,
             idle_exit,
