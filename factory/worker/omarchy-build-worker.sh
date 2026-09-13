@@ -20,7 +20,7 @@
 # Environment (secrets come from the operator, never from the task):
 #   OMARCHY_API            https://pkgs.firemanxbr.org
 #   OMARCHY_POOL           https://pool.firemanxbr.org (builds can depend on earlier factory builds)
-#   FACTORY_TOKEN          bearer token for the factory endpoints
+#   OMARCHY_WORKER_TOKEN   this worker's token (POST /factory/workers, shown once); FACTORY_TOKEN is an accepted alias
 #   OMARCHY_PUBLISH_TOKEN  bearer token pkg-repo uses to publish and render
 #   WORKER_ARCH            architecture to build for (default: this host's; another one runs emulated)
 #   WORKER_ID              default <hostname>-<arch>-<random>
@@ -172,7 +172,8 @@ inside() {
 # the result to the contributor's staging workspace and exits. No signing
 # key, no publish token: community results never touch the pool directly.
 container_worker() {
-  : "${FACTORY_TOKEN:?FACTORY_TOKEN (a worker token from POST /factory/workers) is required}"
+  OMARCHY_WORKER_TOKEN="${OMARCHY_WORKER_TOKEN:-${FACTORY_TOKEN:-}}"
+  : "${OMARCHY_WORKER_TOKEN:?OMARCHY_WORKER_TOKEN (a worker token from POST /factory/workers) is required}"
   : "${WORKER_ID:?WORKER_ID (from POST /factory/workers) is required}"
   ARCH="$(uname -m)"; [[ "$ARCH" == arm64 ]] && ARCH=aarch64
   log "container worker $WORKER_ID ($ARCH) preparing"
@@ -229,19 +230,19 @@ container_worker() {
 upload_staging() { # task-id file name
   local id="$1" file="$2" name="$3" size; size="$(wc -c <"$file" | tr -d ' ')"
   if (( size <= 90 * 1024 * 1024 )); then
-    curl -sS --fail-with-body --max-time 900 -X PUT "$OMARCHY_API/api/v1/factory/tasks/$id/artifacts/$name" -H "authorization: Bearer $FACTORY_TOKEN" \
+    curl -sS --fail-with-body --max-time 900 -X PUT "$OMARCHY_API/api/v1/factory/tasks/$id/artifacts/$name" -H "authorization: Bearer $OMARCHY_WORKER_TOKEN" \
       -H "content-type: application/octet-stream" --data-binary "@$file" -o /dev/null
     return
   fi
   local base="$OMARCHY_API/api/v1/factory/tasks/$id/artifacts/$name/multipart" up parts=() n=0 etag
-  up="$(curl -sS --fail-with-body -X POST "$base?action=create" -H "authorization: Bearer $FACTORY_TOKEN" | jq -r .upload_id)"
+  up="$(curl -sS --fail-with-body -X POST "$base?action=create" -H "authorization: Bearer $OMARCHY_WORKER_TOKEN" | jq -r .upload_id)"
   rm -rf /build/parts && mkdir -p /build/parts && split -b 64m -d -a 4 "$file" /build/parts/p
   for part in /build/parts/p*; do
     n=$((n + 1))
-    etag="$(curl -sS --fail-with-body -X POST "$base?action=part&part=$n&upload_id=$up" -H "authorization: Bearer $FACTORY_TOKEN" --data-binary "@$part" | jq -r .etag)"
+    etag="$(curl -sS --fail-with-body -X POST "$base?action=part&part=$n&upload_id=$up" -H "authorization: Bearer $OMARCHY_WORKER_TOKEN" --data-binary "@$part" | jq -r .etag)"
     parts+=("{\"partNumber\":$n,\"etag\":\"$etag\"}")
   done
-  curl -sS --fail-with-body -X POST "$base?action=complete&upload_id=$up" -H "authorization: Bearer $FACTORY_TOKEN" -H "content-type: application/json" \
+  curl -sS --fail-with-body -X POST "$base?action=complete&upload_id=$up" -H "authorization: Bearer $OMARCHY_WORKER_TOKEN" -H "content-type: application/json" \
     --data "{\"parts\":[$(IFS=,; echo "${parts[*]}")]}" -o /dev/null
   rm -rf /build/parts
 }
@@ -256,13 +257,14 @@ WORK="${WORK:-$HOME/.cache/omarchy-factory}"   # under $HOME: podman machine on 
 api() { # method path [json]
   local method="$1" path="$2" body="${3:-}"
   curl -sS --fail-with-body --max-time 60 -X "$method" "$OMARCHY_API/api/v1$path" \
-    -H "authorization: Bearer $FACTORY_TOKEN" -H "content-type: application/json" \
+    -H "authorization: Bearer $OMARCHY_WORKER_TOKEN" -H "content-type: application/json" \
     ${body:+--data "$body"} -w '\n%{http_code}'
 }
 sha256() { if command -v sha256sum >/dev/null; then sha256sum "$1" | cut -d' ' -f1; else shasum -a 256 "$1" | cut -d' ' -f1; fi; }
 
 prepare() {
-  : "${FACTORY_TOKEN:?FACTORY_TOKEN is required}"
+  OMARCHY_WORKER_TOKEN="${OMARCHY_WORKER_TOKEN:-${FACTORY_TOKEN:-}}"
+  : "${OMARCHY_WORKER_TOKEN:?OMARCHY_WORKER_TOKEN (a worker token from POST /factory/workers) is required}"
   : "${OMARCHY_PUBLISH_TOKEN:?OMARCHY_PUBLISH_TOKEN is required}"
   RUNTIME="$(command -v podman || command -v docker || true)"
   [[ -n "$RUNTIME" ]] || { log "podman or docker is required"; exit 2; }

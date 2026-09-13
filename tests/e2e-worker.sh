@@ -49,8 +49,16 @@ WRANGLER_STATE="$E2E/wrangler-state"
 # The pool holds the signing key (SECURITY.md): the throwaway key goes in as
 # the Worker secret, armored on one dotenv line.
 SIGNING_KEY="$(gpg --batch --armor --export-secret-keys "$KEYID" | awk '{printf "%s\\n", $0}')"
-printf 'PUBLISH_TOKEN=%s\nFACTORY_TOKEN=e2e-factory\nSIGNING_KEY="%s"\n' "$OMARCHY_PUBLISH_TOKEN" "$SIGNING_KEY" > "$E2E/.dev.vars"
+printf 'PUBLISH_TOKEN=%s\nJOB_TOKEN_SECRET=e2e-jobs\nSIGNING_KEY="%s"\n' "$OMARCHY_PUBLISH_TOKEN" "$SIGNING_KEY" > "$E2E/.dev.vars"
 npx wrangler d1 migrations apply omarchy-repo --local --persist-to "$WRANGLER_STATE" >/dev/null
+# Two registered project workers (what POST /factory/workers + a maintainer's
+# trust produce), seeded straight into the local index: their tokens are
+# omw_e2e_w1 and omw_e2e_w2.
+W1_HASH=$(printf %s omw_e2e_w1 | sha256sum | cut -d' ' -f1); W2_HASH=$(printf %s omw_e2e_w2 | sha256sum | cut -d' ' -f1)
+npx wrangler d1 execute omarchy-repo --local --persist-to "$WRANGLER_STATE" --command \
+  "INSERT INTO build_workers (id, arch, owner, token_hash, mode, trust, trusted_by, last_seen) VALUES
+     ('w1', 'aarch64', 'e2e', '$W1_HASH', 'shared', 'project', 'e2e', '2000-01-01T00:00:00Z'),
+     ('w2', 'aarch64', 'e2e', '$W2_HASH', 'shared', 'project', 'e2e', '2000-01-01T00:00:00Z')" >/dev/null
 npx wrangler dev --ip 0.0.0.0 --port "$PORT" --persist-to "$WRANGLER_STATE" \
   --env-file "$E2E/.dev.vars" --var "POOL_URL:http://$HOST_FROM_CONTAINER:$PORT/pool" > "$E2E/wrangler.log" 2>&1 &
 WRANGLER_PID=$!
@@ -135,7 +143,8 @@ grep -q '"signing":true' <<<"$status_body" || { echo "status does not report sig
 echo "databases, signatures, package blobs, Range requests, stats, pages, security and service status OK"
 
 step "Factory: enqueue, claim with a lease, fail → requeue, complete after publish"
-fauth=(-H "authorization: Bearer e2e-factory" -H "content-type: application/json")
+w1=(-H "authorization: Bearer omw_e2e_w1" -H "content-type: application/json")
+w2=(-H "authorization: Bearer omw_e2e_w2" -H "content-type: application/json")
 # The guard: xz is served by 'packages' for x86_64 → refused there; aarch64 has nobody → queued.
 enq=$(curl -s -X POST "$OMARCHY_API/api/v1/factory/enqueue" "${auth[@]}" -d '{"name":"xz","group":"community","pkgbuild_ref":"deadbeef","reason":"pkgbuild-changed","arches":["x86_64","aarch64"]}')
 grep -q '"arches":\["aarch64"\]' <<<"$enq" || { echo "enqueue did not skip the upstream-served arch: $enq"; exit 1; }
@@ -143,22 +152,26 @@ grep -q '"source":"packages"' <<<"$enq" || { echo "enqueue did not name who ship
 refused=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/enqueue" "${auth[@]}" -d '{"name":"xz","group":"community","pkgbuild_ref":"deadbeef","reason":"x","arches":["x86_64"]}')
 [[ "$refused" == 409 ]] || { echo "expected 409 for a name upstream ships, got $refused"; exit 1; }
 tid=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["tasks"][0])' <<<"$enq")
-[[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/claim" "${auth[@]}" -d '{"worker":"w","arch":"aarch64"}')" == 401 ]] || { echo "publish token must not claim"; exit 1; }
-claim=$(curl -s -X POST "$OMARCHY_API/api/v1/factory/claim" "${fauth[@]}" -d '{"worker":"w1","arch":"aarch64","hostname":"e2e"}')
+[[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/claim" "${auth[@]}" -d '{"arch":"aarch64"}')" == 401 ]] || { echo "publish token must not claim"; exit 1; }
+[[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/claim" -H "authorization: Bearer omw_unknown" -H "content-type: application/json" -d '{"arch":"aarch64"}')" == 401 ]] || { echo "an unregistered worker token must not claim"; exit 1; }
+[[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/claim" "${w1[@]}" -d '{"arch":"x86_64"}')" == 400 ]] || { echo "a worker claims only its registered architecture"; exit 1; }
+claim=$(curl -s -X POST "$OMARCHY_API/api/v1/factory/claim" "${w1[@]}" -d '{"arch":"aarch64","hostname":"e2e"}')
 grep -q "\"id\":$tid," <<<"$claim" || { echo "claim did not return the queued task: $claim"; exit 1; }
-[[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/claim" "${fauth[@]}" -d '{"worker":"w2","arch":"aarch64"}')" == 204 ]] || { echo "second worker must get nothing"; exit 1; }
-[[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/tasks/$tid/heartbeat" "${fauth[@]}" -d '{"worker":"w2"}')" == 409 ]] || { echo "a stranger must not heartbeat"; exit 1; }
-curl -sf -X POST "$OMARCHY_API/api/v1/factory/tasks/$tid/heartbeat" "${fauth[@]}" -d '{"worker":"w1"}' >/dev/null
-failed=$(curl -s -X POST "$OMARCHY_API/api/v1/factory/tasks/$tid/fail" "${fauth[@]}" -d '{"worker":"w1","error":"boom"}')
+job=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])' <<<"$claim")
+[[ "$job" == omj.* ]] || { echo "claim did not issue a job token: $claim"; exit 1; }
+[[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/claim" "${w2[@]}" -d '{"arch":"aarch64"}')" == 204 ]] || { echo "second worker must get nothing"; exit 1; }
+[[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/tasks/$tid/heartbeat" "${w2[@]}")" == 409 ]] || { echo "a stranger must not heartbeat"; exit 1; }
+curl -sf -X POST "$OMARCHY_API/api/v1/factory/tasks/$tid/heartbeat" -H "authorization: Bearer $job" >/dev/null || { echo "the job token must heartbeat its own task"; exit 1; }
+failed=$(curl -s -X POST "$OMARCHY_API/api/v1/factory/tasks/$tid/fail" "${w1[@]}" -d '{"error":"boom"}')
 grep -q '"status":"queued"' <<<"$failed" || { echo "first failure must requeue: $failed"; exit 1; }
-claim2=$(curl -s -X POST "$OMARCHY_API/api/v1/factory/claim" "${fauth[@]}" -d '{"worker":"w2","arch":"aarch64"}')
+claim2=$(curl -s -X POST "$OMARCHY_API/api/v1/factory/claim" "${w2[@]}" -d '{"arch":"aarch64"}')
 grep -q '"attempts":2' <<<"$claim2" || { echo "second claim must be attempt 2: $claim2"; exit 1; }
-[[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/tasks/$tid/complete" "${fauth[@]}" -d '{"worker":"w2","sha256":"0000","filename":"nope"}')" == 409 ]] || { echo "complete before publish must be refused"; exit 1; }
+[[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/tasks/$tid/complete" "${w2[@]}" -d '{"sha256":"0000","filename":"nope"}')" == 409 ]] || { echo "complete before publish must be refused"; exit 1; }
 # The "build result" must be in the pool: the xz object already published
 # stands in for it (the fixtures are x86_64 packages; the brain checks the
 # pool, not the architecture of the bytes).
 xz_sha=$(sha256sum "$E2E/pkgs/xz-5.8.4-1-x86_64.pkg.tar.zst" | cut -d' ' -f1)
-done_body=$(curl -s -X POST "$OMARCHY_API/api/v1/factory/tasks/$tid/complete" "${fauth[@]}" -d "{\"worker\":\"w2\",\"sha256\":\"$xz_sha\",\"filename\":\"xz-5.8.4-1-x86_64.pkg.tar.zst\",\"version\":\"5.8.4-1\",\"duration_ms\":1200}")
+done_body=$(curl -s -X POST "$OMARCHY_API/api/v1/factory/tasks/$tid/complete" "${w2[@]}" -d "{\"sha256\":\"$xz_sha\",\"filename\":\"xz-5.8.4-1-x86_64.pkg.tar.zst\",\"version\":\"5.8.4-1\",\"duration_ms\":1200}")
 grep -q '"status":"done"' <<<"$done_body" || { echo "complete failed: $done_body"; exit 1; }
 fac=$(curl -s "$OMARCHY_API/api/v1/factory")
 grep -q '"builds_done":1' <<<"$fac" || { echo "worker stats missing: $fac"; exit 1; }
@@ -167,7 +180,7 @@ grep -q '"name":"xz","arch":"aarch64"' <<<"$built" || { echo "built list missing
 fpage=$(curl -s "$OMARCHY_API/factory"); grep -q "Factory" <<<"$fpage" || { echo "factory page not served"; exit 1; }
 reg=$(curl -s "$OMARCHY_API/api/v1/factory/packages"); grep -q '"packages"' <<<"$reg" || { echo "registry not served: $reg"; exit 1; }
 [[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/packages" -H "content-type: application/json" -d '{"url":"https://github.com/x/y"}')" == 401 ]] || { echo "registering without a contributor token must be refused"; exit 1; }
-[[ "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$OMARCHY_API/api/v1/factory/tasks/$tid/artifacts/x.log" "${fauth[@]}" --data 'x')" == 401 ]] || { echo "the project token must not write to staging"; exit 1; }
+[[ "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$OMARCHY_API/api/v1/factory/tasks/$tid/artifacts/x.log" "${auth[@]}" --data 'x')" == 401 ]] || { echo "the publish token must not write to staging"; exit 1; }
 [[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/tasks/$tid/approve" "${auth[@]}" -d '{}')" == 401 ]] || { echo "approving needs a maintainer's contributor token"; exit 1; }
 review=$(curl -s "$OMARCHY_API/api/v1/factory/review"); grep -q '"staged"' <<<"$review" || { echo "review list not served: $review"; exit 1; }
 rpage=$(curl -s "$OMARCHY_API/review"); grep -q "Review" <<<"$rpage" || { echo "review page not served"; exit 1; }

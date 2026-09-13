@@ -30,10 +30,8 @@ const POLL: Duration = Duration::from_secs(30);
 pub struct WorkOptions {
     pub api: String,
     pub pool: String,
-    /// The worker's own token (`omw_…`), or the project's `FACTORY_TOKEN`.
+    /// The worker's own token (`omw_…`); the registration names the worker.
     pub worker_token: String,
-    /// Required with `FACTORY_TOKEN`; a registered worker is its token.
-    pub worker_id: Option<String>,
     pub arch: String,
     pub kinds: Vec<String>,
     pub labels: serde_json::Value,
@@ -86,14 +84,8 @@ pub fn run(opts: &WorkOptions) -> Result<()> {
     let claimer = Api::new(&opts.api, &opts.worker_token)?;
     let hostname = hostname();
     let version = pkg_manifest::BUILD_VERSION;
-    let worker = opts.worker_id.clone().unwrap_or_default();
     eprintln!(
-        "worker {}({}) ready — {} — asking {} for {}",
-        if worker.is_empty() {
-            "(registered)"
-        } else {
-            &worker
-        },
+        "worker ({}) ready — {} — asking {} for {}",
         opts.arch,
         version,
         opts.api,
@@ -107,7 +99,6 @@ pub fn run(opts: &WorkOptions) -> Result<()> {
     let mut done = 0u32;
     loop {
         let body = serde_json::json!({
-            "worker": if worker.is_empty() { serde_json::Value::Null } else { serde_json::Value::String(worker.clone()) },
             "arch": opts.arch, "hostname": hostname, "version": version, "labels": opts.labels, "kinds": opts.kinds,
         });
         let claimed = match claimer.post_json_as(&opts.worker_token, "/factory/claim", &body) {

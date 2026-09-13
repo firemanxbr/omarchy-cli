@@ -8,10 +8,12 @@ import { issueJobToken, scopesFor, type JobClaims } from "../jobtoken";
  * requests and build tasks; build workers are ephemeral, live anywhere, and
  * *pull* work:
  *
- *   POST /factory/claim                 {worker, arch, hostname?, labels?, version?} → a task with a lease, or 204
- *   POST /factory/tasks/:id/heartbeat   {worker}                       extend the lease
- *   POST /factory/tasks/:id/complete    {worker, sha256, filename, version, duration_ms?, log_tail?}
- *   POST /factory/tasks/:id/fail        {worker, error, duration_ms?, log_tail?}   → requeued, or failed after max_attempts
+ *   POST /factory/claim                 {arch, hostname?, labels?, version?, kinds?} → a task with a lease and its job token, or 204
+ *   POST /factory/tasks/:id/heartbeat                                  extend the lease (a fresh job token)
+ *   POST /factory/tasks/:id/complete    {sha256, filename, version, duration_ms?, log_tail?} · {result, summary} for jobs
+ *   POST /factory/tasks/:id/fail        {error, duration_ms?, log_tail?}   → requeued, or failed after max_attempts
+ * The worker is its registered token (POST /factory/workers); a task's
+ * writes use the job token the claim issued.
  *
  * A lease that expires (worker died, build hung) goes back to the queue on
  * the scheduler's next tick. Maintainers / the pipeline (publish token):
@@ -63,8 +65,8 @@ interface TaskRow {
   staged_prefix: string | null;
 }
 
-/** Who is calling a worker endpoint: a project worker (FACTORY_TOKEN), a registered one (own token), or a job (its per-task token). */
-export type Actor = { kind: "project" } | { kind: "worker"; w: WorkerIdentity } | { kind: "job"; job: JobClaims };
+/** Who is calling a worker endpoint: a registered worker (own token) or a job (its per-task token). */
+export type Actor = { kind: "worker"; w: WorkerIdentity } | { kind: "job"; job: JobClaims };
 
 const now = () => new Date().toISOString();
 const plusMinutes = (m: number) => new Date(Date.now() + m * 60000).toISOString();
@@ -250,14 +252,13 @@ async function touchWorker(env: Env, w: { worker: string; arch: string; hostname
 const ALL_KINDS = ["build", "sync", "promote", "render", "health", "security", "metrics", "gc"];
 
 export async function handleClaim(request: Request, env: Env, actor: Actor): Promise<Response> {
-  const b = (await request.json()) as { worker?: string; arch?: string; hostname?: string; labels?: unknown; version?: string; kinds?: unknown };
+  const b = (await request.json()) as { arch?: string; hostname?: string; labels?: unknown; version?: string; kinds?: unknown };
   if (!b.arch || !isRepoArch(b.arch)) return json({ error: "arch (x86_64|aarch64) is required" }, 400);
   if (actor.kind === "job") return json({ error: "a job token cannot claim; use the worker token" }, 403);
-  // A registered worker is its registration: id, owner, trust and what it may build.
-  const workerId = actor.kind === "worker" ? actor.w.id : b.worker;
-  if (!workerId) return json({ error: "worker is required" }, 400);
-  if (actor.kind === "worker" && actor.w.arch !== b.arch) return json({ error: `this worker is registered for ${actor.w.arch}` }, 400);
-  const trust = actor.kind === "project" || actor.w.trust === "project" ? "project" : "community";
+  // A worker is its registration: id, owner, trust and what it may build.
+  const workerId = actor.w.id;
+  if (actor.w.arch !== b.arch) return json({ error: `this worker is registered for ${actor.w.arch}` }, 400);
+  const trust = actor.w.trust === "project" ? "project" : "community";
   // What this worker may claim. Project trust takes any kind it declares;
   // community trust takes community builds only — a shared worker anyone's,
   // a dedicated one its owner's packages. Community results never reach the
@@ -273,7 +274,7 @@ export async function handleClaim(request: Request, env: Env, actor: Actor): Pro
     scope += ` AND (kind != 'build' OR trust = 'project')`;
   } else {
     scope += ` AND trust = 'community'`;
-    if (actor.kind === "worker" && actor.w.mode === "dedicated") {
+    if (actor.w.mode === "dedicated") {
       scope += ` AND name IN (SELECT value FROM json_each(?))`;
       binds.push(JSON.stringify(actor.w.packages.length ? actor.w.packages : ["-"]));
     }
@@ -308,25 +309,23 @@ export async function handleClaim(request: Request, env: Env, actor: Actor): Pro
   });
 }
 
-async function owned(env: Env, id: number, worker: string | undefined, actor: Actor): Promise<TaskRow | Response> {
+async function owned(env: Env, id: number, actor: Actor): Promise<TaskRow | Response> {
   if (actor.kind === "job" && !actor.job.s.includes(`task:${id}`)) return json({ error: `this job token is for task ${actor.job.t}` }, 403);
-  const who = actor.kind === "worker" ? actor.w.id : actor.kind === "job" ? actor.job.w : worker;
-  if (!who) return json({ error: "worker is required" }, 400);
+  const who = actor.kind === "worker" ? actor.w.id : actor.job.w;
   const task = await env.DB.prepare("SELECT * FROM build_tasks WHERE id = ?").bind(id).first<TaskRow>();
   if (!task) return json({ error: "no such task" }, 404);
   if (task.status !== "leased" || task.lease_owner !== who) return json({ error: `task ${id} is ${task.status}${task.lease_owner ? " by " + task.lease_owner : ""}; the lease is not yours` }, 409);
   return task;
 }
 
-function workerName(b: { worker?: string }, actor: Actor): string {
-  return actor.kind === "worker" ? actor.w.id : actor.kind === "job" ? actor.job.w : (b.worker ?? "?");
+function workerName(actor: Actor): string {
+  return actor.kind === "worker" ? actor.w.id : actor.job.w;
 }
 
-export async function handleHeartbeat(id: number, request: Request, env: Env, actor: Actor): Promise<Response> {
-  const b = (await request.json()) as { worker?: string };
-  const task = await owned(env, id, b.worker, actor);
+export async function handleHeartbeat(id: number, env: Env, actor: Actor): Promise<Response> {
+  const task = await owned(env, id, actor);
   if (task instanceof Response) return task;
-  const who = workerName(b, actor);
+  const who = workerName(actor);
   const until = plusMinutes(LEASE_MINUTES);
   await env.DB.prepare("UPDATE build_tasks SET lease_expires_at = ? WHERE id = ?").bind(until, id).run();
   await env.DB.prepare("UPDATE build_workers SET last_seen = ?, current_task = ? WHERE id = ?").bind(now(), id, who).run();
@@ -338,10 +337,10 @@ export async function handleHeartbeat(id: number, request: Request, env: Env, ac
 }
 
 export async function handleComplete(id: number, request: Request, env: Env, actor: Actor): Promise<Response> {
-  const b = (await request.json()) as { worker?: string; sha256?: string; filename?: string; version?: string; duration_ms?: number; log_tail?: string; result?: unknown; summary?: string };
-  const task = await owned(env, id, b.worker, actor);
+  const b = (await request.json()) as { sha256?: string; filename?: string; version?: string; duration_ms?: number; log_tail?: string; result?: unknown; summary?: string };
+  const task = await owned(env, id, actor);
   if (task instanceof Response) return task;
-  const who = workerName(b, actor);
+  const who = workerName(actor);
   if (task.kind !== "build") {
     // A pool job: what it did is its result; the journal gets one line.
     await env.DB.prepare("UPDATE build_tasks SET status = 'done', finished_at = ?, duration_ms = ?, log_tail = ?, result = ?, lease_owner = NULL, lease_expires_at = NULL WHERE id = ?")
@@ -393,10 +392,10 @@ export async function handleComplete(id: number, request: Request, env: Env, act
 }
 
 export async function handleFail(id: number, request: Request, env: Env, actor: Actor): Promise<Response> {
-  const b = (await request.json()) as { worker?: string; error?: string; duration_ms?: number; log_tail?: string };
-  const task = await owned(env, id, b.worker, actor);
+  const b = (await request.json()) as { error?: string; duration_ms?: number; log_tail?: string };
+  const task = await owned(env, id, actor);
   if (task instanceof Response) return task;
-  const who = workerName(b, actor);
+  const who = workerName(actor);
   const exhausted = task.attempts >= task.max_attempts;
   // A requeued task goes behind its peers (priority + 10) so one broken
   // PKGBUILD does not hold the queue.
@@ -466,9 +465,13 @@ export async function handleFactory(env: Env, url?: URL): Promise<Response> {
   );
 }
 
-/** Ephemeral hosted workers (gh-*) that have not reported for a day are forgotten; the journal keeps their builds. */
+/**
+ * Workers from before registration (no token of their own: the retired
+ * shared secret's ephemeral runners and hosts) can never claim again; a day
+ * after their last report they are forgotten. The journal keeps their builds.
+ */
 export async function pruneWorkers(env: Env): Promise<number> {
-  const res = await env.DB.prepare("DELETE FROM build_workers WHERE owner IS NULL AND id LIKE 'gh-%' AND last_seen < ?")
+  const res = await env.DB.prepare("DELETE FROM build_workers WHERE token_hash IS NULL AND last_seen < ?")
     .bind(new Date(Date.now() - 86400000).toISOString())
     .run();
   return res.meta.changes ?? 0;

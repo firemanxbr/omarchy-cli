@@ -229,7 +229,7 @@ export async function handleRegisterWorker(c: Contributor, request: Request, env
   )
     .bind(id, b.arch, b.labels ? JSON.stringify(b.labels) : null, c.login, await sha256Hex(token), mode, JSON.stringify(packages))
     .run();
-  return json({ worker: id, token, mode, arch: b.arch, packages, note: "Run the Omarchy Packaging image with WORKER_ID and FACTORY_TOKEN set to these; the token is shown once." }, 201);
+  return json({ worker: id, token, mode, arch: b.arch, packages, note: "Run the Omarchy Packaging image with WORKER_ID and OMARCHY_WORKER_TOKEN set to these; the token is shown once." }, 201);
 }
 
 export async function handleRevokeWorker(c: Contributor, id: string, env: Env): Promise<Response> {

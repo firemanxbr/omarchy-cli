@@ -7,6 +7,10 @@ run-name: Pool worker (${{ inputs.arch }})
 # jobs from the pool and runs each with the per-job credential the pool
 # hands out. Any machine the project trusts does the same with
 # `pkg-repo work`; this is the fallback fleet, free on a public repository.
+# It is a registered project worker like the others: one per architecture
+# (POST /factory/workers, trusted by a maintainer), its token the GitHub
+# secret POOL_WORKER_TOKEN_<ARCH>. Nothing on GitHub can write to the pool
+# by itself.
 
 on:
   workflow_dispatch:
@@ -43,8 +47,7 @@ jobs:
         env:
           OMARCHY_API: ${{ vars.OMARCHY_API }}
           OMARCHY_POOL: ${{ vars.OMARCHY_POOL }}
-          OMARCHY_WORKER_TOKEN: ${{ secrets.FACTORY_TOKEN }}
-          WORKER_ID: gh-pool-${{ inputs.arch }}-${{ github.run_id }}
+          OMARCHY_WORKER_TOKEN: ${{ inputs.arch == 'aarch64' && secrets.POOL_WORKER_TOKEN_AARCH64 || secrets.POOL_WORKER_TOKEN_X86_64 }}
         run: |
           pkg-repo work --arch "${{ inputs.arch }}" --idle-exit "${{ inputs.idle_exit }}" --repo-dir "$PWD" --work-dir "$RUNNER_TEMP/pool-worker" \
             --labels '{"where":"github-hosted","runner":"${{ runner.name }}","run":"${{ github.run_id }}"}'

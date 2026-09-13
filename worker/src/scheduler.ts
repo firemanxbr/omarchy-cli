@@ -163,7 +163,7 @@ export async function factoryDemand(env: Env, now = new Date()): Promise<{ arch:
   // need project trust; community workers do not count for them.
   const rows = await env.DB.prepare(
     `SELECT arch, COUNT(*) AS queued, SUM(CASE WHEN kind != 'build' OR trust = 'project' THEN 1 ELSE 0 END) AS pool,
-            (SELECT COUNT(*) FROM build_workers w WHERE w.arch = t.arch AND w.last_seen > ? AND w.current_task IS NULL AND (w.trust = 'project' OR w.owner IS NULL)) AS alive
+            (SELECT COUNT(*) FROM build_workers w WHERE w.arch = t.arch AND w.last_seen > ? AND w.current_task IS NULL AND w.trust = 'project' AND w.revoked_at IS NULL) AS alive
        FROM build_tasks t WHERE status = 'queued' AND (kind != 'build' OR trust = 'project') GROUP BY arch`,
   )
     .bind(new Date(now.getTime() - 10 * 60000).toISOString())
@@ -177,7 +177,7 @@ export async function runScheduler(env: Env, now = new Date()): Promise<string[]
     const n = await requeueExpiredLeases(env);
     if (n) log.push(`factory: ${n} expired lease(s) back in the queue`);
     const gone = await pruneWorkers(env);
-    if (gone) log.push(`factory: ${gone} stale hosted worker(s) forgotten`);
+    if (gone) log.push(`factory: ${gone} unregistered worker(s) forgotten`);
   } catch (e) {
     log.push(`factory requeue: ${String(e)}`);
   }

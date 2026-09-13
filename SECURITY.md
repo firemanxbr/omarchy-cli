@@ -35,7 +35,6 @@ please do not file a public issue for it.
 | Job token `omj.…` | the worker running one task, for the lease | the routes that task needs — e.g. `sync`: upload objects, index, create a release in one ring, store that ring's databases; community `build`: upload to that task's staging folder | anything outside its scopes (403, journaled); anything after the lease (30 min, renewed by heartbeat) | live |
 | Maintainer / admin role | a contributor promoted by an admin | promote a worker to project trust; approve or reject staged builds of their areas (recorded); set roles (admin) | operate as a worker | live |
 | Publish token | GitHub Actions (pipeline), maintainers on the command line | everything a job can, on any ring | — | live; **retiring** as each job kind moves to pulled jobs |
-| `FACTORY_TOKEN` | the hosted pool-worker fallback | claim pool jobs | write without a job token; take a contributor's build | live; **retiring** in favour of registered project workers |
 | Signing key (OpenPGP) | the pool's Worker only (`SIGNING_KEY` secret, `worker/src/signing.ts`) | sign the databases it stores and the packages the factory builds (`POST /pool/:sha256/sign`) | — | live; no worker, runner or repository holds it |
 | `CLOUDFLARE_API_TOKEN` | GitHub Actions release workflow | deploy the Worker, apply migrations | — | live; the only secret GitHub will keep |
 | GitHub PAT on the Worker | the scheduler | dispatch workflows | — | live; removed once no rule dispatches a workflow |
@@ -97,5 +96,5 @@ check, and the security layer's advisories.
 
 1. ~~Per-job scoped tokens; project workers registered and trusted by a maintainer; pool jobs pulled by workers~~ — live (v0.0.40).
 2. ~~Signing inside the pool's Worker: the key becomes a Worker secret; `publish` and `render` stop signing on workers; the GitHub secret is deleted~~ — live (v0.0.49). A client's `.sig` for a database is superseded; a package signature must match the stored bytes.
-3. Retire the publish token and `FACTORY_TOKEN`: maintainers use personal tokens, the pipeline's last workflows become jobs, GitHub keeps only the release.
+3. ~~Retire `FACTORY_TOKEN`~~ — gone (v0.0.50): every worker, the hosted fallback included, is a registration with its own token. Retire the publish token: maintainers use personal tokens, the pipeline's last workflows become jobs, GitHub keeps only the release.
 4. ~~Phase 2: maintainers by area, approval as a recorded action, rebuild at approval on project workers~~ — live (v0.0.42). A promotion gate for the `factory` source is unnecessary: nothing unapproved enters `edge`.

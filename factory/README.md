@@ -96,10 +96,10 @@ curl -s -X POST $API/factory/workers -H "authorization: Bearer $OMC" -H 'content
 curl -s -X POST $API/factory/packages/project/build -H "authorization: Bearer $OMC"
 
 # 5. Run the worker: the project's signed image, one fresh container per task.
-WORKER_ID=you-laptop-ab12 FACTORY_TOKEN=omw_… ANTHROPIC_API_KEY=sk-… \
+WORKER_ID=you-laptop-ab12 OMARCHY_WORKER_TOKEN=omw_… ANTHROPIC_API_KEY=sk-… \
   podman compose -f factory/image/compose.yml up -d        # or docker compose
 #    or, one task by hand:
-podman run --rm -e WORKER_ID=you-laptop-ab12 -e FACTORY_TOKEN=omw_… ghcr.io/firemanxbr/omarchy-packaging:latest
+podman run --rm -e WORKER_ID=you-laptop-ab12 -e OMARCHY_WORKER_TOKEN=omw_… ghcr.io/firemanxbr/omarchy-packaging:latest
 
 # 6. Follow it.
 curl -s $API/factory/me -H "authorization: Bearer $OMC"       # your packages, workers, tasks, staging quota
@@ -179,7 +179,7 @@ The factory touches the pool through four things, all versioned in the API:
 |---|---|
 | `GET /api/v1/package/:name` | who ships a name already (the guard) |
 | `POST /api/v1/factory/{requests,enqueue}` · `/requests/:id/{approve,reject}` · `/tasks/:id/cancel` (publish token) · `GET /factory/built` | maintainers and the enqueue workflow |
-| `POST /api/v1/factory/claim` · `/tasks/:id/{heartbeat,complete,fail}` (FACTORY_TOKEN, or a registered worker's token) | the worker protocol |
+| `POST /api/v1/factory/claim` (a registered worker's token) · `/tasks/:id/{heartbeat,complete,fail}` (the claim's job token) | the worker protocol |
 | `POST /api/v1/factory/register` · `/factory/packages[/:name/build]` · `/factory/workers` (contributor token) · `PUT /factory/tasks/:id/artifacts/:file` (worker token) · `GET /factory/packages`, `/factory/me` | contributors: registry, own workers, staging uploads |
 | `pkg-repo publish --source factory --ring edge --arch …` · `pkg-repo render` | how a result enters the pool: as a source like any other |
 
