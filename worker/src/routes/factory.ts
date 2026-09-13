@@ -50,6 +50,8 @@ interface TaskRow {
   log_tail: string | null;
   error: string | null;
   created_at: string;
+  /** 0 = dry run: build and report, never publish. */
+  publish: number;
 }
 
 const now = () => new Date().toISOString();
@@ -110,7 +112,7 @@ function nothingToBuild(skipped: { arch: string; source: string; version: string
 }
 
 /** Queue one task per architecture unless an identical one is already queued or running. */
-async function enqueue(env: Env, t: { name: string; group: string; arches: string[]; pkgbuild_ref: string; reason: string; version?: string | null; priority?: number }): Promise<number[]> {
+async function enqueue(env: Env, t: { name: string; group: string; arches: string[]; pkgbuild_ref: string; reason: string; version?: string | null; priority?: number; publish?: boolean }): Promise<number[]> {
   const ids: number[] = [];
   for (const arch of t.arches) {
     const dup = await env.DB.prepare(
@@ -123,9 +125,9 @@ async function enqueue(env: Env, t: { name: string; group: string; arches: strin
       continue;
     }
     const row = await env.DB.prepare(
-      `INSERT INTO build_tasks (name, "group", arch, version, pkgbuild_ref, reason, priority) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+      `INSERT INTO build_tasks (name, "group", arch, version, pkgbuild_ref, reason, priority, publish) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
     )
-      .bind(t.name, t.group, arch, t.version ?? null, t.pkgbuild_ref, t.reason, t.priority ?? 100)
+      .bind(t.name, t.group, arch, t.version ?? null, t.pkgbuild_ref, t.reason, t.priority ?? 100, t.publish === false ? 0 : 1)
       .first<{ id: number }>();
     if (row) ids.push(row.id);
   }
@@ -174,13 +176,13 @@ export async function handleRejectRequest(id: number, request: Request, env: Env
 }
 
 export async function handleEnqueue(request: Request, env: Env): Promise<Response> {
-  const b = (await request.json()) as { name?: string; group?: string; arches?: unknown; pkgbuild_ref?: string; reason?: string; version?: string; priority?: number; override?: boolean };
+  const b = (await request.json()) as { name?: string; group?: string; arches?: unknown; pkgbuild_ref?: string; reason?: string; version?: string; priority?: number; override?: boolean; publish?: boolean };
   if (!b.name || !b.group || !b.pkgbuild_ref || !b.reason) return json({ error: "name, group, pkgbuild_ref and reason are required" }, 400);
   const arches = parseArches(b.arches);
   const { build, skipped } = splitByUpstream(await providedBy(env, b.name), arches, b.override);
   if (!build.length) return nothingToBuild(skipped);
-  const tasks = await enqueue(env, { name: b.name, group: b.group, arches: build, pkgbuild_ref: b.pkgbuild_ref, reason: b.reason, version: b.version ?? null, priority: b.priority });
-  const note = skipped.length ? `; ${skipped.map((s) => `${s.arch} skipped, ${s.source} ships ${s.version}`).join(", ")}` : "";
+  const tasks = await enqueue(env, { name: b.name, group: b.group, arches: build, pkgbuild_ref: b.pkgbuild_ref, reason: b.reason, version: b.version ?? null, priority: b.priority, publish: b.publish });
+  const note = (skipped.length ? `; ${skipped.map((s) => `${s.arch} skipped, ${s.source} ships ${s.version}`).join(", ")}` : "") + (b.publish === false ? "; dry run, nothing will be published" : "");
   await event(env, "enqueue", "ok", `${b.name}${b.version ? " " + b.version : ""}: ${tasks.length} build task(s) queued for ${build.join(", ")} (${b.reason})${note}`, { name: b.name, arches: build, skipped, pkgbuild_ref: b.pkgbuild_ref, reason: b.reason, tasks });
   return json({ tasks, arches: build, skipped }, 201);
 }
@@ -245,9 +247,12 @@ export async function handleComplete(id: number, request: Request, env: Env): Pr
   // The result must be in the pool. A rebuild of a version already stored
   // under the same filename pins the stored object (pkg-repo publish), so
   // the filename settles which sha256 the pool actually serves.
-  const indexed = await env.DB.prepare("SELECT sha256 FROM packages WHERE sha256 = ? OR (filename = ? AND repo_arch = ?) ORDER BY sha256 = ? DESC LIMIT 1")
-    .bind(b.sha256, b.filename, task.arch, b.sha256)
-    .first<{ sha256: string }>();
+  let indexed = task.publish === 0 ? { sha256: b.sha256 } : null;
+  if (!indexed) {
+    indexed = await env.DB.prepare("SELECT sha256 FROM packages WHERE sha256 = ? OR (filename = ? AND repo_arch = ?) ORDER BY sha256 = ? DESC LIMIT 1")
+      .bind(b.sha256, b.filename, task.arch, b.sha256)
+      .first<{ sha256: string }>();
+  }
   if (!indexed) return json({ error: "publish the package to the pool first (pkg-repo publish --source factory), then complete" }, 409);
   await env.DB.prepare(
     "UPDATE build_tasks SET status = 'done', finished_at = ?, result_sha256 = ?, result_filename = ?, result_version = ?, duration_ms = ?, log_tail = ?, lease_owner = NULL, lease_expires_at = NULL WHERE id = ?",
@@ -255,7 +260,7 @@ export async function handleComplete(id: number, request: Request, env: Env): Pr
     .bind(now(), indexed.sha256, b.filename, b.version ?? null, b.duration_ms ?? null, (b.log_tail ?? "").slice(-4000), id)
     .run();
   await env.DB.prepare("UPDATE build_workers SET last_seen = ?, current_task = NULL, builds_done = builds_done + 1 WHERE id = ?").bind(now(), b.worker).run();
-  await event(env, "build", "ok", `${task.name} ${b.version ?? ""} built for ${task.arch} by ${b.worker}${b.duration_ms ? " in " + Math.round(b.duration_ms / 60000) + " min" : ""}`, { task: id, arch: task.arch, sha256: indexed.sha256, filename: b.filename, worker: b.worker, attempts: task.attempts, duration_ms: b.duration_ms ?? null });
+  await event(env, "build", "ok", `${task.name} ${b.version ?? ""} built for ${task.arch} by ${b.worker}${b.duration_ms ? " in " + Math.round(b.duration_ms / 60000) + " min" : ""}${task.publish === 0 ? " (dry run, not published)" : ""}`, { task: id, arch: task.arch, sha256: indexed.sha256, filename: b.filename, worker: b.worker, attempts: task.attempts, duration_ms: b.duration_ms ?? null });
   return json({ task: id, status: "done" });
 }
 

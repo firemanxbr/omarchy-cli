@@ -173,14 +173,14 @@ heartbeat_loop() { # task-id
 }
 
 build() { # task json
-  local task="$1" id name group ref reason
+  local task="$1" id name group ref reason publish
   id="$(jq -r .task.id <<<"$task")"; name="$(jq -r .task.name <<<"$task")"; group="$(jq -r '.task.group' <<<"$task")"
-  ref="$(jq -r .task.pkgbuild_ref <<<"$task")"; reason="$(jq -r .task.reason <<<"$task")"
+  ref="$(jq -r .task.pkgbuild_ref <<<"$task")"; reason="$(jq -r .task.reason <<<"$task")"; publish="$(jq -r '.task.publish // 1' <<<"$task")"
   local dir="$WORK/task-$id" started=$SECONDS logfile="$WORK/task-$id.log"
   rm -rf "$dir"; mkdir -p "$dir/out"; chmod 777 "$dir" "$dir/out"
   printf 'name=%q\ngroup=%q\nref=%q\narch=%q\npool=%q\n' "$name" "$group" "$ref" "$ARCH" "$OMARCHY_POOL" > "$dir/meta.sh"
   cp "${BASH_SOURCE[0]}" "$dir/worker.sh"
-  log "task $id: $name for $ARCH at $ref ($reason) → fresh $IMAGE"
+  log "task $id: $name for $ARCH at $ref ($reason)$([[ $publish == 0 ]] && echo " — dry run") → fresh $IMAGE"
   heartbeat_loop "$id" & local beat=$!
   disown "$beat"
   local status=0
@@ -201,11 +201,16 @@ build() { # task json
       cp "$p" "$dir/final/"
     done
     local pkgs=("$dir"/final/*.pkg.tar.zst)
-    for p in "${pkgs[@]}"; do
-      gpg --batch --yes --detach-sign --local-user "$OMARCHY_GPG_KEYID" --output "$p.sig" "$p"
-    done
-    "$PKG_REPO" publish --source factory --ring edge --arch "$ARCH" --note "factory task $id: $name ($reason)" "${pkgs[@]}"
-    "$PKG_REPO" render --ring edge --arch "$ARCH" --sign "$OMARCHY_GPG_KEYID"
+    if [[ $publish == 0 ]]; then
+      # A dry run: keep the result on this host, publish nothing.
+      mkdir -p "$WORK/dry-run" && cp "${pkgs[@]}" "$WORK/dry-run/" && echo "dry run: result kept in $WORK/dry-run, not published"
+    else
+      for p in "${pkgs[@]}"; do
+        gpg --batch --yes --detach-sign --local-user "$OMARCHY_GPG_KEYID" --output "$p.sig" "$p"
+      done
+      "$PKG_REPO" publish --source factory --ring edge --arch "$ARCH" --note "factory task $id: $name ($reason)" "${pkgs[@]}"
+      "$PKG_REPO" render --ring edge --arch "$ARCH" --sign "$OMARCHY_GPG_KEYID"
+    fi
   ) >"$logfile" 2>&1
   status=$?
   set -e

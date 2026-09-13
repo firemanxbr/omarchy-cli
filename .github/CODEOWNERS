@@ -5,3 +5,4 @@ factory/pkgbuilds/community/   @firemanxbr
 factory/pkgbuilds/omarchy/     @firemanxbr
 factory/worker/                @firemanxbr
 worker/src/routes/factory.ts   @firemanxbr
+factory/pkgbuilds/sizing/       @firemanxbr

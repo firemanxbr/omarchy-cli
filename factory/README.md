@@ -56,6 +56,15 @@ PKGBUILD reviewed and merged ──▶ pool: build_requests / build_tasks (D1)
    worker that dies mid-build loses its lease and the task is requeued by the
    pool's scheduler within ten minutes.
 
+## Sizing a package before committing to it
+
+A **dry run** builds and measures but never signs, publishes or renders:
+*Actions → Factory enqueue → Run workflow* with `group/name`, `dry_run`
+(and `override` when an upstream source ships the name). The worker keeps
+the result under `~/.cache/omarchy-factory/dry-run/`; the Factory page shows
+the task with a *dry run* pill and how long it took. `factory/pkgbuilds/sizing/`
+holds recipes kept only for this (chromium, from Arch Linux ARM).
+
 ## Run a worker
 
 Anything with `podman` or `docker`, `gpg`, `jq` and `curl` is a worker: a
