@@ -25,19 +25,18 @@ const BODY = String.raw`
 
   <section id="pipeline">
     <h2>Pipeline <span id="pipeline-state" class="pill none" style="vertical-align:middle;margin-left:8px">checking</span></h2>
-    <p class="sub">The pool is fed and promoted by GitHub Actions workflows writing to the index through its API; a Cloudflare Worker serves the index and this page, the packages are static objects on R2. A snapshot every 30 minutes records the runs, what is executing right now and the runner minutes.</p>
+    <p class="sub">The pool is fed and promoted by its own jobs: the brain (a Cloudflare Worker with the index in D1) queues sync, promote, health, security and gc on schedule, project workers anywhere pull them with a per-job credential, and the packages are static objects on R2. A snapshot every 30 minutes records what ran, what is running now and the worker minutes.</p>
     <div class="tiles" id="systiles"></div>
     <div class="charts">
       <div class="chart"><h3>Pool growth <span>7 days</span></h3><div class="sub">bytes stored once, from the metrics snapshots</div><div id="c-pool"></div></div>
       <div class="chart"><h3>Imports per day <span>14 days</span></h3><div class="sub">packages brought into the pool by the sync runs</div><div id="c-imports"></div></div>
       <div class="chart"><h3>Health <span>14 days</span></h3><div class="sub">worst result per day, per ring and architecture</div><div id="c-health"></div></div>
-      <div class="chart"><h3>GitHub Actions <span>7 days</span></h3><div class="sub">runs per workflow: succeeded, failed, running now</div><div id="c-actions"></div></div>
       <div class="chart"><h3>Sync throughput <span>last runs</span></h3><div class="sub">MB/s per sync run, one runner each</div><div id="c-sync"></div></div>
-      <div class="chart"><h3>Runner minutes <span>per day</span></h3><div class="sub">GitHub-hosted runner time consumed</div><div id="c-minutes"></div></div>
+      <div class="chart"><h3>Worker minutes <span>per day</span></h3><div class="sub">time the project's workers spent on pool jobs</div><div id="c-minutes"></div></div>
       <div class="chart"><h3>Pool jobs <span>7 days</span></h3><div class="sub">sync, promote, health, gc pulled by workers: done, failed, waiting</div><div id="c-jobs"></div></div>
       <div class="chart"><h3>Factory builds <span>14 days</span></h3><div class="sub">per day: contributors' builds staged, the project's published, failed</div><div id="c-builds"></div></div>
     </div>
-    <div class="table-wrap"><table id="workflows"><thead><tr><th>Workflow</th><th>Last run</th><th class="num">Took</th><th class="num">Runs 7d</th><th class="num">Failed</th><th class="num">Running</th><th class="num">Minutes 7d</th></tr></thead><tbody></tbody></table></div>
+    <div class="table-wrap"><table id="workflows"><thead><tr><th>Job</th><th>Last</th><th class="num">Runs 7d</th><th class="num">Failed</th><th class="num">Running</th><th class="num">Minutes 7d</th></tr></thead><tbody></tbody></table></div>
   </section>
 
   <section>
@@ -193,7 +192,8 @@ const CHARTS = String.raw`  // ---- tiny SVG charts (no library; the page has no
   function worst(a, b) { var rank = { error: 3, warn: 2, ok: 1 }; return (rank[b] || 0) > (rank[a] || 0) ? b : a; }
 
   function renderSystem(d) {
-    var m = d.metrics, a = m && m.actions;
+    // Snapshots before v0.0.51 measured GitHub Actions ("actions"); now the pool's own jobs.
+    var m = d.metrics, a = m && (m.jobs || m.actions), w = m && m.workers;
     var pool = d.pool, refAny = pool.referenced_by_any_release || {}, rec = pool.reclaimable || { objects: 0, bytes: 0 };
     var ringBytes = d.rings.reduce(function (x, r) { return x + (r.bytes || 0); }, 0);
     var pending = Math.max(0, (pool.objects || 0) - (refAny.objects || 0));
@@ -203,16 +203,16 @@ const CHARTS = String.raw`  // ---- tiny SVG charts (no library; the page has no
     var nextRc = utcH < 6 ? 6 - utcH : 30 - utcH, nextStable = utcH < 9 ? 9 - utcH : 33 - utcH;
     var fmtH = function (h) { return h < 1 ? Math.round(h * 60) + " min" : Math.floor(h) + " h " + Math.round((h % 1) * 60) + " min"; };
     var tiles = [
-      ["Jobs running now", a ? num(a.running) : "—", a ? "GitHub Actions jobs executing or queued" : "no metrics snapshot yet"],
-      ["Runs, 7 days", a ? num(a.runs) : "—", a ? num(a.failures) + " failed · " + num(a.runs - a.failures - a.running) + " succeeded" : ""],
-      ["Runner minutes, 7 days", a ? num(a.minutes) : "—", "GitHub-hosted, x86_64 and arm64"],
+      ["Jobs running now", a ? num(a.running) : "—", a ? "pool jobs leased or queued" + (w ? " · " + num(w.alive) + " worker(s) alive, " + num(w.busy) + " busy" : "") : "no metrics snapshot yet"],
+      ["Jobs, 7 days", a ? num(a.runs) : "—", a ? num(a.failures) + " failed · " + num(a.runs - a.failures - a.running) + " succeeded" : ""],
+      ["Worker minutes, 7 days", a ? num(a.minutes) : "—", "on the project's workers, both architectures"],
       ["Sources", synced + " / " + expected, lastSyncEv ? "last sync " + ago(lastSyncEv.created_at) + " · every hour" : "no sync yet"],
       ["Next promotion", "edge → rc in " + fmtH(nextRc), "rc → stable in " + fmtH(nextStable) + " · 06:00 and 09:00 UTC daily"],
       ["Security data", sec.updated_at ? ago(sec.updated_at) : "never", num(sec.advisories) + " advisories · Arch + Debian trackers, KEV, EPSS · every 3 h" + (secEv && secEv.status !== "ok" ? " · last run " + secEv.status : "")],
       ["Stored once", bytes(pool.bytes), num(pool.objects) + " objects, one per sha256"],
       ["Served by the rings", bytes(ringBytes), "what three copied trees would hold"],
       ["Reclaimable", bytes(rec.bytes), num(rec.objects) + " objects past retention" + (pending ? " · " + num(pending) + " awaiting a release" : "")],
-      ["Snapshot", m ? ago(m.recorded_at) : "never", m ? "metrics every 30 minutes" : "the Metrics workflow has not run"]
+      ["Snapshot", m ? ago(m.recorded_at) : "never", m ? "the pool measures itself every 30 minutes" : "no snapshot yet"]
     ];
     tiles.forEach(function (t, i) { var el = $("#systiles"), cell = el.children[i]; if (!cell) { cell = document.createElement("div"); cell.className = "tile"; el.appendChild(cell); } setTile(cell, '<div class="k">' + t[0] + '</div><div class="v num">' + t[1] + '</div><div class="s">' + t[2] + '</div>'); });
 
@@ -230,27 +230,25 @@ const CHARTS = String.raw`  // ---- tiny SVG charts (no library; the page has no
     $("#c-health").innerHTML = heat(rows, days14, function (k, dd) { return cells[k + "/" + dd] || null; }) +
       '<div class="legend"><span><i style="background:' + C.green + '"></i>ok</span><span><i style="background:' + C.amber + '"></i>warn (nothing rendered)</span><span><i style="background:' + C.red + '"></i>error</span><span><i style="background:' + C.dim + ';opacity:.5"></i>no check</span></div>';
 
-    var wfs = (a && a.workflows ? a.workflows.slice() : []).sort(function (x, y) { return y.runs - x.runs; });
-    $("#c-actions").innerHTML = hbars(wfs.map(function (w) { return { label: w.name, note: num(w.runs) + " · " + num(w.minutes) + " min", parts: [{ v: w.success, color: C.green, name: "succeeded" }, { v: w.failure, color: C.red, name: "failed" }, { v: w.running, color: C.blue, name: "running" }, { v: Math.max(0, w.runs - w.success - w.failure - w.running), color: C.dim, name: "other" }] }; })) +
-      '<div class="legend"><span><i style="background:' + C.green + '"></i>succeeded</span><span><i style="background:' + C.red + '"></i>failed</span><span><i style="background:' + C.blue + '"></i>running</span><span><i style="background:' + C.dim + '"></i>cancelled / skipped</span></div>';
-
     var runs = (S.sync_runs || []).slice().reverse().filter(function (r) { return r.bytes && r.duration_ms; });
     $("#c-sync").innerHTML = bars(runs.map(function (r) { var mbs = Number(r.bytes) / 1048576 / (Number(r.duration_ms) / 1000); return { label: r.source.slice(0, 5) + (r.arch === "aarch64" ? "/arm" : ""), value: Math.round(mbs * 10) / 10, color: r.status === "ok" ? C.green : C.amber, title: r.source + " " + r.arch + " " + ago(r.created_at) + ": " + num(r.uploaded) + " packages, " + bytes(r.bytes) + " in " + dur(r.duration_ms) + " → " + (Math.round(mbs * 10) / 10) + " MB/s" + (r.concurrency ? " with " + r.concurrency + " workers" : "") }; }), function (v) { return v + " MB/s"; });
 
-    var daily = a && a.daily ? a.daily : [], byD = {}; daily.forEach(function (r) { byD[r.day] = r; });
-    var jd = S.jobs_daily || [], byKind = {};
-    jd.forEach(function (r) { var k = byKind[r.kind] = byKind[r.kind] || { done: 0, failed: 0, waiting: 0, ms: 0 }; if (r.status === "done") k.done += Number(r.n); else if (r.status === "failed" || r.status === "cancelled") k.failed += Number(r.n); else k.waiting += Number(r.n); k.ms += Number(r.ms || 0); });
+    var jd = S.jobs_daily || [], byKind = {}, byD = {};
+    jd.forEach(function (r) { var k = byKind[r.kind] = byKind[r.kind] || { done: 0, failed: 0, waiting: 0, ms: 0 }; if (r.status === "done") k.done += Number(r.n); else if (r.status === "failed" || r.status === "cancelled") k.failed += Number(r.n); else k.waiting += Number(r.n); k.ms += Number(r.ms || 0);
+      var dd = byD[r.day] = byD[r.day] || { runs: 0, failures: 0, ms: 0 }; dd.runs += Number(r.n); if (r.status === "failed") dd.failures += Number(r.n); dd.ms += Number(r.ms || 0); });
     $("#c-jobs").innerHTML = hbars(Object.keys(byKind).sort(function (a, b) { return (byKind[b].done + byKind[b].failed) - (byKind[a].done + byKind[a].failed); }).map(function (k) { var v = byKind[k]; return { label: k, note: num(v.done + v.failed + v.waiting) + " · " + Math.round(v.ms / 60000) + " min", parts: [{ v: v.done, color: C.green, name: "done" }, { v: v.failed, color: C.red, name: "failed" }, { v: v.waiting, color: C.blue, name: "waiting" }] }; })) +
       '<div class="legend"><span><i style="background:' + C.green + '"></i>done</span><span><i style="background:' + C.red + '"></i>failed</span><span><i style="background:' + C.blue + '"></i>queued / running</span></div>';
     var bd = S.builds_daily || [], byDay = {};
     bd.forEach(function (r) { var d = byDay[r.day] = byDay[r.day] || { staged: 0, published: 0, failed: 0 }; if (r.status === "staged") d.staged += Number(r.n); else if (r.status === "done") d.published += Number(r.n); else if (r.status === "failed") d.failed += Number(r.n); });
     $("#c-builds").innerHTML = bars(lastDays(14).map(function (dd) { var d = byDay[dd] || { staged: 0, published: 0, failed: 0 }; var t = d.staged + d.published + d.failed; return { label: dd.slice(5), value: t, color: d.failed > d.published + d.staged ? C.red : C.green, title: dd + ": " + d.staged + " staged, " + d.published + " published, " + d.failed + " failed" }; }), function (v) { return v + " build(s)"; });
-    $("#c-minutes").innerHTML = bars(lastDays(7).map(function (dd) { var r = byD[dd]; return { label: dd.slice(5), value: r ? Number(r.minutes) : 0, color: C.blue, title: dd + ": " + (r ? r.minutes + " min in " + r.runs + " runs, " + r.failures + " failed" : "no runs") }; }), function (v) { return v + " min"; });
+    $("#c-minutes").innerHTML = bars(lastDays(7).map(function (dd) { var r = byD[dd]; return { label: dd.slice(5), value: r ? Math.round(r.ms / 60000) : 0, color: C.blue, title: dd + ": " + (r ? Math.round(r.ms / 60000) + " min in " + r.runs + " jobs, " + r.failures + " failed" : "no jobs") }; }), function (v) { return v + " min"; });
 
-    pager("#workflows", wfs, function (w) {
-      var l = w.last || {}, st = l.conclusion || l.status || "—", cls = st === "success" ? "ok" : st === "failure" ? "error" : (st === "in_progress" || st === "queued") ? "warn" : "";
-      return '<tr><td>' + esc(w.name) + '</td><td><span class="dot ' + cls + '"></span>' + (l.url ? '<a class="run" href="' + esc(l.url) + '">' + esc(st) + '</a>' : esc(st)) + (l.created_at ? ' <span class="when">' + ago(l.created_at) + '</span>' : '') + '</td><td class="num">' + (l.seconds ? dur(l.seconds * 1000) : "") + '</td><td class="num">' + num(w.runs) + '</td><td class="num">' + (w.failure ? '<span style="color:var(--red)">' + num(w.failure) + '</span>' : '0') + '</td><td class="num">' + (w.running ? '<span style="color:var(--blue)">' + num(w.running) + '</span>' : '0') + '</td><td class="num">' + num(w.minutes) + '</td></tr>';
-    }, { empty: 'no metrics snapshot yet — the Metrics workflow records one every 30 minutes', n: 25 });
+    // One row per job kind: what the journal's latest entry says, and the week's totals.
+    var kinds = Object.keys(byKind).sort().map(function (k) { var v = byKind[k], l = latest(d.latest, k); return { kind: k, last: l, runs: v.done + v.failed + v.waiting, failed: v.failed, running: v.waiting, minutes: Math.round(v.ms / 60000) }; });
+    pager("#workflows", kinds, function (w) {
+      var l = w.last, st = l ? l.status : "—", cls = st === "ok" ? "ok" : st === "error" ? "error" : st === "warn" ? "warn" : "";
+      return '<tr><td>' + esc(w.kind) + '</td><td><span class="dot ' + cls + '"></span>' + esc(st) + (l ? ' <span class="when">' + ago(l.created_at) + '</span>' : '') + '</td><td class="num">' + num(w.runs) + '</td><td class="num">' + (w.failed ? '<span style="color:var(--red)">' + num(w.failed) + '</span>' : '0') + '</td><td class="num">' + (w.running ? '<span style="color:var(--blue)">' + num(w.running) + '</span>' : '0') + '</td><td class="num">' + num(w.minutes) + '</td></tr>';
+    }, { empty: 'no jobs yet — the pool queues them on schedule and project workers pull them', n: 25 });
   }
 
   function renderCoverage(d) {

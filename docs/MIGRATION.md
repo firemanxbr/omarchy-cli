@@ -197,7 +197,6 @@ gh workflow run sync.yml -f sources=all -f limit=0 -R NEWORG/omarchy-pool       
 gh workflow run promote.yml -f from=edge -f to=rc -f note="seed" -R NEWORG/omarchy-pool
 gh workflow run promote.yml -f from=rc -f to=stable -f soak_days=0 -f note="seed" -R NEWORG/omarchy-pool
 gh workflow run security.yml -R NEWORG/omarchy-pool
-gh workflow run metrics.yml  -R NEWORG/omarchy-pool
 ```
 
 From then on the hourly sync, the daily promotions (06:00 and 09:00 UTC), the

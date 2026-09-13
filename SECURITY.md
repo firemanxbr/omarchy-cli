@@ -96,5 +96,5 @@ check, and the security layer's advisories.
 
 1. ~~Per-job scoped tokens; project workers registered and trusted by a maintainer; pool jobs pulled by workers~~ — live (v0.0.40).
 2. ~~Signing inside the pool's Worker: the key becomes a Worker secret; `publish` and `render` stop signing on workers; the GitHub secret is deleted~~ — live (v0.0.49). A client's `.sig` for a database is superseded; a package signature must match the stored bytes.
-3. ~~Retire `FACTORY_TOKEN`~~ — gone (v0.0.50): every worker, the hosted fallback included, is a registration with its own token. Retire the publish token: maintainers use personal tokens, the pipeline's last workflows become jobs, GitHub keeps only the release.
+3. ~~Retire `FACTORY_TOKEN`~~ — gone (v0.0.50): every worker, the hosted fallback included, is a registration with its own token. ~~The pipeline's last workflows become jobs~~ — done (v0.0.51: `security` is a pulled job, the metrics snapshot is the brain's own). Retire the publish token: maintainers use personal tokens, the factory's enqueue/update workflows become jobs, GitHub keeps only the release.
 4. ~~Phase 2: maintainers by area, approval as a recorded action, rebuild at approval on project workers~~ — live (v0.0.42). A promotion gate for the `factory` source is unnecessary: nothing unapproved enters `edge`.

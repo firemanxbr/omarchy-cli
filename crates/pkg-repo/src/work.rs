@@ -21,6 +21,7 @@ use serde::Deserialize;
 use crate::client::Api;
 use crate::gate::{self, GateOptions, Verdict};
 use crate::ops;
+use crate::security::{self, FastTrackOptions, SecurityOptions};
 use crate::sync::SyncOptions;
 
 pub const REPO_URL: &str = "https://github.com/firemanxbr/omarchy-pool";
@@ -186,6 +187,7 @@ fn task_label(t: &Task) -> String {
             s(p, "ring")
         ),
         "promote" => format!("promote {} → {}", s(p, "from"), s(p, "to")),
+        "security" => "security: advisories, matches, fast-track".to_owned(),
         "render" | "health" => format!("{} {}/{}", t.kind, s(p, "ring"), s(p, "arch")),
         _ => format!("{} {}", t.kind, t.name),
     }
@@ -253,6 +255,7 @@ fn execute(opts: &WorkOptions, task: &Task, token: &Arc<Mutex<String>>) -> Resul
             })
         }
         "promote" => promote_job(opts, &job, task, token),
+        "security" => security_job(opts, &job, token),
         "health" => {
             let ring = s(&task.params, "ring");
             let arch = s(&task.params, "arch");
@@ -705,4 +708,151 @@ fn promote_job(
             unhealthy.join(", ")
         )),
     }
+}
+
+/// The public vulnerability feeds the security layer reads (SECURITY.md).
+const FEEDS: [(&str, &str); 4] = [
+    (
+        "arch.json",
+        "https://security.archlinux.org/issues/all.json",
+    ),
+    (
+        "debian.json",
+        "https://security-tracker.debian.org/tracker/data/json",
+    ),
+    (
+        "kev.json",
+        "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json",
+    ),
+    (
+        "epss.csv.gz",
+        "https://epss.cyentia.com/epss_scores-current.csv.gz",
+    ),
+];
+
+/// Fetches the feeds into the work dir; returns the security options that read them.
+fn fetch_feeds(opts: &WorkOptions, job: &Api) -> Result<SecurityOptions> {
+    let feeds = opts.work_dir.join("feeds");
+    std::fs::create_dir_all(&feeds)?;
+    for (name, url) in FEEDS {
+        job.download(url, &feeds.join(name))
+            .with_context(|| format!("fetching {url}"))?;
+    }
+    let epss = feeds.join("epss.csv");
+    let gz = std::fs::File::open(feeds.join("epss.csv.gz"))?;
+    let mut out = std::fs::File::create(&epss)?;
+    std::io::copy(&mut flate2::read::GzDecoder::new(gz), &mut out)?;
+    Ok(SecurityOptions {
+        arch_tracker: feeds.join("arch.json"),
+        debian: Some(feeds.join("debian.json")),
+        kev: Some(feeds.join("kev.json")),
+        epss: Some(epss),
+        rings: vec!["edge".into(), "rc".into(), "stable".into()],
+        dry_run: false,
+    })
+}
+
+/// Renders a fast-tracked ring and verifies it on both architectures;
+/// rolls it back to `previous` when health fails. Returns whether it was rolled back.
+fn verify_fast_track(
+    opts: &WorkOptions,
+    job: &Api,
+    token: &Arc<Mutex<String>>,
+    ring: &str,
+    previous: Option<u64>,
+) -> Result<bool> {
+    let arches = ["x86_64", "aarch64"];
+    for arch in arches {
+        ops::render(job, ring, arch, opts.sign.as_deref())?;
+    }
+    let mut unhealthy = Vec::new();
+    for arch in arches {
+        if !script(opts, token, "tests/health-check.sh", &[ring, arch])? {
+            unhealthy.push(arch);
+        }
+    }
+    if unhealthy.is_empty() {
+        return Ok(false);
+    }
+    let Some(prev) = previous else {
+        return Err(anyhow!(
+            "health failed on {} after a fast-track into {ring}, which had no previous release to roll back to",
+            unhealthy.join(", ")
+        ));
+    };
+    ops::rollback(
+        job,
+        ring,
+        prev,
+        Some(&format!(
+            "automatic rollback: health failed after a security fast-track ({})",
+            unhealthy.join(", ")
+        )),
+    )?;
+    for arch in arches {
+        ops::render(job, ring, arch, opts.sign.as_deref())?;
+    }
+    job.post_event(&serde_json::json!({ "kind": "rollback", "ring": ring, "source": "edge", "status": "warn",
+        "summary": format!("{ring}: security fast-track failed health on {}; rolled back to {prev}", unhealthy.join(", ")),
+        "payload": { "restored_release_id": prev, "unhealthy": unhealthy } }))?;
+    Ok(true)
+}
+
+/// The security job: fetch the feeds, match advisories against every ring,
+/// then fast-track clean versions of exposed packages from edge into rc and
+/// stable, render, verify on both architectures and roll back a ring whose
+/// health fails — what security.yml did on GitHub, as one pulled task.
+fn security_job(opts: &WorkOptions, job: &Api, token: &Arc<Mutex<String>>) -> Result<Outcome> {
+    let report = security::run(job, &fetch_feeds(opts, job)?)?;
+    let matched = format!(
+        "{} advisories, {} vulnerable / {} fixed matches, {} in KEV",
+        report.arch_advisories + report.debian_advisories,
+        report.matches_vulnerable,
+        report.matches_fixed,
+        report.kev
+    );
+    // Fast-track: rc and stable take clean versions from edge, skipping the soak.
+    let mut tracked = Vec::new();
+    let mut rolled_back = Vec::new();
+    for ring in ["rc", "stable"] {
+        let previous = ops::head(job, ring)?;
+        let ft = security::fast_track(
+            job,
+            &FastTrackOptions {
+                ring,
+                from: "edge",
+                min_severity: "medium",
+                dry_run: false,
+            },
+        )?;
+        if ft.fixes.is_empty() {
+            continue;
+        }
+        tracked.push(serde_json::json!({ "ring": ring, "fixes": ft.fixes.len() }));
+        if verify_fast_track(opts, job, token, ring, previous)? {
+            rolled_back.push(ring);
+        }
+    }
+    let summary = if tracked.is_empty() {
+        format!("{matched}; nothing to fast-track")
+    } else {
+        format!(
+            "{matched}; fast-tracked into {}{}",
+            tracked
+                .iter()
+                .map(|t| format!("{} ({} fix(es))", t["ring"], t["fixes"]))
+                .collect::<Vec<_>>()
+                .join(", "),
+            if rolled_back.is_empty() {
+                String::new()
+            } else {
+                format!("; rolled back {}", rolled_back.join(", "))
+            }
+        )
+    };
+    Ok(Outcome {
+        summary,
+        result: serde_json::json!({ "matches_vulnerable": report.matches_vulnerable, "matches_fixed": report.matches_fixed, "kev": report.kev,
+            "fast_tracked": tracked, "rolled_back": rolled_back }),
+    })
 }

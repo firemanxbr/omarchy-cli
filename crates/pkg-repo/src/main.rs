@@ -234,7 +234,7 @@ enum Command {
         #[arg(long, default_value = std::env::consts::ARCH)]
         arch: String,
         /// Job kinds to pull (repeatable).
-        #[arg(long = "kind", default_values_t = ["build".to_owned(), "sync".to_owned(), "render".to_owned(), "promote".to_owned(), "health".to_owned(), "gc".to_owned()])]
+        #[arg(long = "kind", default_values_t = ["build".to_owned(), "sync".to_owned(), "render".to_owned(), "promote".to_owned(), "health".to_owned(), "security".to_owned(), "gc".to_owned()])]
         kinds: Vec<String>,
         /// Free JSON shown on the Factory page, e.g. {"where":"droplet-1"}.
         #[arg(long, default_value = "{}")]

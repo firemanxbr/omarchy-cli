@@ -130,7 +130,7 @@ Server = https://pool.firemanxbr.org/$arch
       <tr><td>Pool</td><td>A Cloudflare R2 bucket with a custom domain. pacman reads packages and databases from it as plain static files; nothing runs in front of them.</td></tr>
       <tr><td>Index</td><td>A D1 (SQLite) database: one row per package object with its manifest, dependency edges, sonames; releases and ring heads; every event the pipeline records.</td></tr>
       <tr><td>API + this site</td><td>One Cloudflare Worker serving <code>/api/v1</code> and these pages.</td></tr>
-      <tr><td>Pipeline</td><td>GitHub Actions workflows: sync (hourly), promote (daily, evidence-gated), health (daily), GC (weekly), metrics (every 30 min), release (every merge). Their runs are linked from the journal.</td></tr>
+      <tr><td>Pipeline</td><td>Jobs the pool queues on its own clock and project workers pull: sync (hourly), promote (daily, evidence-gated), health (daily), security (every 3 h), GC (weekly); a metrics snapshot every 30 min by the pool itself. GitHub only releases the code (every merge).</td></tr>
       <tr><td>Factory</td><td>The build queue lives in the index (requests, tasks, leases); workers are containers anywhere — a laptop, a GitHub-hosted runner — that claim a task, build it in a fresh Arch container, sign, publish into <code>edge</code> and report. A lease that expires goes back to the queue.</td></tr>
       <tr><td>Tools</td><td><code>pkg-repo</code> (publisher: sync, promote, gate, render), <code>pkg-extract</code> (manifests), <code>omarchy-cli</code> (thin client) — Rust, built for both architectures on every release.</td></tr>
     </tbody></table></div>
