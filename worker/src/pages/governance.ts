@@ -12,7 +12,7 @@ const FILE = `${REPO_URL}/blob/main/factory/MAINTAINERS.toml`;
 
 const BODY = String.raw`
   <h1>Governance</h1>
-  <p class="lede">Two roles, one file, decisions by pull request. Anyone who signs in with GitHub is a <b>contributor</b>. The people listed in <a href="${FILE}"><code>factory/MAINTAINERS.toml</code></a> are the <b>maintainers</b> of the groups that list them. Nobody is above that — no owner, no administrator, no button that grants a role: the project belongs to its maintainers and contributors, and the pool reads the file on <code>main</code> every ten minutes and applies it.</p>
+  <p class="lede">Two roles, one file, decisions by pull request. Anyone who signs in with GitHub is a <b>contributor</b>. The people listed in <a href="${FILE}"><code>factory/MAINTAINERS.toml</code></a> are the <b>maintainers</b> of the groups that list them. Nobody is above that — no owner, no superuser, no button that grants a role: the project belongs to its maintainers and contributors, and the pool reads the file on <code>main</code> every ten minutes and applies it.</p>
 
   <section>
     <h2>Groups and their maintainers</h2>
