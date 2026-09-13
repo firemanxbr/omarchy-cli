@@ -13,7 +13,7 @@ import { sha256Hex } from "./contributors";
  *   GET /auth/github            → GitHub (state in a short-lived cookie)
  *   GET /auth/github/callback   → cookie omc, redirect to ?next (same origin)
  *   GET /auth/me                → {login, role, areas} or 401
- *   POST /auth/logout           → cookie cleared
+ *   GET|POST /auth/logout       → session invalidated, cookie cleared
  *
  * Needs GITHUB_OAUTH_CLIENT_ID (var) and GITHUB_OAUTH_CLIENT_SECRET (secret)
  * of a GitHub OAuth App whose callback URL is <dashboard>/auth/github/callback.
@@ -87,7 +87,10 @@ export async function handleAuthCallback(url: URL, request: Request, env: Env): 
   return new Response(null, { status: 302, headers });
 }
 
-export function handleLogout(url: URL): Response {
+/** Sign out: the session stops working on the server, not only in this browser. The CLI token is untouched. */
+export async function handleLogout(url: URL, request: Request, env: Env): Promise<Response> {
+  const session = cookieOf(request, "omc") ?? "";
+  if (session.startsWith("oms_")) await env.DB.prepare("UPDATE contributors SET session_hash = NULL WHERE session_hash = ?").bind(await sha256Hex(session)).run();
   const headers = new Headers({ location: "/" });
   headers.append("set-cookie", cookie("omc", "", 0, url.protocol === "https:"));
   return new Response(null, { status: 302, headers });

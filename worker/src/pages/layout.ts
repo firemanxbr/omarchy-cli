@@ -33,9 +33,12 @@ const CSS = String.raw`
   header nav a { color: var(--muted); text-decoration: none; padding-bottom: 2px; border-bottom: 1px solid transparent; }
   header nav a:hover { color: var(--text); }
   header nav a.active { color: var(--text); border-bottom-color: var(--green); }
-  header .account { font-size: 13px; color: var(--text); text-decoration: none; border: 1px solid var(--line); padding: 5px 11px; white-space: nowrap; }
+  header .account { font-size: 13px; border: 1px solid var(--line); padding: 5px 11px; white-space: nowrap; display: inline-flex; align-items: center; }
   header .account:hover { border-color: var(--green); }
+  header .account a { color: var(--text); text-decoration: none; }
   header .account .who { color: var(--muted); }
+  header .account #signout { color: var(--muted); margin-left: 10px; padding-left: 10px; border-left: 1px solid var(--line); }
+  header .account #signout:hover { color: var(--text); }
   .gh { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); text-decoration: none; font-size: 13.5px; }
   .gh:hover { color: var(--text); }
   .gh svg { width: 18px; height: 18px; fill: currentColor; }
@@ -281,7 +284,12 @@ const HELPERS = String.raw`
   function whoami(cb) {
     fetch("/auth/me", { cache: "no-store" }).then(function (r) { return r.ok ? r.json() : null; }).then(function (me) {
       ME = me; var a = $("#account"); if (!a) return;
-      if (me) { a.innerHTML = '<b>' + esc(me.login) + '</b> <span class="who">' + esc(me.role) + '</span>'; a.href = "/user/" + encodeURIComponent(me.login); a.title = "signed in with GitHub as " + me.login + (me.areas && me.areas.length ? " (" + me.areas.join(", ") + ")" : ""); }
+      if (me) {
+        a.innerHTML = '<b>' + esc(me.login) + '</b> <span class="who">' + esc(me.role) + '</span>'; a.href = "/user/" + encodeURIComponent(me.login); a.title = "signed in with GitHub as " + me.login + (me.areas && me.areas.length ? " (" + me.areas.join(", ") + ")" : "");
+        // Sign out is on every page: the cookie is cleared by /auth/logout,
+        // the older local-storage token (a CLI token pasted into the page) with it.
+        var out = $("#signout"); if (out) { out.hidden = false; out.onclick = function () { try { localStorage.removeItem("omc_token"); localStorage.removeItem("omc_login"); } catch (e) {} location.href = "/auth/logout"; return false; }; }
+      }
       if (cb) cb(me);
     }).catch(function () { if (cb) cb(null); });
   }
@@ -396,7 +404,7 @@ export function page(o: PageOptions): string {
   </nav>
   <span class="spacer"></span>
   <a id="status" class="status" href="/status" title="checking"><i class="led"></i><span>checking</span></a>
-  <a id="account" class="account" href="/auth/github?next=${escapeHtml(o.active === "review" ? "/review" : "/contribute")}" title="contributors and maintainers sign in with GitHub">Sign in</a>
+  <span class="account"><a id="account" href="/auth/github?next=${escapeHtml(o.active === "review" ? "/review" : "/contribute")}" title="contributors and maintainers sign in with GitHub">Sign in</a><a id="signout" href="/auth/logout" hidden title="sign out of the dashboard on this browser">sign out</a></span>
 </header>
 
 <main>
