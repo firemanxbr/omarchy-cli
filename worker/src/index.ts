@@ -270,7 +270,7 @@ async function api(method: string, path: string, url: URL, request: Request, env
   if ((m = path.match(/^\/factory\/tasks\/(\d+)\/artifacts$/)) && method === "GET") return handleStagingList(Number(m[1]), env);
   if ((m = path.match(/^\/factory\/tasks\/(\d+)\/artifacts\/([A-Za-z0-9][A-Za-z0-9._:+-]{0,200})$/)) && method === "GET") return handleStagingGet(Number(m[1]), m[2], env, requireAuthOk(request, env));
   if ((m = path.match(/^\/factory\/tasks\/(\d+)$/)) && method === "GET") return handleTask(Number(m[1]), env);
-  if (path.startsWith("/factory/") && (method === "POST" || method === "PUT" || method === "DELETE")) {
+  if (path.startsWith("/factory/") && (method === "POST" || method === "PUT" || method === "DELETE" || method === "PATCH")) {
     const r = await factoryRoutes(method, path, url, request, env);
     if (r) return r;
   }
