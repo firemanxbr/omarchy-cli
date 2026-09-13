@@ -266,7 +266,12 @@ export async function handleClaim(request: Request, env: Env, actor: Actor): Pro
   const kinds = trust === "project" ? wanted : ["build"];
   let scope = `kind IN (SELECT value FROM json_each(?))`;
   const binds: unknown[] = [JSON.stringify(kinds)];
-  if (trust !== "project") {
+  if (trust === "project") {
+    // Contributors' builds are contributors' business (their workers, or a
+    // shared community worker): a project worker never spends the project's
+    // compute on them. It takes pool jobs and project builds only.
+    scope += ` AND (kind != 'build' OR trust = 'project')`;
+  } else {
     scope += ` AND trust = 'community'`;
     if (actor.kind === "worker" && actor.w.mode === "dedicated") {
       scope += ` AND name IN (SELECT value FROM json_each(?))`;

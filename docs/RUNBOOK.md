@@ -200,10 +200,11 @@ tasks from the pool ([factory/README.md](../factory/README.md)). Day to day:
 - **A failed task**: the Factory page shows the error and the log tail
   (`GET /api/v1/factory/tasks/:id` has the full tail). Fix the PKGBUILD in a
   pull request; merging queues it again.
-- **Workers**: the scheduler starts a hosted runner when tasks wait and no
-  worker is alive; a laptop or VM runs the same container (README, *Run a
-  worker*). Every worker holds the publish token and the signing key: treat
-  the machine as you would the CI runner.
+- **Workers**: contributors' builds run on their workers; project builds
+  (approvals, `factory/pkgbuilds`) on project-trusted workers — today the
+  Mac (`pkg-repo work`, one process per architecture). No GitHub runner
+  builds packages; a queued build waits for a project worker. Project
+  workers hold the signing key until the pool signs its own objects.
 - **New upstream versions**: `factory-update.yml` (daily, 05:45 UTC from the
   scheduler) checks each PKGBUILD's GitHub upstream, bumps `pkgver`
   (`pkgrel=1`), refreshes checksums with `updpkgsums` and opens one pull
