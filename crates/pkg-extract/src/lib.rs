@@ -10,6 +10,7 @@
 //! It is used both by the CI publisher (`pkg-extract` binary) and by the local
 //! client when installing a package built from the AUR.
 
+pub mod components;
 pub mod elf;
 pub mod pkginfo;
 
@@ -49,6 +50,8 @@ struct ArchiveScan {
     pkginfo: Option<PkgInfo>,
     files: BTreeSet<String>,
     elf: Vec<(String, ElfFacts)>,
+    /// Go modules and crates.io crates the binaries embed (statically linked).
+    components: Vec<pkg_manifest::Component>,
 }
 
 /// Reads a package archive and produces its manifest.
@@ -139,6 +142,7 @@ fn scan_archive(path: &Path) -> Result<ArchiveScan, ExtractError> {
         }
         let mut bytes = prefix[..read].to_vec();
         entry.read_to_end(&mut bytes)?;
+        scan.components.extend(components::embedded(&bytes));
         match elf::inspect(&bytes) {
             Ok(Some(facts)) => scan.elf.push((path, facts)),
             Ok(None) => {}
@@ -274,6 +278,12 @@ fn merge(
         replaces: replaces.into_vec(),
         files: scan.files.iter().cloned().collect(),
         backup: info.all("backup").iter().map(|p| format!("/{p}")).collect(),
+        components: {
+            let mut c = scan.components.clone();
+            c.sort();
+            c.dedup();
+            c
+        },
     })
 }
 

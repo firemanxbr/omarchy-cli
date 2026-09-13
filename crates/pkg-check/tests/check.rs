@@ -72,6 +72,7 @@ fn manifest(name: &str, version: &str, requires: &[&str], provides: &[&str]) -> 
         replaces: vec![],
         files: vec![],
         backup: vec![],
+        components: vec![],
     }
 }
 

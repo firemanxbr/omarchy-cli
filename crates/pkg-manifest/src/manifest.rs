@@ -63,6 +63,24 @@ pub struct PackageManifest {
     /// Paths that must be preserved on upgrade/removal (`backup=` in `.PKGINFO`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub backup: Vec<String>,
+    /// What the package's statically linked binaries embed: the Go modules
+    /// (`debug/buildinfo`) and the crates.io crates (`cargo-auditable`) they
+    /// were built with. No soname reveals a vendored library; advisories
+    /// against these reach the package through this list.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub components: Vec<Component>,
+}
+
+/// A library a binary embeds, named the way its ecosystem's advisory feed does.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Component {
+    /// `Go` or `crates.io` (OSV's ecosystem names).
+    pub ecosystem: String,
+    /// The module path (`golang.org/x/crypto`) or the crate name (`openssl`).
+    pub name: String,
+    /// As the ecosystem writes it: `v0.21.0` for Go, `0.10.64` for a crate.
+    pub version: String,
 }
 
 /// Verbatim `.PKGINFO` values, in Arch dependency syntax, without ELF enrichment.
@@ -142,6 +160,7 @@ mod tests {
             replaces: vec![],
             files: vec!["/usr/bin/flea".into()],
             backup: vec![],
+            components: vec![],
         };
         let json = serde_json::to_string(&m).unwrap();
         let back: PackageManifest = serde_json::from_str(&json).unwrap();

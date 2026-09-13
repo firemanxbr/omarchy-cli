@@ -31,7 +31,7 @@ function job(scopes: string[]): Promise<string> {
 
 const sha = (s: string) => Array.from({ length: 64 }, (_, i) => s.charCodeAt(i % s.length).toString(16).slice(-1)).join("");
 
-interface Pkg { name: string; version: string; arch: string; requires?: string[]; provides?: string[]; pkgprovides?: string[] }
+interface Pkg { name: string; version: string; arch: string; requires?: string[]; provides?: string[]; pkgprovides?: string[]; components?: { ecosystem: string; name: string; version: string }[] }
 
 /** Puts a fake object in the pool and indexes its manifest, as the sync does. */
 async function index(source: string, repoArch: string, p: Pkg, token: string): Promise<string> {
@@ -42,7 +42,7 @@ async function index(source: string, repoArch: string, p: Pkg, token: string): P
   const r = await call("POST", `/packages?source=${source}&arch=${repoArch}`, {
     schema_version: 1, name: p.name, version: p.version, arch: p.arch, sha256: s, filename,
     size_download: bytes.length, size_installed: bytes.length * 3, description: `${p.name} for tests`,
-    provides: [p.name, ...(p.provides ?? [])], requires: p.requires ?? [], pkginfo: { provides: p.pkgprovides ?? [] }, files: [`usr/bin/${p.name}`],
+    provides: [p.name, ...(p.provides ?? [])], requires: p.requires ?? [], pkginfo: { provides: p.pkgprovides ?? [] }, files: [`usr/bin/${p.name}`], components: p.components ?? [],
   }, token);
   expect(r.status, JSON.stringify(r.json)).toBe(201);
   return s;
@@ -62,9 +62,16 @@ beforeAll(async () => {
   // x86_64: zlib 1.3, xz 5.8 (needs zlib), curl (needs xz); aarch64: zlib 1.3 and xz 5.8.
   shas["zlib-x86"] = await index("core", "x86_64", { name: "zlib", version: "1:1.3.2-3", arch: "x86_64", provides: ["libz.so=1-64"] }, pool);
   shas["xz-x86"] = await index("core", "x86_64", { name: "xz", version: "5.8.4-1", arch: "x86_64", requires: ["zlib"], provides: ["liblzma.so=5-64"] }, pool);
-  shas["curl-x86"] = await index("extra", "x86_64", { name: "curl", version: "8.10.0-1", arch: "x86_64", requires: ["xz", "libz.so=1-64"] }, pool);
+  shas["curl-x86"] = await index("extra", "x86_64", { name: "curl", version: "8.10.0-1", arch: "x86_64", requires: ["xz", "libz.so=1-64"], components: [{ ecosystem: "Go", name: "golang.org/x/crypto", version: "v0.21.0" }, { ecosystem: "crates.io", name: "openssl", version: "0.10.64" }] }, pool);
   shas["zlib-arm"] = await index("alarm", "aarch64", { name: "zlib", version: "1:1.3.2-3", arch: "aarch64" }, pool);
   shas["xz-arm"] = await index("alarm", "aarch64", { name: "xz", version: "5.8.4-1", arch: "aarch64", requires: ["zlib"] }, pool);
+});
+
+describe("embedded components", () => {
+  it("are indexed one row per module or crate, and come back with the package", async () => {
+    const rows = await env.DB.prepare("SELECT ecosystem, name, version FROM package_components ORDER BY ecosystem").all();
+    expect(rows.results).toEqual([{ ecosystem: "Go", name: "golang.org/x/crypto", version: "v0.21.0" }, { ecosystem: "crates.io", name: "openssl", version: "0.10.64" }]);
+  });
 });
 
 describe("POST /releases", () => {
