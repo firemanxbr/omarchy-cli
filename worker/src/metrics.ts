@@ -10,6 +10,20 @@ import { version } from "./meta";
 
 const EVERY_MINUTES = 30;
 
+/** `any` packages a ring serves, and how many of them (same name and version) it holds once per architecture — the extra bytes are the second copy. */
+export async function anyTwice(env: Env, ring: string): Promise<{ names: number; objects: number; bytes: number; twice: number; extra_bytes: number }> {
+  const all = await env.DB.prepare(
+    `SELECT COUNT(DISTINCT p.name) AS names, COUNT(*) AS objects, COALESCE(SUM(p.size_download), 0) AS bytes
+       FROM ring_packages rp JOIN packages p ON p.id = rp.package_id WHERE rp.ring = ? AND p.arch = 'any'`,
+  ).bind(ring).first<{ names: number; objects: number; bytes: number }>();
+  const dup = await env.DB.prepare(
+    `SELECT COUNT(*) AS twice, COALESCE(SUM(bytes), 0) AS extra_bytes FROM (
+       SELECT MIN(p.size_download) AS bytes FROM ring_packages rp JOIN packages p ON p.id = rp.package_id
+        WHERE rp.ring = ? AND p.arch = 'any' GROUP BY p.name, p.version HAVING COUNT(DISTINCT p.repo_arch) = 2)`,
+  ).bind(ring).first<{ twice: number; extra_bytes: number }>();
+  return { names: all?.names ?? 0, objects: all?.objects ?? 0, bytes: all?.bytes ?? 0, twice: dup?.twice ?? 0, extra_bytes: dup?.extra_bytes ?? 0 };
+}
+
 export async function snapshotMetrics(env: Env, now = new Date()): Promise<string> {
   const last = await env.DB.prepare("SELECT created_at FROM events WHERE kind = 'metrics' ORDER BY id DESC LIMIT 1").first<{ created_at: string }>();
   if (last && now.getTime() - Date.parse(last.created_at) < (EVERY_MINUTES - 1) * 60000) return "metrics: on time";
@@ -103,6 +117,10 @@ export async function snapshotMetrics(env: Env, now = new Date()): Promise<strin
     rings: rings.results,
     // OPR recipes by origin, per ring: the AUR-synced count is the one to drive to zero.
     provenance: { stable: await provenanceCounts(env, "stable"), rc: await provenanceCounts(env, "rc"), edge: await provenanceCounts(env, "edge") },
+    // Architecture-independent packages a ring stores twice: Arch Linux ARM
+    // rebuilds and re-signs `any` packages, so the same name and version is
+    // one object per architecture directory. What that costs the pool.
+    any: { stable: await anyTwice(env, "stable"), edge: await anyTwice(env, "edge") },
     version: version(env).version,
   };
   // Snapshots are worth 90 days of history; the charts read 7.
