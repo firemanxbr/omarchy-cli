@@ -112,6 +112,7 @@ const CSS = String.raw`
   .ring .head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
   .ring .name { font-family: Geist, sans-serif; font-size: 20px; font-weight: 600; }
   .ring .rel { color: var(--muted); font-size: 13px; }
+  button.small { font-size: 12px; padding: 2px 8px; margin-left: 6px; }
   .pill { display: inline-block; font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; padding: 2px 8px; border: 1px solid var(--line); color: var(--muted); }
   .pill.ok { color: var(--green); border-color: var(--green); }
   .pill.warn { color: var(--amber); border-color: var(--amber); }

@@ -179,8 +179,33 @@ enum Command {
     Releases {
         #[command(flatten)]
         remote: Remote,
+        /// The ring; with --all, every ring.
+        #[arg(long, required_unless_present = "all")]
+        ring: Option<String>,
+        /// Every ring at once (edge, rc, stable).
+        #[arg(long)]
+        all: bool,
+        /// Machine-readable: the API's rows as JSON, one object per ring.
+        #[arg(long)]
+        json: bool,
+    },
+    /// What changed between two releases of a ring: added, removed, upgraded.
+    Diff {
+        #[command(flatten)]
+        remote: Remote,
         #[arg(long)]
         ring: String,
+        /// The older release (default: the parent of `to`).
+        #[arg(long)]
+        from: Option<u64>,
+        /// The newer release (default: the ring's head).
+        #[arg(long)]
+        to: Option<u64>,
+        /// One architecture only.
+        #[arg(long)]
+        arch: Option<String>,
+        #[arg(long)]
+        json: bool,
     },
     /// Prints the id of a ring's current release (nothing, exit 1, if the ring is empty).
     Head {
@@ -421,7 +446,30 @@ fn main() -> Result<()> {
             to,
             note,
         } => ops::rollback(&api(&remote)?, &ring, to, note.as_deref()).map(|_| ()),
-        Command::Releases { remote, ring } => ops::releases(&api(&remote)?, &ring),
+        Command::Releases {
+            remote,
+            ring,
+            all,
+            json,
+        } => {
+            let rings: Vec<String> = if all {
+                ["edge", "rc", "stable"]
+                    .iter()
+                    .map(|r| (*r).to_owned())
+                    .collect()
+            } else {
+                vec![ring.unwrap_or_default()]
+            };
+            ops::releases(&api(&remote)?, &rings, json)
+        }
+        Command::Diff {
+            remote,
+            ring,
+            from,
+            to,
+            arch,
+            json,
+        } => ops::diff(&api(&remote)?, &ring, from, to, arch.as_deref(), json),
         Command::Head { remote, ring } => match ops::head(&api(&remote)?, &ring)? {
             Some(id) => {
                 println!("{id}");

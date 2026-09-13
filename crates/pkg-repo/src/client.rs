@@ -58,6 +58,11 @@ pub struct ReleaseCreated {
     pub release: Release,
     pub package_count: u64,
     pub size_download: u64,
+    /// Architectures this release serves exactly as its parent did: their
+    /// databases are already rendered, the pool carried the artifact rows
+    /// over, nothing to render for them.
+    #[serde(default)]
+    pub unchanged_arches: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]

@@ -333,7 +333,7 @@ fn execute(opts: &WorkOptions, task: &Task, token: &Arc<Mutex<String>>) -> Resul
                 to,
                 if note.is_empty() { None } else { Some(&note) },
             )?;
-            let rendered = render_both(opts, &job, &ring, &opts.arch)?;
+            let rendered = render_both(opts, &job, &ring, &opts.arch, &[])?;
             Ok(Outcome {
                 summary: format!(
                     "{ring} rolled back to release {to} as release {created}; rendered {}",
@@ -489,14 +489,30 @@ fn sync_options(
     }
 }
 
-fn render_both(opts: &WorkOptions, job: &Api, ring: &str, arch: &str) -> Result<Vec<String>> {
-    let mut rendered = ops::render(job, ring, arch, opts.sign.as_deref())?;
+/// Renders a ring's databases for `arch` and for the other architecture,
+/// except the ones the pool says a release left exactly as its parent
+/// (`unchanged`): those are already rendered at the live keys and the
+/// release carries their artifact rows.
+fn render_both(
+    opts: &WorkOptions,
+    job: &Api,
+    ring: &str,
+    arch: &str,
+    unchanged: &[String],
+) -> Result<Vec<String>> {
     let other = if arch == "aarch64" {
         "x86_64"
     } else {
         "aarch64"
     };
-    rendered.extend(ops::render(job, ring, other, opts.sign.as_deref())?);
+    let mut rendered = Vec::new();
+    for a in [arch, other] {
+        if unchanged.iter().any(|u| u == a) {
+            eprintln!("{ring}/{a}: unchanged since the parent release; databases kept");
+            continue;
+        }
+        rendered.extend(ops::render(job, ring, a, opts.sign.as_deref())?);
+    }
     Ok(rendered)
 }
 
@@ -526,7 +542,7 @@ fn sync_job(opts: &WorkOptions, job: &Api, task: &Task) -> Result<Outcome> {
         let o = sync_options(opts, &task.params, &keys, false);
         let report = ops::run_sync_report(job, &o)?;
         let rendered = if report.release.is_some() {
-            render_both(opts, job, &o.ring, &o.arch)?
+            render_both(opts, job, &o.ring, &o.arch, &report.unchanged_arches)?
         } else {
             Vec::new()
         };
@@ -595,8 +611,14 @@ fn sync_job(opts: &WorkOptions, job: &Api, task: &Task) -> Result<Outcome> {
             note: Some(&note),
             ..ReleaseRequest::default()
         })?;
-        releases.push(serde_json::json!({ "ring": ring, "id": created.release.id, "seq": created.release.seq, "packages": created.package_count }));
-        rendered.extend(render_both(opts, job, ring, &arch)?);
+        releases.push(serde_json::json!({ "ring": ring, "id": created.release.id, "seq": created.release.seq, "packages": created.package_count, "unchanged": created.unchanged_arches }));
+        rendered.extend(render_both(
+            opts,
+            job,
+            ring,
+            &arch,
+            &created.unchanged_arches,
+        )?);
     }
     Ok(Outcome {
         summary: format!(

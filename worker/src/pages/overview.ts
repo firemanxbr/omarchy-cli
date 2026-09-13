@@ -47,8 +47,9 @@ const BODY = String.raw`
 
   <section>
     <h2>Ring history</h2>
-    <p class="sub">A ring's history is append-only: every row is an immutable selection of packages (a release), <em>head</em> is the one being served, <em>parent</em> the previous head of the same ring, <em>from</em> the release a promotion or rollback copied. Pointing a ring at an earlier row is how a rollback works.</p>
-    <div class="table-wrap"><table id="releases"><thead><tr><th>Release</th><th>Ring</th><th>Seq</th><th class="num">Packages</th><th>Parent</th><th>From</th><th>Note</th><th>Created</th></tr></thead><tbody></tbody></table></div>
+    <p class="sub">A ring's history is append-only: every row is an immutable selection of packages (a release), <em>head</em> is the one being served, <em>parent</em> the previous head of the same ring, <em>from</em> the release a promotion or rollback copied. Pointing a ring at an earlier row is how a rollback works — <em>diff</em> shows what a row changed against its parent; a signed-in maintainer can <em>roll back</em> a ring to any earlier row still inside retention (a job a project worker runs: the index write, both architectures re-rendered, health-checked).</p>
+    <p class="sub" id="rb-state" hidden></p>
+    <div class="table-wrap"><table id="releases"><thead><tr><th>Release</th><th>Ring</th><th>Seq</th><th class="num">Packages</th><th>Parent</th><th>From</th><th>Note</th><th>Created</th><th></th></tr></thead><tbody></tbody></table></div>
   </section>
 `;
 
@@ -61,7 +62,11 @@ __CHARTS__
     edge: { title: "For CI and developers", text: "What upstream published in the last hour, signature-verified and rendered, nothing else checked yet. The same packages Arch serves, one hour later." }
   };
 
+  var LAST = null;
+  // The roll back buttons depend on who is signed in, which arrives on its own: draw the history again then.
+  whoami(function (me) { if (me && LAST) render(LAST); });
   function render(d) {
+    LAST = d;
     var stable = d.rings.filter(function (r) { return r.ring === "stable"; })[0] || {};
     var byArch = function (r, arch) { return (r.sources || []).filter(function (s) { return s.arch === arch; }).reduce(function (n, s) { return n + s.packages; }, 0); };
     var lastSync = latest(d.events, "sync");
@@ -101,17 +106,35 @@ __CHARTS__
 
     pager("#events", d.events, function (e) {
       var run = e.payload && e.payload.ci && e.payload.ci.run_url;
-      return '<tr><td><span class="dot ' + e.status + '"></span>' + e.status + '</td><td><span class="kind">' + esc(e.kind) + '</span></td><td>' + esc(e.ring || "") + '</td><td>' + esc(e.source || "") + '</td><td>' + (run ? '<a class="run" href="' + esc(run) + '" title="open the run">' + esc(e.summary) + '</a>' : esc(e.summary)) + '</td><td class="num">' + dur(e.duration_ms) + '</td><td class="when" title="' + esc(e.created_at) + '">' + ago(e.created_at) + '</td></tr>';
+      // A promotion or rollback made a release: link what it changed.
+      var rid = e.payload && e.payload.release_id, diff = "";
+      if (rid && e.ring && (e.kind === "promote" || e.kind === "rollback" || e.kind === "sync" || e.kind === "fast-track")) diff = ' <a class="run" href="/diff?ring=' + esc(e.ring) + '&to=' + rid + '" title="what release ' + rid + ' changed">diff</a>';
+      return '<tr><td><span class="dot ' + e.status + '"></span>' + e.status + '</td><td><span class="kind">' + esc(e.kind) + '</span></td><td>' + esc(e.ring || "") + '</td><td>' + esc(e.source || "") + '</td><td>' + (run ? '<a class="run" href="' + esc(run) + '" title="open the run">' + esc(e.summary) + '</a>' : esc(e.summary)) + diff + '</td><td class="num">' + dur(e.duration_ms) + '</td><td class="when" title="' + esc(e.created_at) + '">' + ago(e.created_at) + '</td></tr>';
     }, { empty: 'nothing yet' });
 
+    var heads = {}; (d.releases || []).forEach(function (r) { if (r.is_head) heads[r.ring] = r.id; });
     pager("#releases", d.releases, function (r) {
-      return '<tr><td>' + r.id + (r.is_head ? ' <span class="pill ok">head</span>' : '') + '</td><td>' + r.ring + '</td><td>#' + r.seq + '</td><td class="num">' + num(r.package_count) + '</td><td>' + (r.parent_id || '—') + '</td><td>' + (r.source_id || '—') + '</td><td>' + esc(r.note || '') + '</td><td class="when" title="' + esc(r.created_at) + '">' + ago(r.created_at) + '</td></tr>';
+      var diff = r.parent_id ? '<a class="run" href="/diff?ring=' + r.ring + '&from=' + r.parent_id + '&to=' + r.id + '">diff</a>' : '';
+      var rb = ME && ME.role === "maintainer" && !r.is_head && heads[r.ring] ? ' <button type="button" class="small" data-rollback="' + r.id + '" data-ring="' + r.ring + '" title="point ' + r.ring + ' back at release ' + r.id + '">roll back</button>' : '';
+      return '<tr><td>' + r.id + (r.is_head ? ' <span class="pill ok">head</span>' : '') + '</td><td>' + r.ring + '</td><td>#' + r.seq + '</td><td class="num">' + num(r.package_count) + '</td><td>' + (r.parent_id || '—') + '</td><td>' + (r.source_id || '—') + '</td><td>' + esc(r.note || '') + '</td><td class="when" title="' + esc(r.created_at) + '">' + ago(r.created_at) + '</td><td>' + diff + rb + '</td></tr>';
     }, { empty: 'no releases yet' });
 
     renderCoverage(d);
     renderSystem(d);
   }
 
+  // A rollback is a job like the scheduler's: queued here with the maintainer's session, run by a project worker.
+  document.addEventListener("click", function (ev) {
+    var b = ev.target.closest ? ev.target.closest("button[data-rollback]") : null; if (!b) return;
+    var ring = b.getAttribute("data-ring"), to = b.getAttribute("data-rollback");
+    var note = prompt("Roll " + ring + " back to release " + to + "? Say why, for the journal:"); if (!note) return;
+    b.disabled = true;
+    busy(fetch("/api/v1/factory/jobs", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind: "rollback", params: { ring: ring, to: to, note: note } }) })).then(function (r) { return r.json(); }).then(function (j) {
+      var el = $("#rb-state"); el.hidden = false;
+      el.innerHTML = j.error ? '<span class="pill error">refused</span> ' + esc(j.error) : '<span class="pill ok">queued</span> rollback of <b>' + esc(ring) + '</b> to release ' + esc(to) + ' is task #' + j.task + '; a project worker will run it within a minute — the <a href="/factory">Factory</a> page follows it, the journal above records the result.';
+      b.disabled = false;
+    }).catch(function (e) { b.disabled = false; alert("failed: " + e); });
+  });
   liveStats(render, 60000);
 `;
 

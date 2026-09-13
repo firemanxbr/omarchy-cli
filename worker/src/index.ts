@@ -16,6 +16,7 @@
  *   GET  /api/v1/packages/:sha256
  *   GET  /api/v1/releases/:ring[?fields=summary|include=files][&arch=&limit=&offset=&release_id=]
  *   GET  /api/v1/releases/:ring/history
+ *   GET  /api/v1/releases/:ring/diff?from=&to=&arch=  added / removed / upgraded between two releases
  *   POST /api/v1/releases                          create / promote / roll back
  *   PUT  /api/v1/releases/:id/artifacts/:kind?repo=&arch=
  *   GET  /api/v1/search?q=&ring=&arch=          package search within a ring
@@ -39,7 +40,7 @@
 
 import { handleMultipartComplete, handleMultipartCreate, handleMultipartPart, handlePutPool, handlePutPoolSig } from "./routes/pool";
 import { handleGetPackage, handleKnownPackages, handlePostPackage } from "./routes/packages";
-import { handleCreateRelease, handleGetRelease, handleReleaseHistory, handlePutArtifact } from "./routes/releases";
+import { handleCreateRelease, handleGetRelease, handleReleaseHistory, handlePutArtifact, handleReleaseDiff } from "./routes/releases";
 import { handleGraph } from "./routes/graph";
 import { handlePackage, handlePackageFiles, handleSearch } from "./routes/search";
 import { handlePrune, handlePutAdvisories, handlePutMatches, handleSecurity } from "./routes/security";
@@ -76,6 +77,7 @@ import { getStartedHtml } from "./pages/get-started";
 import { howItWorksHtml } from "./pages/how-it-works";
 import { statusHtml } from "./pages/status";
 import { apiDocsHtml } from "./pages/api-docs";
+import { diffHtml } from "./pages/diff";
 import { packageHtml, packagesHtml } from "./pages/packages";
 import { securityHtml } from "./pages/security";
 import { factoryHtml } from "./pages/factory";
@@ -166,6 +168,7 @@ export default {
         return Response.redirect(url.toString(), 301);
       }
       if (path === "/status") return html(statusHtml(env.POOL_URL, version(env)));
+      if (path === "/diff") return html(diffHtml(env.POOL_URL, version(env)));
       if (path === "/api" || path === "/api/") return html(apiDocsHtml(env.POOL_URL, version(env)));
       if (path === "/packages") return html(packagesHtml(env.POOL_URL, version(env)));
       if (path === "/security") return html(securityHtml(env.POOL_URL, version(env)));
@@ -410,6 +413,9 @@ async function api(method: string, path: string, url: URL, request: Request, env
   }
   if ((m = path.match(/^\/releases\/([a-z]+)\/history$/)) && method === "GET") {
     return handleReleaseHistory(m[1], env);
+  }
+  if ((m = path.match(/^\/releases\/([a-z]+)\/diff$/)) && method === "GET") {
+    return handleReleaseDiff(m[1], url, env);
   }
   if ((m = path.match(/^\/releases\/(\d+)\/artifacts\/(db|db\.sig|files|files\.sig)$/)) && method === "PUT") {
     return (await authorizeArtifacts(request, env, Number(m[1]))) ?? handlePutArtifact(Number(m[1]), m[2], url, request, env);
