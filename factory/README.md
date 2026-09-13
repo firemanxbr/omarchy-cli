@@ -65,6 +65,66 @@ PKGBUILD reviewed and merged ──▶ pool: build_requests / build_tasks (D1)
 The Factory page follows a request through every stage
 (`requested → drafting → validating → review → approved`).
 
+## Contribute a package
+
+You have something to package for Omarchy. No permission needed, nothing
+spent by the project until a maintainer approves a build: you register the
+package, you run the worker (on your machine, with your tokens), the result
+waits in your staging workspace.
+
+```bash
+API=https://pkgs.firemanxbr.org/api/v1
+
+# 1. Who you are — a GitHub token is used once to read your login and never stored
+#    (a fine-grained token with no permissions is enough; `gh auth token` works).
+curl -s -X POST $API/factory/register -H 'content-type: application/json' \
+  -d "{\"github_token\":\"$(gh auth token)\"}"
+#    → {"login":"you","token":"omc_…"}   keep it: export OMC=omc_…
+
+# 2. Register the package: the pool checks nobody ships it, detects what it is.
+curl -s -X POST $API/factory/packages -H "authorization: Bearer $OMC" -H 'content-type: application/json' \
+  -d '{"url":"https://github.com/you/project"}'
+#    optional: "name", "group" (community|omarchy), "arches", "release" (a tag), "pkgbuild_path" (a PKGBUILD in your repo)
+
+# 3. Register a worker — dedicated to your packages, or shared with everyone.
+curl -s -X POST $API/factory/workers -H "authorization: Bearer $OMC" -H 'content-type: application/json' \
+  -d '{"name":"laptop","arch":"aarch64","mode":"dedicated"}'
+#    → {"worker":"you-laptop-ab12","token":"omw_…"}   shown once
+
+# 4. Queue the build(s).
+curl -s -X POST $API/factory/packages/project/build -H "authorization: Bearer $OMC"
+
+# 5. Run the worker: the project's signed image, one fresh container per task.
+WORKER_ID=you-laptop-ab12 FACTORY_TOKEN=omw_… ANTHROPIC_API_KEY=sk-… \
+  podman compose -f factory/image/compose.yml up -d        # or docker compose
+#    or, one task by hand:
+podman run --rm -e WORKER_ID=you-laptop-ab12 -e FACTORY_TOKEN=omw_… ghcr.io/firemanxbr/omarchy-packaging:latest
+
+# 6. Follow it.
+curl -s $API/factory/me -H "authorization: Bearer $OMC"       # your packages, workers, tasks, staging quota
+```
+
+What happens: the worker claims your task (a dedicated worker only ever
+sees your packages; a shared one takes any community task), builds it in the
+container — from the `PKGBUILD` in your repository if you named one, else a
+PKGBUILD **drafted** from the project (with your `ANTHROPIC_API_KEY` your agent
+writes it and corrects it from the build log, up to three times; without a
+key a template covers Rust, Go, CMake, Meson, autotools and release
+binaries) — and uploads the package, the PKGBUILD, `PKGINFO` and the build
+log to `staging/<you>/<package>/<task>/`. The task is then **staged**: the
+Factory page lists it, the log and the PKGBUILD are public, the package is
+for maintainers. Nothing you build reaches users until a maintainer of the
+group approves it — and the approved bytes are rebuilt on project
+infrastructure (phase 2).
+
+Limits: 10 tasks queued or building and 2 GB of staging per contributor;
+staging objects expire after 30 days. A worker token is revocable
+(`DELETE /factory/workers/<id>`); registering again replaces your contributor
+token. `cosign verify ghcr.io/firemanxbr/omarchy-packaging:latest
+--certificate-identity-regexp github.com/firemanxbr/omarchy-pool
+--certificate-oidc-issuer https://token.actions.githubusercontent.com` checks
+the image is the project's.
+
 ## Sizing a package before committing to it
 
 A **dry run** builds and measures but never signs, publishes or renders:
@@ -123,7 +183,8 @@ The factory touches the pool through four things, all versioned in the API:
 |---|---|
 | `GET /api/v1/package/:name` | who ships a name already (the guard) |
 | `POST /api/v1/factory/{requests,enqueue}` · `/requests/:id/{approve,reject}` · `/tasks/:id/cancel` (publish token) · `GET /factory/built` | maintainers and the enqueue workflow |
-| `POST /api/v1/factory/claim` · `/tasks/:id/{heartbeat,complete,fail}` (factory token) | the worker protocol |
+| `POST /api/v1/factory/claim` · `/tasks/:id/{heartbeat,complete,fail}` (FACTORY_TOKEN, or a registered worker's token) | the worker protocol |
+| `POST /api/v1/factory/register` · `/factory/packages[/:name/build]` · `/factory/workers` (contributor token) · `PUT /factory/tasks/:id/artifacts/:file` (worker token) · `GET /factory/packages`, `/factory/me` | contributors: registry, own workers, staging uploads |
 | `pkg-repo publish --source factory --ring edge --arch …` · `pkg-repo render` | how a result enters the pool: as a source like any other |
 
 Nothing in the pool knows how a package is built, where a worker runs or what a
@@ -156,7 +217,9 @@ requeues leases past `lease_expires_at`.
 ```
 factory/
   README.md                       this file
-  worker/omarchy-build-worker.sh  the worker: claims on the host, builds each task in a fresh container
+  worker/omarchy-build-worker.sh  the worker: claims on the host, builds each task in a fresh container;
+                                  `--container` is the contributor's one-task-per-container mode
+  image/Containerfile             the Omarchy Packaging image (signed, both architectures); image/compose.yml runs it
   bin/pkgbuild-meta               PKGBUILD → arches and version, without executing it as you
   pkgbuilds/<group>/<name>/       reviewed PKGBUILDs; CODEOWNERS per group
 .github/workflows/factory-enqueue.yml   merged PKGBUILD → tasks

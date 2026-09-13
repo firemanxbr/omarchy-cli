@@ -38,7 +38,8 @@ const SEARCH_SCRIPT = String.raw`
     var term = $("#q").value.trim(), my = ++seq;
     if (term.length < 2) { $("#hint").textContent = "Type at least two characters."; $("#results tbody").innerHTML = ""; return; }
     $("#hint").textContent = "Searching " + ring + " · " + arch + "…";
-    fetch("/api/v1/search?q=" + encodeURIComponent(term) + "&ring=" + ring + "&arch=" + arch + "&limit=100").then(function (r) { return r.json(); }).then(function (d) {
+    skeletonRows("#results", 5, 5);
+    busy(fetch("/api/v1/search?q=" + encodeURIComponent(term) + "&ring=" + ring + "&arch=" + arch + "&limit=100")).then(function (r) { return r.json(); }).then(function (d) {
       if (my !== seq) return;
       var rows = d.packages || [];
       $("#hint").textContent = rows.length ? rows.length + (rows.length === 100 ? "+" : "") + " package(s) in " + ring + " · " + arch : "Nothing in " + ring + " · " + arch + " matches “" + term + "”.";
@@ -140,7 +141,7 @@ const PACKAGE_SCRIPT = String.raw`
     data = d; ring = d.shown_ring;
     document.querySelectorAll(".ring-name").forEach(function (e) { e.textContent = ring; });
     var m = d.manifest || {}, p = d.package;
-    $("#desc").textContent = m.description || "";
+    $("#desc").className = "lede"; $("#desc").textContent = m.description || "";
     $("#meta").innerHTML = [
       m.url ? '<a href="' + esc(m.url) + '">' + esc(m.url.replace(/^https?:\/\//, "")) + '</a>' : "",
       (m.licenses || []).length ? "license " + esc((m.licenses || []).join(", ")) : "",
@@ -184,7 +185,7 @@ const PACKAGE_SCRIPT = String.raw`
 
   $("#load-files").onclick = function () {
     $("#files").textContent = "loading…";
-    fetch("/api/v1/package/" + encodeURIComponent(name) + "/files?ring=" + ring + "&arch=" + arch).then(function (r) { return r.json(); }).then(function (d) {
+    busy(fetch("/api/v1/package/" + encodeURIComponent(name) + "/files?ring=" + ring + "&arch=" + arch)).then(function (r) { return r.json(); }).then(function (d) {
       var files = (d.files || []).filter(function (f) { return !/\/$/.test(f); });
       $("#files").className = ""; $("#files").textContent = files.length + " files\n" + files.join("\n");
       $("#load-files").style.display = "none";
@@ -193,7 +194,8 @@ const PACKAGE_SCRIPT = String.raw`
 
   // The index can be busy during a bulk import; a transient 5xx gets retried.
   function loadPackage(attempt) {
-    fetch("/api/v1/package/" + encodeURIComponent(name) + "?ring=" + ring + "&arch=" + arch).then(function (r) {
+    if (attempt === 1) { skeletonRows("#rings", 6, 3); skeletonText("#desc"); ["#graph", "#sec-own", "#sec-exposed"].forEach(function (id) { var el = $(id); if (el && !el.innerHTML.trim()) el.innerHTML = '<div class="empty loading">Resolving dependencies and advisories</div>'; }); }
+    busy(fetch("/api/v1/package/" + encodeURIComponent(name) + "?ring=" + ring + "&arch=" + arch)).then(function (r) {
       if (r.status >= 500) throw new Error("index busy (HTTP " + r.status + ")");
       return r.json();
     }).then(function (d) {

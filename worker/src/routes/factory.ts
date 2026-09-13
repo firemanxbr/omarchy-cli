@@ -1,5 +1,6 @@
 import { json, type Env } from "../index";
 import { isRepoArch } from "../r2";
+import type { WorkerIdentity } from "./contributors";
 
 /**
  * The factory's brain. Cloudflare is the source of truth for package
@@ -52,7 +53,14 @@ interface TaskRow {
   created_at: string;
   /** 0 = dry run: build and report, never publish. */
   publish: number;
+  /** project: the worker signs and publishes · community: the result goes to staging for a maintainer. */
+  trust: string;
+  owner: string | null;
+  staged_prefix: string | null;
 }
+
+/** Who is calling a worker endpoint: a project worker (FACTORY_TOKEN) or a registered one (own token). */
+export type Actor = { kind: "project" } | { kind: "worker"; w: WorkerIdentity };
 
 const now = () => new Date().toISOString();
 const plusMinutes = (m: number) => new Date(Date.now() + m * 60000).toISOString();
@@ -235,46 +243,100 @@ async function touchWorker(env: Env, w: { worker: string; arch: string; hostname
     .run();
 }
 
-export async function handleClaim(request: Request, env: Env): Promise<Response> {
+export async function handleClaim(request: Request, env: Env, actor: Actor): Promise<Response> {
   const b = (await request.json()) as { worker?: string; arch?: string; hostname?: string; labels?: unknown; version?: string };
-  if (!b.worker || !b.arch || !isRepoArch(b.arch)) return json({ error: "worker and arch (x86_64|aarch64) are required" }, 400);
+  if (!b.arch || !isRepoArch(b.arch)) return json({ error: "arch (x86_64|aarch64) is required" }, 400);
+  // A registered worker is its registration: id, owner and what it may build.
+  const workerId = actor.kind === "worker" ? actor.w.id : b.worker;
+  if (!workerId) return json({ error: "worker is required" }, 400);
+  if (actor.kind === "worker" && actor.w.arch !== b.arch) return json({ error: `this worker is registered for ${actor.w.arch}` }, 400);
+  // What this worker may claim. Project workers take anything; a shared
+  // community worker takes community tasks; a dedicated one only its owner's
+  // packages. Community results never reach the pool, so a contributor's
+  // worker can never build for the project by accident.
+  let scope = "1";
+  const binds: unknown[] = [];
+  if (actor.kind === "worker") {
+    if (actor.w.mode === "dedicated") {
+      const names = actor.w.packages.length ? actor.w.packages : ["-"];
+      scope = `trust = 'community' AND name IN (SELECT value FROM json_each(?))`;
+      binds.push(JSON.stringify(names));
+    } else {
+      scope = `trust = 'community'`;
+    }
+  }
   // One statement claims the next queued task of this architecture: D1
   // serialises writes, so two workers never get the same one.
   const task = await env.DB.prepare(
-    `UPDATE build_tasks SET status = 'leased', lease_owner = ?1, lease_expires_at = ?2, started_at = ?3, attempts = attempts + 1, error = NULL
-      WHERE id = (SELECT id FROM build_tasks WHERE status = 'queued' AND arch = ?4 ORDER BY priority, id LIMIT 1) AND status = 'queued'
+    `UPDATE build_tasks SET status = 'leased', lease_owner = ?, lease_expires_at = ?, started_at = ?, attempts = attempts + 1, error = NULL
+      WHERE id = (SELECT id FROM build_tasks WHERE status = 'queued' AND arch = ? AND ${scope} ORDER BY priority, id LIMIT 1) AND status = 'queued'
       RETURNING *`,
   )
-    .bind(b.worker, plusMinutes(LEASE_MINUTES), now(), b.arch)
+    .bind(workerId, plusMinutes(LEASE_MINUTES), now(), b.arch, ...binds)
     .first<TaskRow>();
-  await touchWorker(env, { worker: b.worker, arch: b.arch, hostname: b.hostname, labels: b.labels, version: b.version }, task?.id ?? null);
+  await touchWorker(env, { worker: workerId, arch: b.arch, hostname: b.hostname, labels: b.labels, version: b.version }, task?.id ?? null);
   if (!task) return new Response(null, { status: 204 });
-  return json({ task, lease_minutes: LEASE_MINUTES, repo: "https://github.com/firemanxbr/omarchy-pool", pkgbuild_path: `factory/pkgbuilds/${task.group}/${task.name}` });
+  if (task.trust === "community") {
+    await env.DB.prepare("UPDATE factory_packages SET status = 'building', detail = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE name = ?").bind(`building on ${workerId} (${task.arch})`, task.name).run();
+  }
+  return json({
+    task,
+    lease_minutes: LEASE_MINUTES,
+    repo: "https://github.com/firemanxbr/omarchy-pool",
+    pkgbuild_path: task.pkgbuild_ref.includes(":") || task.pkgbuild_ref.startsWith("draft") ? null : `factory/pkgbuilds/${task.group}/${task.name}`,
+    // Where a community result goes: PUT these back with the worker token.
+    upload: task.trust === "community" ? `/api/v1/factory/tasks/${task.id}/artifacts/<filename>` : null,
+  });
 }
 
-async function owned(env: Env, id: number, worker: string): Promise<TaskRow | Response> {
+async function owned(env: Env, id: number, worker: string | undefined, actor: Actor): Promise<TaskRow | Response> {
+  const who = actor.kind === "worker" ? actor.w.id : worker;
+  if (!who) return json({ error: "worker is required" }, 400);
   const task = await env.DB.prepare("SELECT * FROM build_tasks WHERE id = ?").bind(id).first<TaskRow>();
   if (!task) return json({ error: "no such task" }, 404);
-  if (task.status !== "leased" || task.lease_owner !== worker) return json({ error: `task ${id} is ${task.status}${task.lease_owner ? " by " + task.lease_owner : ""}; the lease is not yours` }, 409);
+  if (task.status !== "leased" || task.lease_owner !== who) return json({ error: `task ${id} is ${task.status}${task.lease_owner ? " by " + task.lease_owner : ""}; the lease is not yours` }, 409);
   return task;
 }
 
-export async function handleHeartbeat(id: number, request: Request, env: Env): Promise<Response> {
+function workerName(b: { worker?: string }, actor: Actor): string {
+  return actor.kind === "worker" ? actor.w.id : (b.worker ?? "?");
+}
+
+export async function handleHeartbeat(id: number, request: Request, env: Env, actor: Actor): Promise<Response> {
   const b = (await request.json()) as { worker?: string };
-  if (!b.worker) return json({ error: "worker is required" }, 400);
-  const task = await owned(env, id, b.worker);
+  const task = await owned(env, id, b.worker, actor);
   if (task instanceof Response) return task;
+  const who = workerName(b, actor);
   const until = plusMinutes(LEASE_MINUTES);
   await env.DB.prepare("UPDATE build_tasks SET lease_expires_at = ? WHERE id = ?").bind(until, id).run();
-  await env.DB.prepare("UPDATE build_workers SET last_seen = ?, current_task = ? WHERE id = ?").bind(now(), id, b.worker).run();
+  await env.DB.prepare("UPDATE build_workers SET last_seen = ?, current_task = ? WHERE id = ?").bind(now(), id, who).run();
   return json({ task: id, lease_expires_at: until });
 }
 
-export async function handleComplete(id: number, request: Request, env: Env): Promise<Response> {
+export async function handleComplete(id: number, request: Request, env: Env, actor: Actor): Promise<Response> {
   const b = (await request.json()) as { worker?: string; sha256?: string; filename?: string; version?: string; duration_ms?: number; log_tail?: string };
-  if (!b.worker || !b.sha256 || !b.filename) return json({ error: "worker, sha256 and filename are required" }, 400);
-  const task = await owned(env, id, b.worker);
+  if (!b.sha256 || !b.filename) return json({ error: "sha256 and filename are required" }, 400);
+  const task = await owned(env, id, b.worker, actor);
   if (task instanceof Response) return task;
+  const who = workerName(b, actor);
+  if (task.trust === "community") {
+    // The result must be in the contributor's staging workspace: the
+    // package named, its PKGBUILD and the build log.
+    const prefix = `staging/${task.owner}/${task.name}/${task.id}/`;
+    const have = (await env.DB.prepare("SELECT key FROM staging_objects WHERE task_id = ?").bind(id).all<{ key: string }>()).results.map((r) => r.key.slice(prefix.length));
+    const missing = [b.filename, "PKGBUILD", "build.log"].filter((f) => !have.includes(f));
+    if (missing.length) return json({ error: `upload ${missing.join(", ")} to staging first (PUT /factory/tasks/${id}/artifacts/<filename>)`, have }, 409);
+    await env.DB.prepare(
+      "UPDATE build_tasks SET status = 'staged', finished_at = ?, result_sha256 = ?, result_filename = ?, result_version = ?, duration_ms = ?, log_tail = ?, staged_prefix = ?, lease_owner = NULL, lease_expires_at = NULL WHERE id = ?",
+    )
+      .bind(now(), b.sha256, b.filename, b.version ?? null, b.duration_ms ?? null, (b.log_tail ?? "").slice(-4000), prefix, id)
+      .run();
+    await env.DB.prepare("UPDATE build_workers SET last_seen = ?, current_task = NULL, builds_done = builds_done + 1 WHERE id = ?").bind(now(), who).run();
+    await env.DB.prepare("UPDATE factory_packages SET status = 'staged', detail = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE name = ?")
+      .bind(`${b.version ?? ""} built for ${task.arch} by ${who}; waiting for a maintainer`, task.name).run();
+    await event(env, "build", "ok", `${task.name} ${b.version ?? ""} built for ${task.arch} by ${who}${b.duration_ms ? " in " + Math.round(b.duration_ms / 60000) + " min" : ""} — staged for a maintainer (${task.owner})`, { task: id, arch: task.arch, sha256: b.sha256, filename: b.filename, worker: who, owner: task.owner, staged_prefix: prefix, duration_ms: b.duration_ms ?? null });
+    return json({ task: id, status: "staged", staged_prefix: prefix });
+  }
   // The result must be in the pool. A rebuild of a version already stored
   // under the same filename pins the stored object (pkg-repo publish), so
   // the filename settles which sha256 the pool actually serves.
@@ -290,16 +352,16 @@ export async function handleComplete(id: number, request: Request, env: Env): Pr
   )
     .bind(now(), indexed.sha256, b.filename, b.version ?? null, b.duration_ms ?? null, (b.log_tail ?? "").slice(-4000), id)
     .run();
-  await env.DB.prepare("UPDATE build_workers SET last_seen = ?, current_task = NULL, builds_done = builds_done + 1 WHERE id = ?").bind(now(), b.worker).run();
-  await event(env, "build", "ok", `${task.name} ${b.version ?? ""} built for ${task.arch} by ${b.worker}${b.duration_ms ? " in " + Math.round(b.duration_ms / 60000) + " min" : ""}${task.publish === 0 ? " (dry run, not published)" : ""}`, { task: id, arch: task.arch, sha256: indexed.sha256, filename: b.filename, worker: b.worker, attempts: task.attempts, duration_ms: b.duration_ms ?? null });
+  await env.DB.prepare("UPDATE build_workers SET last_seen = ?, current_task = NULL, builds_done = builds_done + 1 WHERE id = ?").bind(now(), who).run();
+  await event(env, "build", "ok", `${task.name} ${b.version ?? ""} built for ${task.arch} by ${who}${b.duration_ms ? " in " + Math.round(b.duration_ms / 60000) + " min" : ""}${task.publish === 0 ? " (dry run, not published)" : ""}`, { task: id, arch: task.arch, sha256: indexed.sha256, filename: b.filename, worker: who, attempts: task.attempts, duration_ms: b.duration_ms ?? null });
   return json({ task: id, status: "done" });
 }
 
-export async function handleFail(id: number, request: Request, env: Env): Promise<Response> {
+export async function handleFail(id: number, request: Request, env: Env, actor: Actor): Promise<Response> {
   const b = (await request.json()) as { worker?: string; error?: string; duration_ms?: number; log_tail?: string };
-  if (!b.worker) return json({ error: "worker is required" }, 400);
-  const task = await owned(env, id, b.worker);
+  const task = await owned(env, id, b.worker, actor);
   if (task instanceof Response) return task;
+  const who = workerName(b, actor);
   const exhausted = task.attempts >= task.max_attempts;
   // A requeued task goes behind its peers (priority + 10) so one broken
   // PKGBUILD does not hold the queue.
@@ -308,8 +370,11 @@ export async function handleFail(id: number, request: Request, env: Env): Promis
   )
     .bind(exhausted ? "failed" : "queued", exhausted ? now() : null, (b.error ?? "build failed").slice(0, 2000), (b.log_tail ?? "").slice(-4000), b.duration_ms ?? null, id)
     .run();
-  await env.DB.prepare("UPDATE build_workers SET last_seen = ?, current_task = NULL, builds_failed = builds_failed + 1 WHERE id = ?").bind(now(), b.worker).run();
-  await event(env, "build", exhausted ? "error" : "warn", `${task.name} for ${task.arch} failed on ${b.worker} (attempt ${task.attempts}/${task.max_attempts})${exhausted ? " — giving up" : " — back in the queue"}: ${(b.error ?? "").slice(0, 120)}`, { task: id, arch: task.arch, worker: b.worker, attempts: task.attempts, exhausted });
+  await env.DB.prepare("UPDATE build_workers SET last_seen = ?, current_task = NULL, builds_failed = builds_failed + 1 WHERE id = ?").bind(now(), who).run();
+  if (task.trust === "community" && exhausted) {
+    await env.DB.prepare("UPDATE factory_packages SET status = 'registered', detail = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE name = ?").bind(`build failed on ${who}: ${(b.error ?? "").slice(0, 160)}`, task.name).run();
+  }
+  await event(env, "build", exhausted ? "error" : "warn", `${task.name} for ${task.arch} failed on ${who} (attempt ${task.attempts}/${task.max_attempts})${exhausted ? " — giving up" : " — back in the queue"}: ${(b.error ?? "").slice(0, 120)}`, { task: id, arch: task.arch, worker: who, attempts: task.attempts, exhausted });
   return json({ task: id, status: exhausted ? "failed" : "queued", attempts: task.attempts });
 }
 

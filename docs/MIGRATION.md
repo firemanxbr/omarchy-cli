@@ -231,6 +231,12 @@ pool: they should move to their own repository once a home exists (the
 contract is in [factory/README.md](../factory/README.md), *The contract*).
 Until then, moving the pool moves them too:
 
+- The staging bucket: `npx wrangler r2 bucket create omarchy-factory-staging`
+  and `npx wrangler r2 bucket lifecycle add omarchy-factory-staging --name
+  expire-30d --prefix staging/ --expire-days 30` (binding `STAGING` in
+  `wrangler.toml`). The worker image lives at
+  `ghcr.io/<owner>/omarchy-packaging` (`factory-image.yml`, `IMAGE` env);
+  the compose file and the README name it.
 - Secrets: `FACTORY_TOKEN` on the worker (`npx wrangler secret put
   FACTORY_TOKEN`, any random string) and, for hosted runners, the same value as
   the GitHub secret `FACTORY_TOKEN` (A3). Workers you run elsewhere get it by

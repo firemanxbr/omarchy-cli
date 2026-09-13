@@ -152,6 +152,9 @@ grep -q '"builds_done":1' <<<"$fac" || { echo "worker stats missing: $fac"; exit
 built=$(curl -s "$OMARCHY_API/api/v1/factory/built")
 grep -q '"name":"xz","arch":"aarch64"' <<<"$built" || { echo "built list missing the task: $built"; exit 1; }
 fpage=$(curl -s "$OMARCHY_API/factory"); grep -q "Factory" <<<"$fpage" || { echo "factory page not served"; exit 1; }
+reg=$(curl -s "$OMARCHY_API/api/v1/factory/packages"); grep -q '"packages"' <<<"$reg" || { echo "registry not served: $reg"; exit 1; }
+[[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/packages" -H "content-type: application/json" -d '{"url":"https://github.com/x/y"}')" == 401 ]] || { echo "registering without a contributor token must be refused"; exit 1; }
+[[ "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$OMARCHY_API/api/v1/factory/tasks/$tid/artifacts/x.log" "${fauth[@]}" --data 'x')" == 401 ]] || { echo "the project token must not write to staging"; exit 1; }
 # A signature for bytes the pool does not serve under that filename is refused.
 [[ "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$OMARCHY_API/api/v1/pool/$(printf 'a%.0s' {1..64})/sig?filename=xz-5.8.4-1-x86_64.pkg.tar.zst&arch=x86_64" -H "authorization: Bearer $OMARCHY_PUBLISH_TOKEN" --data-binary "@$E2E/pkgs/xz-5.8.4-1-x86_64.pkg.tar.zst.sig")" == 409 ]] || { echo "a mismatching signature must be refused"; exit 1; }
 echo "factory queue, lease, requeue, guard and completion OK"

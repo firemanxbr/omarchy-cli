@@ -45,10 +45,12 @@ log() { printf '[%s] %s\n' "$(date -u +%H:%M:%S)" "$*" >&2; }
 # ---------------------------------------------------------------- inside ---
 # Runs as root in a fresh Arch container with /task mounted: /task/meta.sh
 # (name, group, ref, arch, pool), /task/out for the result. Logs to stdout.
-inside() {
-  local name group ref arch pool
-  # shellcheck source=/dev/null
-  source /task/meta.sh
+#
+# `ref` says where the PKGBUILD comes from:
+#   <commit>                   factory/pkgbuilds/<group>/<name> in omarchy-pool at that commit
+#   <url>@<tag>:<path>         the contributor's own repository at a tag (path is the PKGBUILD or its directory)
+#   draft:<url>@<tag|latest>   drafted here by factory/bin/draft-pkgbuild (the contributor's agent key, if any)
+prepare_container() {
   # pacman's download sandbox (seccomp + landlock) has no place in an
   # already-isolated, sometimes emulated container.
   sed -i -e 's/^#\?DisableSandboxSyscalls/DisableSandboxSyscalls/' -e 's/^#\?DisableSandboxFilesystem/DisableSandboxFilesystem/' /etc/pacman.conf
@@ -56,41 +58,69 @@ inside() {
     grep -q "^$opt" /etc/pacman.conf || sed -i "0,/^\[options\]/s//[options]\n$opt/" /etc/pacman.conf
   done
   pacman-key --init >/dev/null 2>&1 || true
-  pacman -Syu --noconfirm --needed base-devel git sudo namcap >/dev/null
-  useradd -m -s /bin/bash builder
+  pacman -Syu --noconfirm --needed base-devel git sudo namcap jq python pacman-contrib >/dev/null
+  id builder >/dev/null 2>&1 || useradd -m -s /bin/bash builder
   echo 'builder ALL=(ALL) NOPASSWD: /usr/bin/pacman' > /etc/sudoers.d/builder
+  # The pool's tooling and key, at main.
+  rm -rf /build/pool && git clone -q --depth 1 "$REPO_URL" /build/pool
+}
 
-  # Everything happens on the container's own filesystem (a bind mount from
-  # macOS breaks fakeroot); only the result is copied out.
-  git init -q /build/src
-  git -C /build/src remote add origin "$REPO_URL"
-  git -C /build/src fetch -q --depth 1 origin "$ref"
-  git -C /build/src checkout -q FETCH_HEAD
-
+add_pool_repos() { # arch pool
   # Dependencies resolve against what the pool's edge serves for this
   # architecture — the OPR (omarchy, quickshell…) and earlier factory builds
-  # — on top of the image's own mirrors. The pool's key (in the checkout)
-  # verifies the databases; the packages are then checked against the
-  # sha256 those signed databases carry, so their upstream signatures need
-  # no keyring in this throwaway container.
-  local added=0
+  # — on top of the image's own mirrors. The pool's key verifies the
+  # databases; the packages are then checked against the sha256 those signed
+  # databases carry, so their upstream signatures need no keyring here.
+  local arch="$1" pool="$2" added=0 repo
   for repo in omarchy-packages-edge omarchy-factory-edge; do
-    if curl -sfI --max-time 20 "$pool/$arch/$repo.db" >/dev/null; then
+    if ! grep -q "^\[$repo\]" /etc/pacman.conf && curl -sfI --max-time 20 "$pool/$arch/$repo.db" >/dev/null; then
       printf '\n[%s]\nSigLevel = DatabaseRequired DatabaseTrustedOnly PackageNever\nServer = %s/$arch\n' "$repo" "$pool" >> /etc/pacman.conf
       added=1
     fi
   done
   if [[ $added == 1 ]]; then
-    pacman-key --add /build/src/docs/omarchy-staging.pub.asc >/dev/null 2>&1
-    local poolkey; poolkey="$(gpg --homedir /etc/pacman.d/gnupg --with-colons --show-keys /build/src/docs/omarchy-staging.pub.asc 2>/dev/null | awk -F: '$1=="fpr"{print $10; exit}')"
+    pacman-key --add /build/pool/docs/omarchy-staging.pub.asc >/dev/null 2>&1
+    local poolkey; poolkey="$(gpg --homedir /etc/pacman.d/gnupg --with-colons --show-keys /build/pool/docs/omarchy-staging.pub.asc 2>/dev/null | awk -F: '$1=="fpr"{print $10; exit}')"
     pacman-key --lsign-key "$poolkey" >/dev/null 2>&1
     pacman -Sy >/dev/null
   fi
-  [[ -f "/build/src/factory/pkgbuilds/$group/$name/PKGBUILD" ]] || { echo "no PKGBUILD at factory/pkgbuilds/$group/$name in $ref"; exit 3; }
-  # Build outside the checkout: build tools walk up the tree (cargo finds the
-  # pool's own workspace Cargo.toml above factory/).
-  cp -a "/build/src/factory/pkgbuilds/$group/$name" /build/pkg
-  mkdir -p /build/out && chown -R builder:builder /build/pkg /build/out
+}
+
+fetch_pkgbuild() { # name group ref → /build/pkg holds the PKGBUILD directory
+  local name="$1" group="$2" ref="$3"
+  rm -rf /build/pkg /build/src
+  if [[ "$ref" == draft:* ]]; then
+    local spec url
+    spec="${ref#draft:}"; url="${spec%@*}"
+    echo "==> Drafting a PKGBUILD for $url ($( [[ -n "${ANTHROPIC_API_KEY:-}" ]] && echo "with the contributor's Claude key" || echo "template; set ANTHROPIC_API_KEY on the worker for an agent-written draft"))"
+    mkdir -p /build/pkg
+    GITHUB_TOKEN="${GITHUB_TOKEN:-}" python3 /build/pool/factory/bin/draft-pkgbuild --url "$url" --name "$name" --out /build/pkg
+  elif [[ "$ref" == *@*:* ]]; then
+    local url rest tag path
+    url="${ref%%@*}"; rest="${ref#*@}"; tag="${rest%%:*}"; path="${rest#*:}"
+    echo "==> PKGBUILD from $url at $tag ($path)"
+    if [[ "$tag" == HEAD ]]; then git clone -q --depth 1 "$url" /build/src; else git clone -q --depth 1 --branch "$tag" "$url" /build/src; fi
+    [[ -e "/build/src/$path" ]] || { echo "no $path in $url at $tag"; exit 3; }
+    if [[ -d "/build/src/$path" ]]; then cp -a "/build/src/$path" /build/pkg; else mkdir -p /build/pkg && cp -a "$(dirname "/build/src/$path")"/. /build/pkg/; fi
+  else
+    # Everything happens on the container's own filesystem (a bind mount from
+    # macOS breaks fakeroot); only the result is copied out.
+    git init -q /build/src
+    git -C /build/src remote add origin "$REPO_URL"
+    git -C /build/src fetch -q --depth 1 origin "$ref"
+    git -C /build/src checkout -q FETCH_HEAD
+    [[ -f "/build/src/factory/pkgbuilds/$group/$name/PKGBUILD" ]] || { echo "no PKGBUILD at factory/pkgbuilds/$group/$name in $ref"; exit 3; }
+    # Build outside the checkout: build tools walk up the tree (cargo finds the
+    # pool's own workspace Cargo.toml above factory/).
+    cp -a "/build/src/factory/pkgbuilds/$group/$name" /build/pkg
+  fi
+  [[ -f /build/pkg/PKGBUILD ]] || { echo "no PKGBUILD found for $ref"; exit 3; }
+}
+
+run_makepkg() { # → /build/out/*.pkg.tar.zst
+  rm -rf /build/out; mkdir -p /build/out && chown -R builder:builder /build/pkg /build/out
+  # A drafted PKGBUILD carries SKIP checksums; fill them in.
+  if grep -q "^sha256sums=('SKIP')" /build/pkg/PKGBUILD; then (cd /build/pkg && sudo -u builder updpkgsums); fi
   # Source signatures verify against keys shipped beside the PKGBUILD
   # (keys/pgp/<fingerprint>.asc, the AUR convention), never a keyserver.
   if compgen -G "/build/pkg/keys/pgp/*.asc" >/dev/null; then
@@ -99,9 +129,117 @@ inside() {
   # namcap flags the obvious (missing deps, bad permissions) before the build.
   sudo -u builder namcap /build/pkg/PKGBUILD || true
   # zst whatever the image's makepkg.conf says (Arch Linux ARM defaults to xz).
-  cd /build/pkg && sudo -u builder env PKGDEST=/build/out PKGEXT=.pkg.tar.zst PACKAGER="omarchy-pool factory <https://github.com/firemanxbr/omarchy-pool>" \
-    makepkg --syncdeps --noconfirm --clean --cleanbuild --nosign
-  mkdir -p /task/out && cp /build/out/*.pkg.tar.zst /task/out/ && ls /task/out
+  (cd /build/pkg && sudo -u builder env PKGDEST=/build/out PKGEXT=.pkg.tar.zst PACKAGER="omarchy-pool factory <https://github.com/firemanxbr/omarchy-pool>" \
+    makepkg --syncdeps --noconfirm --clean --cleanbuild --nosign)
+}
+
+# Build with the drafter correcting itself from the log — the contributor's
+# agent doing the heavy lifting, on the contributor's machine.
+build_with_retries() { # name group ref
+  local name="$1" group="$2" ref="$3" attempt=1 max=1
+  [[ "$ref" == draft:* && -n "${ANTHROPIC_API_KEY:-}" ]] && max=3
+  fetch_pkgbuild "$name" "$group" "$ref"
+  while :; do
+    if run_makepkg > /build/attempt.log 2>&1; then cat /build/attempt.log; return 0; fi
+    cat /build/attempt.log
+    if (( attempt >= max )); then return 4; fi
+    attempt=$((attempt + 1))
+    echo "==> Attempt $attempt: correcting the PKGBUILD from the log"
+    cp /build/pkg/PKGBUILD /build/PKGBUILD.prev
+    local url; url="${ref#draft:}"; url="${url%@*}"
+    python3 /build/pool/factory/bin/draft-pkgbuild --url "$url" --name "$name" --out /build/pkg --previous /build/PKGBUILD.prev --log /build/attempt.log || return 4
+  done
+}
+
+inside() {
+  local name group ref arch pool
+  # shellcheck source=/dev/null
+  source /task/meta.sh
+  prepare_container
+  add_pool_repos "$arch" "$pool"
+  build_with_retries "$name" "$group" "$ref"
+  mkdir -p /task/out && cp /build/out/*.pkg.tar.zst /task/out/ && cp /build/pkg/PKGBUILD /task/out/PKGBUILD && ls /task/out
+}
+
+# ------------------------------------------------------------- container ---
+# The Omarchy Packaging image runs this: one container, one task. It claims
+# a task for its registered worker, builds it right here (the container is
+# the fresh environment — a wrapper restarts a new one per task), uploads
+# the result to the contributor's staging workspace and exits. No signing
+# key, no publish token: community results never touch the pool directly.
+container_worker() {
+  : "${FACTORY_TOKEN:?FACTORY_TOKEN (a worker token from POST /factory/workers) is required}"
+  : "${WORKER_ID:?WORKER_ID (from POST /factory/workers) is required}"
+  ARCH="$(uname -m)"; [[ "$ARCH" == arm64 ]] && ARCH=aarch64
+  log "container worker $WORKER_ID ($ARCH) preparing"
+  prepare_container
+  add_pool_repos "$ARCH" "$OMARCHY_POOL"
+  local idle=0 out code body task id name group ref version
+  while :; do
+    out="$(api POST /factory/claim "$(jq -n --arg a "$ARCH" --arg h "$(hostname -s 2>/dev/null || echo ?)" --arg v "container" --argjson l "${WORKER_LABELS:-{\}}" '{arch:$a,hostname:$h,version:$v,labels:$l}')")" \
+      || { log "claim failed: ${out##*$'\n'}"; sleep 60; continue; }
+    code="${out##*$'\n'}"; body="${out%$'\n'*}"
+    if [[ "$code" == "204" ]]; then
+      idle=$((idle + 30))
+      if [[ "${IDLE_EXIT:-0}" -gt 0 && "$idle" -ge "${IDLE_EXIT:-0}" ]]; then log "no work for ${idle}s; exiting"; exit 0; fi
+      sleep 30; continue
+    fi
+    break
+  done
+  task="$body"
+  id="$(jq -r .task.id <<<"$task")"; name="$(jq -r .task.name <<<"$task")"; group="$(jq -r .task.group <<<"$task")"; ref="$(jq -r .task.pkgbuild_ref <<<"$task")"
+  log "task $id: $name for $ARCH ($ref)"
+  heartbeat_loop "$id" & local beat=$!; disown "$beat"
+  local started=$SECONDS status=0
+  set +e
+  ( set -e; build_with_retries "$name" "$group" "$ref" ) > /build/build.log 2>&1
+  status=$?
+  set -e
+  local took=$(( (SECONDS - started) * 1000 )) tail; tail="$(tail -n 80 /build/build.log | jq -Rs .)"
+  if [[ $status -ne 0 ]]; then
+    kill "$beat" 2>/dev/null || true
+    local err; err="$(grep -m1 -E '^(==> ERROR|error|Error|fatal)' /build/build.log || tail -n1 /build/build.log)"
+    log "task $id: failed (exit $status) — ${err:0:200}"
+    # Upload what there is for the record, then report.
+    upload_staging "$id" /build/build.log build.log || true
+    [[ -f /build/pkg/PKGBUILD ]] && upload_staging "$id" /build/pkg/PKGBUILD PKGBUILD || true
+    api POST "/factory/tasks/$id/fail" "$(jq -n --arg e "exit $status: ${err:0:500}" --argjson d "$took" --argjson t "$tail" '{error:$e,duration_ms:$d,log_tail:$t}')" >/dev/null || true
+    exit 1
+  fi
+  shopt -s nullglob
+  local pkgs=(/build/out/*.pkg.tar.zst) main sha filename version
+  main="$(ls /build/out/"$name"-[0-9]*.pkg.tar.zst 2>/dev/null | head -n1 || true)"; [[ -n "$main" ]] || main="${pkgs[0]}"
+  sha="$(sha256 "$main")"; filename="$(basename "$main")"
+  version="$(tar -xOf "$main" .PKGINFO 2>/dev/null | awk -F' = ' '$1=="pkgver"{print $2}')"
+  log "task $id: built $filename in $((took / 1000)) s; uploading to staging"
+  for p in "${pkgs[@]}"; do upload_staging "$id" "$p" "$(basename "$p")"; done
+  upload_staging "$id" /build/pkg/PKGBUILD PKGBUILD
+  upload_staging "$id" /build/build.log build.log
+  tar -xOf "$main" .PKGINFO > /build/PKGINFO && upload_staging "$id" /build/PKGINFO PKGINFO || true
+  kill "$beat" 2>/dev/null || true
+  api POST "/factory/tasks/$id/complete" "$(jq -n --arg s "$sha" --arg f "$filename" --arg v "$version" --argjson d "$took" --argjson t "$tail" '{sha256:$s,filename:$f,version:$v,duration_ms:$d,log_tail:$t}')" >/dev/null
+  log "task $id: staged — a maintainer takes it from here"
+}
+
+# Upload one file to the task's staging workspace: one PUT up to 90 MB, multipart above.
+upload_staging() { # task-id file name
+  local id="$1" file="$2" name="$3" size; size="$(wc -c <"$file" | tr -d ' ')"
+  if (( size <= 90 * 1024 * 1024 )); then
+    curl -sS --fail-with-body --max-time 900 -X PUT "$OMARCHY_API/api/v1/factory/tasks/$id/artifacts/$name" -H "authorization: Bearer $FACTORY_TOKEN" \
+      -H "content-type: application/octet-stream" --data-binary "@$file" -o /dev/null
+    return
+  fi
+  local base="$OMARCHY_API/api/v1/factory/tasks/$id/artifacts/$name/multipart" up parts=() n=0 etag
+  up="$(curl -sS --fail-with-body -X POST "$base?action=create" -H "authorization: Bearer $FACTORY_TOKEN" | jq -r .upload_id)"
+  rm -rf /build/parts && mkdir -p /build/parts && split -b 64m -d -a 4 "$file" /build/parts/p
+  for part in /build/parts/p*; do
+    n=$((n + 1))
+    etag="$(curl -sS --fail-with-body -X POST "$base?action=part&part=$n&upload_id=$up" -H "authorization: Bearer $FACTORY_TOKEN" --data-binary "@$part" | jq -r .etag)"
+    parts+=("{\"partNumber\":$n,\"etag\":\"$etag\"}")
+  done
+  curl -sS --fail-with-body -X POST "$base?action=complete&upload_id=$up" -H "authorization: Bearer $FACTORY_TOKEN" -H "content-type: application/json" \
+    --data "{\"parts\":[$(IFS=,; echo "${parts[*]}")]}" -o /dev/null
+  rm -rf /build/parts
 }
 
 # ------------------------------------------------------------------ host ---
@@ -168,7 +306,7 @@ prepare() {
 
 heartbeat_loop() { # task-id
   while sleep "$LEASE_BEAT"; do
-    api POST "/factory/tasks/$1/heartbeat" "{\"worker\":\"$WORKER_ID\"}" >/dev/null 2>&1 || true
+    api POST "/factory/tasks/$1/heartbeat" "{\"worker\":\"${WORKER_ID:-}\"}" >/dev/null 2>&1 || true
   done
 }
 
@@ -261,4 +399,8 @@ main() {
   done
 }
 
-if [[ "${1:-}" == "--inside" ]]; then inside; else main "$@"; fi
+case "${1:-}" in
+  --inside) inside ;;
+  --container) container_worker ;;
+  *) main "$@" ;;
+esac
