@@ -10,6 +10,7 @@
 //! the repository at this binary's version; they need podman (or docker),
 //! python3 and curl on the host.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
@@ -18,7 +19,7 @@ use std::time::{Duration, Instant};
 use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
 
-use crate::client::Api;
+use crate::client::{Api, ReleaseRequest};
 use crate::gate::{self, GateOptions, Verdict};
 use crate::ops;
 use crate::security::{self, FastTrackOptions, SecurityOptions};
@@ -376,15 +377,19 @@ fn keyrings(opts: &WorkOptions) -> Result<PathBuf> {
     Ok(dir)
 }
 
-fn sync_job(opts: &WorkOptions, job: &Api, task: &Task) -> Result<Outcome> {
-    let p = &task.params;
-    let keyring = keyrings(opts)?.join(format!("{}.gpg", s(p, "keyring")));
+/// One upstream source's sync options, from the task's parameters.
+fn sync_options(
+    opts: &WorkOptions,
+    p: &serde_json::Value,
+    keys: &Path,
+    defer_release: bool,
+) -> SyncOptions {
     let defer: Vec<String> = s(p, "defer_to")
         .split(',')
         .filter(|d| !d.is_empty())
         .map(str::to_owned)
         .collect();
-    let o = SyncOptions {
+    SyncOptions {
         source: s(p, "source"),
         upstream: String::new(),
         base_url: Some(s(p, "base_url")),
@@ -395,37 +400,133 @@ fn sync_job(opts: &WorkOptions, job: &Api, task: &Task) -> Result<Outcome> {
         concurrency: 8,
         work_dir: opts.work_dir.join("sync"),
         dry_run: false,
-        keyring: Some(keyring),
+        keyring: Some(keys.join(format!("{}.gpg", s(p, "keyring")))),
         defer_to: defer,
+        defer_release,
+    }
+}
+
+fn render_both(opts: &WorkOptions, job: &Api, ring: &str, arch: &str) -> Result<Vec<String>> {
+    let mut rendered = ops::render(job, ring, arch, opts.sign.as_deref())?;
+    let other = if arch == "aarch64" {
+        "x86_64"
+    } else {
+        "aarch64"
     };
-    let report = ops::run_sync_report(job, &o)?;
-    let mut rendered = Vec::new();
-    if report.release.is_some() {
-        rendered = ops::render(job, &o.ring, &o.arch, opts.sign.as_deref())?;
-        let other = if o.arch == "aarch64" {
-            "x86_64"
+    rendered.extend(ops::render(job, ring, other, opts.sign.as_deref())?);
+    Ok(rendered)
+}
+
+/// What one ring accumulates across the sources of a batched sync.
+#[derive(Default)]
+struct Pending {
+    add: Vec<String>,
+    remove: Vec<String>,
+    notes: Vec<String>,
+}
+
+/// The sync job. `params.sources` (a JSON list of source configurations,
+/// all of one architecture) syncs them in turn and pins the result as
+/// **one release per ring** — a release copies the ring's whole selection
+/// and D1 bills every row written, so eleven sources an hour must not
+/// mean eleven releases. A task with a single source (`params.source`,
+/// the old form, and `pkg-repo job sync --param source=…`) pins its own.
+fn sync_job(opts: &WorkOptions, job: &Api, task: &Task) -> Result<Outcome> {
+    let keys = keyrings(opts)?;
+    let batch: Vec<serde_json::Value> = task
+        .params
+        .get("sources")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|j| serde_json::from_str(j).ok())
+        .unwrap_or_default();
+    if batch.is_empty() {
+        let o = sync_options(opts, &task.params, &keys, false);
+        let report = ops::run_sync_report(job, &o)?;
+        let rendered = if report.release.is_some() {
+            render_both(opts, job, &o.ring, &o.arch)?
         } else {
-            "aarch64"
+            Vec::new()
         };
-        rendered.extend(ops::render(job, &o.ring, other, opts.sign.as_deref())?);
+        return Ok(Outcome {
+            summary: format!(
+                "{}/{} → {}: upstream {}, uploaded {}, removed {}, failed {}{}",
+                o.source,
+                o.arch,
+                o.ring,
+                report.upstream_total,
+                report.uploaded,
+                report.removed,
+                report.failed.len(),
+                if rendered.is_empty() {
+                    String::new()
+                } else {
+                    format!("; rendered {}", rendered.join(", "))
+                }
+            ),
+            result: serde_json::json!({ "upstream_total": report.upstream_total, "uploaded": report.uploaded, "already_indexed": report.already_indexed, "removed": report.removed, "deferred": report.deferred, "failed": report.failed.len(), "release": report.release, "rendered": rendered }),
+        });
+    }
+
+    // Per ring: what to pin, what to drop, and the note's pieces.
+    let mut pending: BTreeMap<String, Pending> = BTreeMap::new();
+    let mut lines = Vec::new();
+    let mut per_source = Vec::new();
+    let mut arch = String::new();
+    for p in &batch {
+        let o = sync_options(opts, p, &keys, true);
+        arch.clone_from(&o.arch);
+        let report = match ops::run_sync_report(job, &o) {
+            Ok(r) => r,
+            Err(e) => {
+                // One source failing (a mirror down) must not stop the others;
+                // its own sync event says what happened.
+                lines.push(format!("{}: failed ({e:#})", o.source));
+                per_source.push(serde_json::json!({ "source": o.source, "ring": o.ring, "error": format!("{e:#}") }));
+                continue;
+            }
+        };
+        lines.push(format!(
+            "{}: +{} -{} of {}",
+            o.source, report.uploaded, report.removed, report.upstream_total
+        ));
+        per_source.push(serde_json::json!({ "source": o.source, "ring": o.ring, "upstream_total": report.upstream_total, "uploaded": report.uploaded, "removed": report.removed, "failed": report.failed.len() }));
+        if !report.pending_add.is_empty() || !report.pending_remove.is_empty() {
+            let e = pending.entry(o.ring.clone()).or_default();
+            e.add.extend(report.pending_add);
+            e.remove.extend(report.pending_remove);
+            e.notes.push(format!(
+                "{} +{} -{}",
+                o.source, report.uploaded, report.removed
+            ));
+        }
+    }
+    let mut releases = Vec::new();
+    let mut rendered = Vec::new();
+    for (ring, p) in &pending {
+        let note = format!("sync {arch}: {}", p.notes.join(", "));
+        let created = job.create_release(&ReleaseRequest {
+            ring,
+            add: &p.add,
+            remove: &p.remove,
+            remove_arch: Some(&arch),
+            note: Some(&note),
+            ..ReleaseRequest::default()
+        })?;
+        releases.push(serde_json::json!({ "ring": ring, "id": created.release.id, "seq": created.release.seq, "packages": created.package_count }));
+        rendered.extend(render_both(opts, job, ring, &arch)?);
     }
     Ok(Outcome {
         summary: format!(
-            "{}/{} → {}: upstream {}, uploaded {}, removed {}, failed {}{}",
-            o.source,
-            o.arch,
-            o.ring,
-            report.upstream_total,
-            report.uploaded,
-            report.removed,
-            report.failed.len(),
+            "{arch}: {}; {} release(s){}",
+            lines.join(", "),
+            releases.len(),
             if rendered.is_empty() {
                 String::new()
             } else {
                 format!("; rendered {}", rendered.join(", "))
             }
         ),
-        result: serde_json::json!({ "upstream_total": report.upstream_total, "uploaded": report.uploaded, "already_indexed": report.already_indexed, "removed": report.removed, "deferred": report.deferred, "failed": report.failed.len(), "release": report.release, "rendered": rendered }),
+        result: serde_json::json!({ "arch": arch, "sources": per_source, "releases": releases, "rendered": rendered }),
     })
 }
 
@@ -675,6 +776,7 @@ fn promote_job(
             dry_run: false,
             keyring: Some(keys.join("omarchy.gpg")),
             defer_to: vec![],
+            defer_release: false,
         };
         if let Err(e) = ops::run_sync_report(job, &o) {
             eprintln!("warning: aligning the OPR channel for {arch}: {e:#}");

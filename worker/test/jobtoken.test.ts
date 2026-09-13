@@ -30,10 +30,12 @@ describe("job tokens", () => {
 });
 
 describe("pulled jobs", () => {
-  it("expands sync to one task per source and architecture, health per ring and architecture", () => {
+  it("expands sync to one task per architecture carrying all its sources, health per ring and architecture", () => {
     const sync = RULES.find((r) => r.job?.kind === "sync")!;
-    expect(jobsOf(sync)).toHaveLength(SYNC_SOURCES.length);
-    expect(jobsOf(sync).filter((j) => j.arch === "aarch64")).toHaveLength(4);
+    expect(jobsOf(sync).map((j) => j.arch)).toEqual(["x86_64", "aarch64"]);
+    const arm = jobsOf(sync).find((j) => j.arch === "aarch64")!;
+    expect(JSON.parse(arm.params.sources)).toHaveLength(SYNC_SOURCES.filter((s) => s.arch === "aarch64").length);
+    expect(JSON.parse(arm.params.sources).map((s: { source: string }) => s.source)).toEqual(["core", "alarm", "extra", "packages"]);
     const health = RULES.find((r) => r.job?.kind === "health")!;
     expect(jobsOf(health)).toHaveLength(6);
     const promote = RULES.find((r) => r.job?.kind === "promote" && r.job.params.to === "stable")!;

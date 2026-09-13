@@ -1,7 +1,7 @@
 import { signingEnabled } from "../signing";
 import { json, RINGS, type Env } from "../index";
 import { EXPECTED_SOURCES, version } from "../meta";
-import { ringHead } from "../db";
+import { ringHead, releaseSources, releaseSummary } from "../db";
 
 /** Everything the dashboard shows, in one round trip. */
 export async function handleStats(env: Env): Promise<Response> {
@@ -12,48 +12,39 @@ export async function handleStats(env: Env): Promise<Response> {
       rings.push({ ring, release: null, package_count: 0, bytes: 0, sources: [], artifacts: [] });
       continue;
     }
-    const sources = await env.DB.prepare(
-      `SELECT p.source, p.repo_arch AS arch, COUNT(*) AS packages, COALESCE(SUM(p.size_download), 0) AS bytes
-         FROM release_packages rp JOIN packages p ON p.id = rp.package_id
-        WHERE rp.release_id = ? GROUP BY p.source, p.repo_arch ORDER BY p.repo_arch, p.source`,
-    )
-      .bind(head.id)
-      .all<{ source: string; arch: string; packages: number; bytes: number }>();
-    const artifacts = await env.DB.prepare(
-      "SELECT repo, arch, kind, size, created_at FROM release_artifacts WHERE release_id = ? ORDER BY repo, kind",
-    )
-      .bind(head.id)
-      .all();
-    const total = sources.results.reduce((a, s) => ({ p: a.p + s.packages, b: a.b + s.bytes }), { p: 0, b: 0 });
-    rings.push({ ring, release: head, package_count: total.p, bytes: total.b, sources: sources.results, artifacts: artifacts.results });
+    // A release is immutable: its count, bytes and per-source breakdown
+    // were computed once, when it was created (db.ts), and cost three
+    // columns to read here. D1 bills rows read; this page is asked for
+    // every 30 seconds.
+    const [summary, sources, artifacts] = await Promise.all([
+      releaseSummary(env, head.id),
+      releaseSources(env, head.id),
+      env.DB.prepare("SELECT repo, arch, kind, size, created_at FROM release_artifacts WHERE release_id = ? ORDER BY repo, kind").bind(head.id).all(),
+    ]);
+    rings.push({ ring, release: head, package_count: summary.package_count, bytes: summary.size_download, sources, artifacts: artifacts.results });
   }
 
   const pool = await env.DB.prepare(
     "SELECT COUNT(*) AS objects, COALESCE(SUM(size_download), 0) AS bytes, COUNT(DISTINCT name) AS names FROM packages",
   ).first<{ objects: number; bytes: number; names: number }>();
-  const referenced = await env.DB.prepare(
-    `SELECT COUNT(*) AS objects, COALESCE(SUM(size_download), 0) AS bytes FROM packages
-      WHERE id IN (SELECT rp.package_id FROM ring_heads h JOIN release_packages rp ON rp.release_id = h.release_id)`,
-  ).first<{ objects: number; bytes: number }>();
+  // Objects some release pinned: a flag on the package (set at release
+  // creation), not a scan of release_packages.
   const anyRelease = await env.DB.prepare(
-    `SELECT COUNT(*) AS objects, COALESCE(SUM(size_download), 0) AS bytes FROM packages
-      WHERE id IN (SELECT package_id FROM release_packages)`,
-  ).first<{ objects: number; bytes: number }>();
-  // What GC would actually delete now: unreferenced by the last 3 releases and past the grace period.
-  const reclaimable = await env.DB.prepare(
-    `SELECT COUNT(*) AS objects, COALESCE(SUM(size_download), 0) AS bytes FROM packages
-      WHERE id NOT IN (SELECT rp.package_id FROM release_packages rp
-                        WHERE rp.release_id IN (SELECT id FROM releases r WHERE r.id IN (
-                          SELECT id FROM releases r2 WHERE r2.ring = r.ring ORDER BY seq DESC LIMIT 3)))
-        AND created_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-7 days')`,
+    "SELECT COUNT(*) AS objects, COALESCE(SUM(size_download), 0) AS bytes FROM packages WHERE released = 1",
   ).first<{ objects: number; bytes: number }>();
   const bySource = await env.DB.prepare(
     "SELECT source, repo_arch AS arch, COUNT(*) AS objects, COALESCE(SUM(size_download), 0) AS bytes FROM packages GROUP BY source, repo_arch ORDER BY repo_arch, source",
   ).all();
+  // The two aggregates that need release_packages (what the heads pin,
+  // what GC would reclaim) come from the last metrics snapshot: computed
+  // every thirty minutes, not on every request.
+  const snap = await env.DB.prepare("SELECT payload FROM events WHERE kind = 'metrics' ORDER BY id DESC LIMIT 1").first<{ payload: string }>();
+  const snapPool = snap ? ((JSON.parse(snap.payload) as { pool?: Record<string, number> }).pool ?? {}) : {};
+  const referenced = { objects: snapPool.referenced_objects ?? null, bytes: snapPool.referenced_bytes ?? null };
+  const reclaimable = { objects: snapPool.reclaimable_objects ?? 0, bytes: snapPool.reclaimable_bytes ?? 0 };
 
   const releases = await env.DB.prepare(
-    `SELECT r.id, r.ring, r.seq, r.parent_id, r.source_id, r.note, r.created_at,
-            (SELECT COUNT(*) FROM release_packages rp WHERE rp.release_id = r.id) AS package_count,
+    `SELECT r.id, r.ring, r.seq, r.parent_id, r.source_id, r.note, r.created_at, r.package_count,
             (h.release_id IS NOT NULL) AS is_head
        FROM releases r LEFT JOIN ring_heads h ON h.release_id = r.id
       ORDER BY r.id DESC LIMIT 15`,

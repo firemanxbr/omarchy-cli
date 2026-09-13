@@ -16,9 +16,12 @@ export async function snapshotMetrics(env: Env, now = new Date()): Promise<strin
   const alive = new Date(now.getTime() - 10 * 60000).toISOString();
 
   const pool = await env.DB.prepare("SELECT COUNT(*) AS objects, COALESCE(SUM(size_download), 0) AS bytes FROM packages").first<{ objects: number; bytes: number }>();
-  const referenced = await env.DB.prepare(
-    "SELECT COALESCE(SUM(size_download), 0) AS bytes FROM packages WHERE id IN (SELECT package_id FROM release_packages)",
-  ).first<{ bytes: number }>();
+  const referenced = await env.DB.prepare("SELECT COALESCE(SUM(size_download), 0) AS bytes FROM packages WHERE released = 1").first<{ bytes: number }>();
+  // What the three heads pin (distinct objects): the one place this join runs.
+  const heads = await env.DB.prepare(
+    `SELECT COUNT(*) AS objects, COALESCE(SUM(size_download), 0) AS bytes FROM packages
+      WHERE id IN (SELECT rp.package_id FROM ring_heads h JOIN release_packages rp ON rp.release_id = h.release_id)`,
+  ).first<{ objects: number; bytes: number }>();
   const reclaimable = await env.DB.prepare(
     `SELECT COUNT(*) AS objects, COALESCE(SUM(size_download), 0) AS bytes FROM packages
       WHERE id NOT IN (SELECT rp.package_id FROM release_packages rp
@@ -78,7 +81,15 @@ export async function snapshotMetrics(env: Env, now = new Date()): Promise<strin
       project: workers.results.find((w) => w.trust === "project")?.alive ?? 0,
       community: workers.results.find((w) => w.trust === "community")?.alive ?? 0,
     },
-    pool: { objects: pool?.objects ?? 0, bytes: pool?.bytes ?? 0, referenced_bytes: referenced?.bytes ?? 0, reclaimable_bytes: reclaimable?.bytes ?? 0, reclaimable_objects: reclaimable?.objects ?? 0 },
+    pool: {
+      objects: pool?.objects ?? 0,
+      bytes: pool?.bytes ?? 0,
+      released_bytes: referenced?.bytes ?? 0,
+      referenced_objects: heads?.objects ?? 0,
+      referenced_bytes: heads?.bytes ?? 0,
+      reclaimable_bytes: reclaimable?.bytes ?? 0,
+      reclaimable_objects: reclaimable?.objects ?? 0,
+    },
     rings: rings.results,
     version: version(env).version,
   };

@@ -52,6 +52,10 @@ DEFAULT_RING = "stable"
 # Task kinds the scheduler creates as pulled jobs (pkg-repo work) instead of
 # GitHub workflows: sync, promote, render, health, security, metrics, gc.
 JOB_KINDS = "gc,health,sync,promote,security,metrics,enqueue"
+# The daily cost estimate (src/cost.ts) reads this account's analytics with
+# the CLOUDFLARE_ANALYTICS_TOKEN secret.
+CLOUDFLARE_ACCOUNT_ID = "34f1918ac9ca522150a1830ea9b61a40"
+CLOUDFLARE_D1_ID = "e2f04e65-465c-4170-8750-69061f846b9b"
 # "Sign in with GitHub": the OAuth App "omarchy-pool" (registered under the
 # account that runs the staging deployment; the secret is a Worker secret,
 # GITHUB_OAUTH_CLIENT_SECRET). Empty = the token form only.
@@ -68,3 +72,4 @@ POOL_DEPLOYED_AT = ""
 #   SIGNING_KEY      — the pool's OpenPGP private key, armored (signing.ts)
 #   GITHUB_TOKEN     — fine-grained token, Actions: read and write on the repository, for the scheduler's last dispatches
 #   GITHUB_OAUTH_CLIENT_SECRET — the OAuth App behind "Sign in with GitHub"
+#   CLOUDFLARE_ANALYTICS_TOKEN — API token with Account Analytics: Read, for the daily cost estimate

@@ -271,6 +271,44 @@ tasks from the pool ([factory/README.md](../factory/README.md)). Day to day:
   `POOL_WORKER_TOKEN_X86_64` / `POOL_WORKER_TOKEN_AARCH64`; to rotate one,
   revoke the worker, register a new one, trust it, `gh secret set`.
 
+## Costs
+
+The account's card is capped at **US$ 30 a month**. What costs money on
+Workers Paid is usage over the included quotas — above all D1 rows read
+(25 B/month included, then US$ 0.001 per million) and rows written
+(50 M/month included, then **US$ 1.00 per million**), then R2 storage
+(US$ 0.015/GB after 10 GB; egress is free). The review of 2026-09-13 found
+the overview re-scanning `release_packages` on every call (US$ 14 a day)
+and every release copying its whole selection three times (index included).
+What keeps the bill near US$ 10:
+
+- a release's summary is computed once and stored (`releases.package_count`,
+  `bytes`, `sources`); the pool-wide aggregates that need the join are
+  computed by the metrics snapshot every 30 minutes, not per request;
+- `release_packages` has no secondary index and GC prunes the membership
+  of releases outside retention, so it holds what the last 3 releases per
+  ring pin, not every release ever;
+- the sync runs **every three hours, one task per architecture, one release
+  per ring** — not one release per source per hour.
+
+**Watching it.** Once a day (06:30 UTC) the brain estimates the month's
+bill from Cloudflare's own analytics (`src/cost.ts`; secret
+`CLOUDFLARE_ANALYTICS_TOKEN`, an API token with *Account Analytics: Read*
+and *D1: Read*) and records a `cost` journal line; `GET /api/v1/cost` has
+the breakdown and the overview shows the projection. `cost-report.yml`
+(06:45 UTC) posts it as a comment on the *Cost report* issue — GitHub
+e-mails it to whoever watches the issue — and fails the run at a projected
+US$ 15, which is one more e-mail. Cloudflare's own budget notifications
+e-mail at actual charges of US$ 10, 20 and 28 (*Notifications → Billing →
+Usage based billing*; the API token cannot create them).
+
+**The guard.** At a projected or actual US$ 25 the brain sets
+`settings.cost_guard` and the scheduler stops creating the jobs that write
+(sync, promote, render, security, enqueue) until the next daily estimate is
+back under the line; health, gc and metrics keep running, the pool keeps
+serving. The header of the overview says so. To lift it by hand:
+`npx wrangler d1 execute omarchy-repo --remote --command "DELETE FROM settings WHERE key = 'cost_guard'"`.
+
 ## Known limits
 
 * **D1 under a bulk import.** Importing a whole repository (thousands of
