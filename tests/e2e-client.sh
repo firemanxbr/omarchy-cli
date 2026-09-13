@@ -116,6 +116,17 @@ hooks_json="$("$CLI" "${CLI_ARGS[@]}" --root "$ROOT/target/rootfs-current" --jso
 python3 -c 'import json,sys; h={x["hook"]: x for x in json.load(sys.stdin)["hooks"]}; assert {"10-by-name.hook","20-by-path.hook"} <= set(h) and "30-not-this.hook" not in h, h; assert h["10-by-name.hook"]["matched"]=="package" and h["20-by-path.hook"]["matched"]=="path" and h["20-by-path.hook"]["when"]=="pre", h' <<<"$hooks_json" || { echo "hook preview is off: $hooks_json"; exit 1; }
 text_check="$("$CLI" "${CLI_ARGS[@]}" --root "$ROOT/target/rootfs-current" check xz)"
 grep -q "Hooks pacman would run" <<<"$text_check" || { echo "hook preview missing from the text output: $text_check"; exit 1; }
+# The same answers over MCP: initialize, tools/list, a check and a status, one JSON line each.
+mcp_out="$(printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"e2e","version":"0"}}}' '{"jsonrpc":"2.0","method":"notifications/initialized"}' '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"check","arguments":{"targets":["xz"]}}}' '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"status","arguments":{}}}' | "$CLI" "${CLI_ARGS[@]}" --root "$ROOT/target/rootfs-current" mcp)"
+python3 -c '
+import json,sys
+lines=[json.loads(l) for l in sys.stdin if l.strip()]
+by={m["id"]: m for m in lines}
+assert by[1]["result"]["serverInfo"]["name"]=="omarchy-cli", by[1]
+assert [t["name"] for t in by[2]["result"]["tools"]]==["status","check","info","search","list","security"], by[2]
+c=by[3]["result"]; assert c["isError"] is False and c["structuredContent"]["safe"] is True and any(h["hook"]=="10-by-name.hook" for h in c["structuredContent"]["hooks"]), c
+s=by[4]["result"]["structuredContent"]; assert s["ring"]=="stable" and s["head"]["package_count"]>=2, s
+' <<<"$mcp_out" || { echo "the MCP server is off: $mcp_out"; exit 1; }
 # A typo in the ring is refused before any request.
 bad_ring="$("$CLI" "${CLI_ARGS[@]}" --root "$ROOT/target/rootfs-current" --ring stabel status 2>&1 || true)"
 grep -q "ring must be edge, rc or stable" <<<"$bad_ring" || { echo "a bad ring must be refused: $bad_ring"; exit 1; }
