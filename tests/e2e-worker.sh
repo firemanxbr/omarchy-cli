@@ -13,7 +13,7 @@ E2E="$ROOT/target/e2e-worker"
 GNUPGHOME="${OMARCHY_POC_GNUPGHOME:-$HOME/.cache/omarchy-cli-poc/gnupg}"
 export GNUPGHOME
 PORT="${OMARCHY_E2E_PORT:-8790}"
-IMAGE="docker.io/library/archlinux:base"
+source "$ROOT/tests/images.env"; IMAGE="$ARCHLINUX_BASE"
 RUNTIME="$(command -v podman || command -v docker)"
 # How the container reaches the worker on the host.
 if [[ "$RUNTIME" == *podman* ]]; then

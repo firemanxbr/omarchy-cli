@@ -82,6 +82,8 @@ export async function snapshotMetrics(env: Env, now = new Date()): Promise<strin
     rings: rings.results,
     version: version(env).version,
   };
+  // Snapshots are worth 90 days of history; the charts read 7.
+  await env.DB.prepare("DELETE FROM events WHERE kind = 'metrics' AND created_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-90 days')").run();
   const summary = `${payload.jobs.runs} jobs in 7 days, ${payload.jobs.running} running, ${payload.jobs.minutes} worker-minutes · ${payload.workers.alive} worker(s) alive · pool ${payload.pool.objects} objects`;
   await env.DB.prepare("INSERT INTO events (kind, status, summary, payload) VALUES ('metrics', 'ok', ?, ?)").bind(summary, JSON.stringify(payload)).run();
   return `metrics: snapshot recorded — ${summary}`;
