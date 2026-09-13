@@ -1,4 +1,5 @@
 import { json, type Env } from "./index";
+import { jobHas, jobOf } from "./jobtoken";
 
 /** Returns a 401 response when the bearer token is missing or wrong, else null. */
 export function requireAuth(request: Request, env: Env): Response | null {
@@ -41,4 +42,40 @@ export function isProjectFactoryToken(request: Request, env: Env): boolean {
 /** True when the bearer token is the publish token (a maintainer / the pipeline). */
 export function requireAuthOk(request: Request, env: Env): boolean {
   return requireAuth(request, env) === null;
+}
+
+/**
+ * A write is allowed with the publish token (a maintainer, the pipeline —
+ * the transition credential) or with a job token that carries the scope.
+ * Returns the 401/403 to send, or null when allowed.
+ */
+export async function authorize(request: Request, env: Env, scope: string): Promise<Response | null> {
+  if (requireAuth(request, env) === null) return null;
+  const job = await jobOf(request, env);
+  if (!job) return json({ error: "unauthorized" }, 401);
+  if (!job.s.includes(scope) && !job.s.some((s) => s.endsWith(":*") && scope.startsWith(s.slice(0, -1)))) {
+    return json({ error: `job ${job.t} (${job.k}) may not ${scope}`, scopes: job.s }, 403);
+  }
+  return null;
+}
+
+/** POST /releases: the scope depends on the ring in the body. */
+export async function authorizeRelease(request: Request, env: Env): Promise<Response | null> {
+  if (requireAuth(request, env) === null) return null;
+  let ring = "";
+  try {
+    ring = String(((await request.clone().json()) as { ring?: string }).ring ?? "");
+  } catch {
+    return json({ error: "invalid JSON" }, 400);
+  }
+  return authorize(request, env, `release:${ring}`);
+}
+
+/** PUT /releases/:id/artifacts: the scope names the ring the release belongs to. */
+export async function authorizeArtifacts(request: Request, env: Env, releaseId: number): Promise<Response | null> {
+  if (requireAuth(request, env) === null) return null;
+  const row = await env.DB.prepare("SELECT ring FROM releases WHERE id = ?").bind(releaseId).first<{ ring: string }>();
+  if (!row) return json({ error: "no such release" }, 404);
+  const ok = (await jobHas(request, env, `artifacts:*:${row.ring}`)) ?? (await jobHas(request, env, `artifacts:${releaseId}`));
+  return ok ? null : authorize(request, env, `artifacts:*:${row.ring}`);
 }

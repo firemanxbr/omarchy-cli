@@ -627,6 +627,29 @@ impl Api {
         })
     }
 
+    /// `POST` with a bearer token of the caller's choosing (a worker token to
+    /// claim, a job token for everything else); `None` on 204.
+    pub fn post_json_as(
+        &self,
+        token: &str,
+        path: &str,
+        body: &serde_json::Value,
+    ) -> Result<Option<serde_json::Value>, RepoError> {
+        with_retry("post_json_as", || {
+            let resp = self
+                .http
+                .post(self.url(path))
+                .bearer_auth(token)
+                .json(body)
+                .send()?;
+            let resp = Self::check(resp)?;
+            if resp.status().as_u16() == 204 {
+                return Ok(None);
+            }
+            Ok(Some(resp.json()?))
+        })
+    }
+
     /// Records a dashboard event. Under GitHub Actions the payload gains a
     /// `ci` object (run id and URL, job, runner architecture) so the dashboard
     /// can link every line of activity to the run that produced it.

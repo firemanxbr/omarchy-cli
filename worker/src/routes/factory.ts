@@ -1,6 +1,7 @@
 import { json, type Env } from "../index";
 import { isRepoArch } from "../r2";
 import type { WorkerIdentity } from "./contributors";
+import { issueJobToken, scopesFor, type JobClaims } from "../jobtoken";
 
 /**
  * The factory's brain. Cloudflare is the source of truth for package
@@ -51,6 +52,9 @@ interface TaskRow {
   log_tail: string | null;
   error: string | null;
   created_at: string;
+  kind: string;
+  params: string | null;
+  result: string | null;
   /** 0 = dry run: build and report, never publish. */
   publish: number;
   /** project: the worker signs and publishes · community: the result goes to staging for a maintainer. */
@@ -59,8 +63,8 @@ interface TaskRow {
   staged_prefix: string | null;
 }
 
-/** Who is calling a worker endpoint: a project worker (FACTORY_TOKEN) or a registered one (own token). */
-export type Actor = { kind: "project" } | { kind: "worker"; w: WorkerIdentity };
+/** Who is calling a worker endpoint: a project worker (FACTORY_TOKEN), a registered one (own token), or a job (its per-task token). */
+export type Actor = { kind: "project" } | { kind: "worker"; w: WorkerIdentity } | { kind: "job"; job: JobClaims };
 
 const now = () => new Date().toISOString();
 const plusMinutes = (m: number) => new Date(Date.now() + m * 60000).toISOString();
@@ -243,54 +247,65 @@ async function touchWorker(env: Env, w: { worker: string; arch: string; hostname
     .run();
 }
 
+const ALL_KINDS = ["build", "sync", "promote", "render", "health", "security", "metrics", "gc"];
+
 export async function handleClaim(request: Request, env: Env, actor: Actor): Promise<Response> {
-  const b = (await request.json()) as { worker?: string; arch?: string; hostname?: string; labels?: unknown; version?: string };
+  const b = (await request.json()) as { worker?: string; arch?: string; hostname?: string; labels?: unknown; version?: string; kinds?: unknown };
   if (!b.arch || !isRepoArch(b.arch)) return json({ error: "arch (x86_64|aarch64) is required" }, 400);
-  // A registered worker is its registration: id, owner and what it may build.
+  if (actor.kind === "job") return json({ error: "a job token cannot claim; use the worker token" }, 403);
+  // A registered worker is its registration: id, owner, trust and what it may build.
   const workerId = actor.kind === "worker" ? actor.w.id : b.worker;
   if (!workerId) return json({ error: "worker is required" }, 400);
   if (actor.kind === "worker" && actor.w.arch !== b.arch) return json({ error: `this worker is registered for ${actor.w.arch}` }, 400);
-  // What this worker may claim. Project workers take anything; a shared
-  // community worker takes community tasks; a dedicated one only its owner's
-  // packages. Community results never reach the pool, so a contributor's
-  // worker can never build for the project by accident.
-  let scope = "1";
-  const binds: unknown[] = [];
-  if (actor.kind === "worker") {
-    if (actor.w.mode === "dedicated") {
-      const names = actor.w.packages.length ? actor.w.packages : ["-"];
-      scope = `trust = 'community' AND name IN (SELECT value FROM json_each(?))`;
-      binds.push(JSON.stringify(names));
-    } else {
-      scope = `trust = 'community'`;
+  const trust = actor.kind === "project" || actor.w.trust === "project" ? "project" : "community";
+  // What this worker may claim. Project trust takes any kind it declares;
+  // community trust takes community builds only — a shared worker anyone's,
+  // a dedicated one its owner's packages. Community results never reach the
+  // pool, so a contributor's worker can never build for the project by accident.
+  const wanted = (Array.isArray(b.kinds) ? b.kinds.filter((k): k is string => typeof k === "string" && ALL_KINDS.includes(k)) : trust === "project" ? ALL_KINDS : ["build"]);
+  const kinds = trust === "project" ? wanted : ["build"];
+  let scope = `kind IN (SELECT value FROM json_each(?))`;
+  const binds: unknown[] = [JSON.stringify(kinds)];
+  if (trust !== "project") {
+    scope += ` AND trust = 'community'`;
+    if (actor.kind === "worker" && actor.w.mode === "dedicated") {
+      scope += ` AND name IN (SELECT value FROM json_each(?))`;
+      binds.push(JSON.stringify(actor.w.packages.length ? actor.w.packages : ["-"]));
     }
   }
   // One statement claims the next queued task of this architecture: D1
   // serialises writes, so two workers never get the same one.
   const task = await env.DB.prepare(
     `UPDATE build_tasks SET status = 'leased', lease_owner = ?, lease_expires_at = ?, started_at = ?, attempts = attempts + 1, error = NULL
-      WHERE id = (SELECT id FROM build_tasks WHERE status = 'queued' AND arch = ? AND ${scope} ORDER BY priority, id LIMIT 1) AND status = 'queued'
+      WHERE id = (SELECT id FROM build_tasks WHERE status = 'queued' AND (arch = ? OR kind IN ('metrics', 'gc', 'security', 'promote')) AND ${scope} ORDER BY priority, id LIMIT 1) AND status = 'queued'
       RETURNING *`,
   )
     .bind(workerId, plusMinutes(LEASE_MINUTES), now(), b.arch, ...binds)
     .first<TaskRow>();
   await touchWorker(env, { worker: workerId, arch: b.arch, hostname: b.hostname, labels: b.labels, version: b.version }, task?.id ?? null);
   if (!task) return new Response(null, { status: 204 });
-  if (task.trust === "community") {
+  if (task.trust === "community" && task.kind === "build") {
     await env.DB.prepare("UPDATE factory_packages SET status = 'building', detail = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE name = ?").bind(`building on ${workerId} (${task.arch})`, task.name).run();
   }
+  // The job's own credential: exactly the routes this task needs, until the lease ends.
+  const params = task.params ? (JSON.parse(task.params) as Record<string, unknown>) : {};
+  const expires = Math.floor(Date.now() / 1000) + LEASE_MINUTES * 60;
+  const token = await issueJobToken(env, { t: task.id, k: task.kind, s: scopesFor(task.kind, task.id, task.trust, params), e: expires, w: workerId });
   return json({
-    task,
+    task: { ...task, params },
+    token,
+    token_expires_at: new Date(expires * 1000).toISOString(),
     lease_minutes: LEASE_MINUTES,
     repo: "https://github.com/firemanxbr/omarchy-pool",
-    pkgbuild_path: task.pkgbuild_ref.includes(":") || task.pkgbuild_ref.startsWith("draft") ? null : `factory/pkgbuilds/${task.group}/${task.name}`,
-    // Where a community result goes: PUT these back with the worker token.
+    pkgbuild_path: task.kind === "build" && !(task.pkgbuild_ref.includes(":") || task.pkgbuild_ref.startsWith("draft")) ? `factory/pkgbuilds/${task.group}/${task.name}` : null,
+    // Where a community result goes: PUT these back with the job token.
     upload: task.trust === "community" ? `/api/v1/factory/tasks/${task.id}/artifacts/<filename>` : null,
   });
 }
 
 async function owned(env: Env, id: number, worker: string | undefined, actor: Actor): Promise<TaskRow | Response> {
-  const who = actor.kind === "worker" ? actor.w.id : worker;
+  if (actor.kind === "job" && !actor.job.s.includes(`task:${id}`)) return json({ error: `this job token is for task ${actor.job.t}` }, 403);
+  const who = actor.kind === "worker" ? actor.w.id : actor.kind === "job" ? actor.job.w : worker;
   if (!who) return json({ error: "worker is required" }, 400);
   const task = await env.DB.prepare("SELECT * FROM build_tasks WHERE id = ?").bind(id).first<TaskRow>();
   if (!task) return json({ error: "no such task" }, 404);
@@ -299,7 +314,7 @@ async function owned(env: Env, id: number, worker: string | undefined, actor: Ac
 }
 
 function workerName(b: { worker?: string }, actor: Actor): string {
-  return actor.kind === "worker" ? actor.w.id : (b.worker ?? "?");
+  return actor.kind === "worker" ? actor.w.id : actor.kind === "job" ? actor.job.w : (b.worker ?? "?");
 }
 
 export async function handleHeartbeat(id: number, request: Request, env: Env, actor: Actor): Promise<Response> {
@@ -310,15 +325,28 @@ export async function handleHeartbeat(id: number, request: Request, env: Env, ac
   const until = plusMinutes(LEASE_MINUTES);
   await env.DB.prepare("UPDATE build_tasks SET lease_expires_at = ? WHERE id = ?").bind(until, id).run();
   await env.DB.prepare("UPDATE build_workers SET last_seen = ?, current_task = ? WHERE id = ?").bind(now(), id, who).run();
-  return json({ task: id, lease_expires_at: until });
+  // The lease moved; so does the job's credential.
+  const params = task.params ? (JSON.parse(task.params) as Record<string, unknown>) : {};
+  const expires = Math.floor(Date.now() / 1000) + LEASE_MINUTES * 60;
+  const token = await issueJobToken(env, { t: task.id, k: task.kind, s: scopesFor(task.kind, task.id, task.trust, params), e: expires, w: who });
+  return json({ task: id, lease_expires_at: until, token, token_expires_at: new Date(expires * 1000).toISOString() });
 }
 
 export async function handleComplete(id: number, request: Request, env: Env, actor: Actor): Promise<Response> {
-  const b = (await request.json()) as { worker?: string; sha256?: string; filename?: string; version?: string; duration_ms?: number; log_tail?: string };
-  if (!b.sha256 || !b.filename) return json({ error: "sha256 and filename are required" }, 400);
+  const b = (await request.json()) as { worker?: string; sha256?: string; filename?: string; version?: string; duration_ms?: number; log_tail?: string; result?: unknown; summary?: string };
   const task = await owned(env, id, b.worker, actor);
   if (task instanceof Response) return task;
   const who = workerName(b, actor);
+  if (task.kind !== "build") {
+    // A pool job: what it did is its result; the journal gets one line.
+    await env.DB.prepare("UPDATE build_tasks SET status = 'done', finished_at = ?, duration_ms = ?, log_tail = ?, result = ?, lease_owner = NULL, lease_expires_at = NULL WHERE id = ?")
+      .bind(now(), b.duration_ms ?? null, (b.log_tail ?? "").slice(-4000), b.result ? JSON.stringify(b.result) : null, id)
+      .run();
+    await env.DB.prepare("UPDATE build_workers SET last_seen = ?, current_task = NULL, builds_done = builds_done + 1 WHERE id = ?").bind(now(), who).run();
+    await event(env, "job", "ok", `${task.kind}${task.params ? " " + Object.values(JSON.parse(task.params)).join("/") : ""}: ${b.summary ?? "done"} by ${who}${b.duration_ms ? " in " + Math.round(b.duration_ms / 1000) + " s" : ""}`, { task: id, kind: task.kind, params: task.params ? JSON.parse(task.params) : null, worker: who, result: b.result ?? null, duration_ms: b.duration_ms ?? null });
+    return json({ task: id, status: "done" });
+  }
+  if (!b.sha256 || !b.filename) return json({ error: "sha256 and filename are required" }, 400);
   if (task.trust === "community") {
     // The result must be in the contributor's staging workspace: the
     // package named, its PKGBUILD and the build log.
@@ -425,7 +453,7 @@ export async function handleFactory(env: Env): Promise<Response> {
 export async function handleBuilt(env: Env): Promise<Response> {
   const rows = await env.DB.prepare(
     `SELECT name, arch, version, status, pkgbuild_ref, id FROM build_tasks t
-      WHERE status != 'cancelled' AND id = (SELECT MAX(id) FROM build_tasks u WHERE u.name = t.name AND u.arch = t.arch AND u.version IS t.version AND u.status != 'cancelled')
+      WHERE kind = 'build' AND status != 'cancelled' AND id = (SELECT MAX(id) FROM build_tasks u WHERE u.kind = 'build' AND u.name = t.name AND u.arch = t.arch AND u.version IS t.version AND u.status != 'cancelled')
       ORDER BY name, arch, id`,
   ).all();
   return json({ built: rows.results }, 200, { "cache-control": "no-store" });

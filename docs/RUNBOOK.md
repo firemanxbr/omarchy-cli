@@ -133,6 +133,29 @@ cd worker && npx wrangler secret put GITHUB_TOKEN < ~/.cache/omarchy-cli-poc/git
 Without the secret the trigger logs "idle" and the workflow files' own
 schedules are all there is.
 
+## Pulled jobs (the pool without GitHub)
+
+The pool's own work — sync, promote, render, health, gc — runs as tasks in
+the factory's queue when `JOB_KINDS` (a Worker var, comma-separated kinds)
+lists the kind: the cron creates them on the same schedule the workflows
+had, and a **project worker** pulls and runs them:
+
+```bash
+# on any machine with podman/docker, python3, curl, git (the health and ABI
+# scripts) — a droplet, a laptop, a Hetzner box
+pkg-repo work --worker-token omw_… --sign "$OMARCHY_GPG_KEYID" --labels '{"where":"droplet-1"}'
+```
+
+The worker is registered like any other (`POST /factory/workers`) and a
+maintainer promotes it: `POST /factory/workers/<id>/trust {"trust":"project"}`
+with a maintainer's contributor token; an admin names maintainers with
+`PATCH /factory/contributors/<login> {"role":"maintainer","areas":[…]}`
+(the publish token works for that while the transition lasts). Every task
+runs with a per-job token the pool issues at claim time (SECURITY.md);
+the worker's own token only claims. Kinds not listed in `JOB_KINDS` keep
+running as GitHub workflows, dispatched by the same scheduler. Worker
+secrets: `JOB_TOKEN_SECRET` (any random string) signs the job tokens.
+
 ## The factory
 
 What no upstream ships is built from `factory/pkgbuilds` by workers that pull

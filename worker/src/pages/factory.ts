@@ -44,6 +44,7 @@ const SCRIPT = String.raw`
     var c = { leased: "var(--blue)", queued: "var(--amber)", done: "var(--green)", staged: "var(--green)", failed: "var(--red)", cancelled: "var(--dim)", requested: "var(--amber)", registered: "var(--dim)", waiting: "var(--amber)", building: "var(--blue)", drafting: "var(--blue)", validating: "var(--blue)", review: "var(--amber)", approved: "var(--green)", rejected: "var(--dim)", unmaintained: "var(--dim)" }[s] || "var(--dim)";
     return '<span class="pill" style="color:' + c + ';border-color:' + c + '">' + esc(s === "leased" ? "building" : s) + '</span>';
   }
+  function paramsLabel(t) { var p = {}; try { p = typeof t.params === "string" ? JSON.parse(t.params || "{}") : (t.params || {}); } catch (e) {} return [p.source, p.from && p.to ? p.from + " → " + p.to : null, p.ring].filter(Boolean).join(" · "); }
   function took(ms) { if (ms == null) return "—"; var s = Math.round(ms / 1000); return s < 60 ? s + " s" : Math.floor(s / 60) + " min " + (s % 60) + " s"; }
   skeletonTiles("#tiles", 5); skeletonRows("#registry", 8, 2); skeletonRows("#workers", 6, 2); skeletonRows("#tasks", 8, 4); skeletonRows("#requests", 8, 2);
   function loadRegistry() {
@@ -81,7 +82,8 @@ const SCRIPT = String.raw`
           : t.status === "done" && t.result_filename
           ? (t.publish === 0 ? '<span class="mono">' + esc(t.result_filename) + '</span>' : '<a href="/package/' + encodeURIComponent(t.name) + '?ring=edge&arch=' + t.arch + '" class="mono">' + esc(t.result_filename) + '</a>')
           : (t.error ? '<span class="muted" title="' + esc(t.error) + '">' + esc(t.error.slice(0, 90)) + '</span>' : '<span class="muted">—</span>');
-        return '<tr><td>' + t.id + '</td><td><b>' + esc(t.name) + '</b> <span class="src">' + esc(t.group) + '</span>' + (t.version ? ' <span class="mono muted">' + esc(t.version) + '</span>' : '') + '</td><td>' + esc(t.arch) + '</td>' +
+        var what = t.kind && t.kind !== "build" ? '<b>' + esc(t.kind) + '</b> <span class="muted">' + esc(paramsLabel(t)) + '</span>' : '<b>' + esc(t.name) + '</b> <span class="src">' + esc(t.group) + '</span>' + (t.version ? ' <span class="mono muted">' + esc(t.version) + '</span>' : '');
+        return '<tr><td>' + t.id + '</td><td>' + what + '</td><td>' + esc(t.arch) + '</td>' +
           '<td>' + statusPill(t.status) + (t.trust === "community" ? ' <span class="pill none" title="a contributor\'s build: goes to staging, a maintainer approves">' + esc(t.owner || "community") + '</span>' : '') + (t.publish === 0 && t.trust !== "community" ? ' <span class="pill none" title="built and measured, never published">dry run</span>' : '') + (t.attempts > 1 ? ' <span class="muted">attempt ' + t.attempts + '/' + t.max_attempts + '</span>' : '') + '</td><td>' + esc(t.reason) + '</td>' +
           '<td class="mono">' + esc(t.lease_owner || "") + '</td><td>' + took(t.duration_ms) + '</td><td>' + result + '</td></tr>';
       }).join("") || '<tr><td colspan="8" class="muted">nothing queued or built yet</td></tr>';
