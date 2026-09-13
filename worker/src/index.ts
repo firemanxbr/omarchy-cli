@@ -45,7 +45,7 @@ import {
   handleApproveRequest, handleCancelTask, handleClaim, handleComplete, handleCreateRequest, handleEnqueue, handleFactory, handleFail,
   handleHeartbeat, handleRejectRequest, handleTask, handleBuilt, handleUpdateRequest,
 } from "./routes/factory";
-import { isProjectFactoryToken, requireAuthOk, authorize, authorizeRelease, authorizeArtifacts } from "./auth";
+import { requireAuthOk, authorize, authorizeRelease, authorizeArtifacts } from "./auth";
 import {
   contributorOf, workerOf, handleRegister, handleMe, handleRegisterPackage, handleDeletePackage, handleBuildPackage, handleRegisterWorker,
   handleRevokeWorker, handleListPackages, handleStagingPut, handleStagingMultipart, handleStagingList, handleStagingGet,
@@ -89,8 +89,6 @@ export interface Env {
   POOL_DEPLOYED_AT?: string;
   /** Fine-grained GitHub token (Actions: read and write) for the pool's own scheduler. */
   GITHUB_TOKEN?: string;
-  /** Bearer token build workers present to the factory endpoints. */
-  FACTORY_TOKEN?: string;
   /** Signs per-job tokens (jobtoken.ts); any random string. */
   JOB_TOKEN_SECRET?: string;
   /** The pool's OpenPGP signing key (armored private key) and its passphrase, if any — signing.ts. */
@@ -170,8 +168,9 @@ export default {
 
 /**
  * The factory's writes. Three kinds of caller: the project (publish token —
- * maintainers, the pipeline), a registered worker (its own token) or a
- * project worker (FACTORY_TOKEN), and a contributor (their token).
+ * maintainers, the pipeline), a registered worker (its own token; project
+ * trust is a maintainer's decision on the registration) or a job (its
+ * per-task token), and a contributor (their token).
  */
 async function factoryRoutes(method: string, path: string, url: URL, request: Request, env: Env): Promise<Response | null> {
   let m: RegExpMatchArray | null;
@@ -200,13 +199,13 @@ async function factoryRoutes(method: string, path: string, url: URL, request: Re
     if (!c) return json({ error: "a maintainer's contributor token is required" }, 401);
     return m[2] === "approve" ? handleApprove(c, Number(m[1]), request, env) : handleReject(c, Number(m[1]), request, env);
   }
-  // Workers: the project's (shared secret) or a registered one (own token).
+  // Workers: registered ones only (own token), or a job's token. There is
+  // no shared worker secret: every worker is somebody's registration.
   const workerActor = async (): Promise<Actor | Response> => {
-    if (isProjectFactoryToken(request, env)) return { kind: "project" };
     const w = await workerOf(request, env);
     if (w) return { kind: "worker", w };
     const job = await jobOf(request, env);
-    return job ? { kind: "job", job } : json({ error: "unauthorized: a worker token (POST /factory/workers), a job token, or the project's FACTORY_TOKEN" }, 401);
+    return job ? { kind: "job", job } : json({ error: "unauthorized: a worker token (POST /factory/workers) or a job token" }, 401);
   };
   // A job token good for this task's staging, as the worker it was issued to.
   const stagingActor = async (taskId: number) => {
@@ -216,7 +215,7 @@ async function factoryRoutes(method: string, path: string, url: URL, request: Re
     return job && job.s.includes(`staging:${taskId}`) ? { id: job.w, owner: null, mode: "", packages: [], arch: "", trust: "community" } : null;
   };
   if (method === "POST" && path === "/factory/claim") { const a = await workerActor(); return a instanceof Response ? a : handleClaim(request, env, a); }
-  if ((m = path.match(/^\/factory\/tasks\/(\d+)\/heartbeat$/)) && method === "POST") { const a = await workerActor(); return a instanceof Response ? a : handleHeartbeat(Number(m[1]), request, env, a); }
+  if ((m = path.match(/^\/factory\/tasks\/(\d+)\/heartbeat$/)) && method === "POST") { const a = await workerActor(); return a instanceof Response ? a : handleHeartbeat(Number(m[1]), env, a); }
   if ((m = path.match(/^\/factory\/tasks\/(\d+)\/complete$/)) && method === "POST") { const a = await workerActor(); return a instanceof Response ? a : handleComplete(Number(m[1]), request, env, a); }
   if ((m = path.match(/^\/factory\/tasks\/(\d+)\/fail$/)) && method === "POST") { const a = await workerActor(); return a instanceof Response ? a : handleFail(Number(m[1]), request, env, a); }
   if ((m = path.match(/^\/factory\/tasks\/(\d+)\/artifacts\/([A-Za-z0-9][A-Za-z0-9._:+-]{0,200})$/)) && method === "PUT") {

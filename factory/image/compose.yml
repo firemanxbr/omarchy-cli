@@ -6,7 +6,7 @@ services:
     restart: unless-stopped
     environment:
       WORKER_ID: ${WORKER_ID:?from POST /api/v1/factory/workers}
-      FACTORY_TOKEN: ${FACTORY_TOKEN:?the worker token, shown once}
+      OMARCHY_WORKER_TOKEN: ${OMARCHY_WORKER_TOKEN:?the worker token, shown once}
       WORKER_LABELS: '{"where":"${WHERE:-my-machine}"}'
       # Optional: your own agent drafts and corrects PKGBUILDs (your tokens, your cost).
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}

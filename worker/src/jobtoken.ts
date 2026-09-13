@@ -44,7 +44,8 @@ function unb64url(s: string): Uint8Array {
 }
 
 async function key(env: Env): Promise<CryptoKey> {
-  const secret = env.JOB_TOKEN_SECRET ?? env.FACTORY_TOKEN ?? "";
+  const secret = env.JOB_TOKEN_SECRET ?? "";
+  if (!secret) throw new Error("JOB_TOKEN_SECRET is not set; no job token can be issued or verified");
   return crypto.subtle.importKey("raw", enc.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]);
 }
 

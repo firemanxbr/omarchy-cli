@@ -242,10 +242,13 @@ Until then, moving the pool moves them too:
   (callback `https://<dashboard>/auth/github/callback`): client id in
   `wrangler.toml` (`GITHUB_OAUTH_CLIENT_ID`), secret with
   `npx wrangler secret put GITHUB_OAUTH_CLIENT_SECRET`.
-- Secrets: `FACTORY_TOKEN` on the worker (`npx wrangler secret put
-  FACTORY_TOKEN`, any random string) and, for hosted runners, the same value as
-  the GitHub secret `FACTORY_TOKEN` (A3). Workers you run elsewhere get it by
-  hand.
+- Workers: register one per architecture for the hosted fallback (`POST
+  /factory/workers` with your contributor token, then trust it as a
+  maintainer) and store their tokens as the GitHub secrets
+  `POOL_WORKER_TOKEN_X86_64` / `POOL_WORKER_TOKEN_AARCH64`. Workers you run
+  elsewhere are registered the same way; `JOB_TOKEN_SECRET` (any random
+  string, `npx wrangler secret put JOB_TOKEN_SECRET`) signs the per-job
+  tokens.
 - `REPO_URL` in `factory/worker/omarchy-build-worker.sh` and `repo` in
   `worker/src/routes/factory.ts` name the repository holding the PKGBUILDs.
 - When the factory leaves, delete `factory/`, the two workflows and the

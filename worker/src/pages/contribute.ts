@@ -151,9 +151,9 @@ const SCRIPT = String.raw`
       $("#w-new").hidden = false;
       $("#w-cmd").textContent =
         "# one task, then exit (repeat to build the next)\n" +
-        "podman run --rm -e WORKER_ID=" + d.worker + " -e FACTORY_TOKEN=" + d.token + " \\\n  ghcr.io/firemanxbr/omarchy-packaging:" + d.arch + "\n\n" +
+        "podman run --rm -e WORKER_ID=" + d.worker + " -e OMARCHY_WORKER_TOKEN=" + d.token + " \\\n  ghcr.io/firemanxbr/omarchy-packaging:" + d.arch + "\n\n" +
         "# or keep it running with compose (" + REPO + "/blob/main/factory/image/compose.yml)\n" +
-        "WORKER_ID=" + d.worker + " FACTORY_TOKEN=" + d.token + " podman compose -f compose.yml up -d";
+        "WORKER_ID=" + d.worker + " OMARCHY_WORKER_TOKEN=" + d.token + " podman compose -f compose.yml up -d";
       $("#worker-form").reset(); refresh();
     }).catch(function (e) { $("#w-btn").disabled = false; $("#pkg-state").textContent = "failed: " + e; });
     return false;

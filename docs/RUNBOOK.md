@@ -233,9 +233,13 @@ tasks from the pool ([factory/README.md](../factory/README.md)). Day to day:
   contributor token (`omc_…`) or worker token (`omw_…`) is a random secret
   hashed in D1; revoke a worker with `DELETE /factory/workers/<id>` as its
   owner, or set `revoked_at` in `build_workers` by hand.
-- **Tokens**: `FACTORY_TOKEN` (worker secret + GitHub secret) authenticates
-  workers only; rotate it with `npx wrangler secret put FACTORY_TOKEN` and
-  `gh secret set FACTORY_TOKEN`, then restart workers.
+- **Tokens**: there is no shared worker secret. Every worker — the Mac's,
+  a droplet's, the hosted fallback's — is a registration with its own
+  `omw_` token; project trust is a maintainer's decision on that
+  registration. The hosted `pool-worker.yml` runs as two registered
+  workers, one per architecture, whose tokens are the GitHub secrets
+  `POOL_WORKER_TOKEN_X86_64` / `POOL_WORKER_TOKEN_AARCH64`; to rotate one,
+  revoke the worker, register a new one, trust it, `gh secret set`.
 
 ## Known limits
 

@@ -1,7 +1,8 @@
 -- Phase 1 of the factory for contributors: anyone with a GitHub identity
 -- registers a package and runs a worker for it; results land in a staging
 -- bucket, in the contributor's workspace, never in the pool. Workers hold
--- their own revocable token; project workers keep the shared FACTORY_TOKEN.
+-- their own revocable token (the shared FACTORY_TOKEN of project workers
+-- was retired later: a NULL token_hash can no longer authenticate).
 
 CREATE TABLE contributors (
     login       TEXT PRIMARY KEY,                    -- GitHub login, verified against api.github.com/user

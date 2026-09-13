@@ -227,12 +227,9 @@ enum Command {
             default_value = "https://pool.firemanxbr.org"
         )]
         pool: String,
-        /// The worker's token (`omw_…` from `POST /factory/workers`), or the project's `FACTORY_TOKEN`.
+        /// The worker's token (`omw_…` from `POST /factory/workers`); the registration names the worker.
         #[arg(long, env = "OMARCHY_WORKER_TOKEN", hide_env_values = true)]
         worker_token: String,
-        /// Worker id; required with `FACTORY_TOKEN` (a registered token names its worker).
-        #[arg(long, env = "WORKER_ID")]
-        worker_id: Option<String>,
         /// Architecture to work for (default: this machine's).
         #[arg(long, default_value = std::env::consts::ARCH)]
         arch: String,
@@ -441,7 +438,6 @@ fn main() -> Result<()> {
             api,
             pool,
             worker_token,
-            worker_id,
             arch,
             kinds,
             labels,
@@ -454,7 +450,6 @@ fn main() -> Result<()> {
             api,
             pool,
             worker_token,
-            worker_id,
             arch: if arch == "arm64" {
                 "aarch64".to_owned()
             } else {
