@@ -348,7 +348,9 @@ export async function handleComplete(id: number, request: Request, env: Env, act
       .bind(now(), b.duration_ms ?? null, (b.log_tail ?? "").slice(-4000), b.result ? JSON.stringify(b.result) : null, id)
       .run();
     await env.DB.prepare("UPDATE build_workers SET last_seen = ?, current_task = NULL, builds_done = builds_done + 1 WHERE id = ?").bind(now(), who).run();
-    await event(env, "job", "ok", `${task.kind}${task.params ? " " + Object.values(JSON.parse(task.params)).join("/") : ""}: ${b.summary ?? "done"} by ${who}${b.duration_ms ? " in " + Math.round(b.duration_ms / 1000) + " s" : ""}`, { task: id, kind: task.kind, params: task.params ? JSON.parse(task.params) : null, worker: who, result: b.result ?? null, duration_ms: b.duration_ms ?? null });
+    const p = task.params ? (JSON.parse(task.params) as Record<string, string>) : {};
+    const label = [p.source, p.arch, p.ring, p.from && p.to ? `${p.from} → ${p.to}` : null].filter(Boolean).join("/");
+    await event(env, "job", "ok", `${task.kind}${label ? " " + label : ""}: ${b.summary ?? "done"} by ${who}${b.duration_ms ? " in " + Math.round(b.duration_ms / 1000) + " s" : ""}`, { task: id, kind: task.kind, params: p, worker: who, result: b.result ?? null, duration_ms: b.duration_ms ?? null });
     return json({ task: id, status: "done" });
   }
   if (!b.sha256 || !b.filename) return json({ error: "sha256 and filename are required" }, 400);
