@@ -152,6 +152,13 @@ tasks from the pool ([factory/README.md](../factory/README.md)). Day to day:
   worker is alive; a laptop or VM runs the same container (README, *Run a
   worker*). Every worker holds the publish token and the signing key: treat
   the machine as you would the CI runner.
+- **New upstream versions**: `factory-update.yml` (daily, 05:45 UTC from the
+  scheduler) checks each PKGBUILD's GitHub upstream, bumps `pkgver`
+  (`pkgrel=1`), refreshes checksums with `updpkgsums` and opens one pull
+  request per package with auto-merge on — CI is the gate, the merge queues
+  the build. It relies on two repository settings: *Actions may create pull
+  requests* (`can_approve_pull_request_reviews`) and *allow auto-merge*.
+  Packages without a GitHub `url=` (vi) are skipped and bumped by hand.
 - **Tokens**: `FACTORY_TOKEN` (worker secret + GitHub secret) authenticates
   workers only; rotate it with `npx wrangler secret put FACTORY_TOKEN` and
   `gh secret set FACTORY_TOKEN`, then restart workers.

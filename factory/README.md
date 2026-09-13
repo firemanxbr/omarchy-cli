@@ -39,11 +39,13 @@ PKGBUILD reviewed and merged ──▶ pool: build_requests / build_tasks (D1)
    task (`GET /api/v1/factory/built`) is queued — so nothing depends on a
    push event arriving. Optionally, a request can be recorded first so the
    dashboard shows what is waiting: `POST /api/v1/factory/requests`.
-3. **After that: automatic.** A version bump of an already approved PKGBUILD
-   is queued the same way when merged. The bump itself comes from a pull
-   request (a person, a bot, or `factory-update.yml` when it exists); CI
-   checks `pkgbuild-meta` parses it and CODEOWNERS are not required again —
-   the ruleset only asks for green checks.
+3. **After that: automatic.** `factory-update.yml` runs daily: for every
+   PKGBUILD with a GitHub `url=` it asks upstream for the latest release,
+   bumps `pkgver` (`pkgrel=1`), refreshes the checksums (`updpkgsums` in an
+   Arch container) and opens a pull request with auto-merge on. CI is the
+   only gate — CODEOWNERS are not asked again for a version bump — and the
+   merge queues the build. `factory/bin/check-updates` is the checker; a
+   person can still bump by hand the same way.
 4. **A worker builds it.** Any worker of that architecture claims the task,
    holds a lease, builds in its clean container, signs, publishes the result
    into `edge` as source `factory` and renders the edge databases. From there
@@ -141,5 +143,7 @@ factory/
   pkgbuilds/<group>/<name>/       reviewed PKGBUILDs; CODEOWNERS per group
 .github/workflows/factory-enqueue.yml   merged PKGBUILD → tasks
 .github/workflows/factory-worker.yml    a worker on a hosted runner, started on demand
+.github/workflows/factory-update.yml    daily: bump approved packages to their latest upstream release
+  bin/check-updates               which PKGBUILDs are behind their GitHub upstream
 .github/CODEOWNERS                      who approves which group
 ```
