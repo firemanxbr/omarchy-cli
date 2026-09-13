@@ -139,6 +139,11 @@ const CSS = String.raw`
   .form button:hover, .searchbar button:hover, table button:hover { border-color: var(--green); }
   table button { padding: 3px 9px; font-size: 12.5px; }
 
+  .pager { display: flex; gap: 10px; align-items: center; margin: 10px 0 6px; font-size: 12.5px; color: var(--dim); flex-wrap: wrap; }
+  .pager input { background: var(--bg-deep); border: 1px solid var(--line); color: var(--text); padding: 5px 9px; font: inherit; font-size: 12.5px; min-width: 200px; }
+  .pager select { background: var(--bg-deep); border: 1px solid var(--line); color: var(--text); padding: 5px 6px; font: inherit; font-size: 12.5px; }
+  .pager .count { margin-left: auto; }
+
   table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
   th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
   th { font-size: 11.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--dim); font-weight: 500; }
@@ -233,6 +238,31 @@ const HELPERS = String.raw`
     el.className = "pill " + (why.length ? "warn" : "ok");
     el.textContent = why.length ? "pipeline behind: " + why.join(" · ") : "pipeline keeping up";
   }
+  // Every table: the first 10 rows, a page size (10/25/50/100) and a filter,
+  // so a page never renders hundreds of rows at once. State survives the
+  // periodic refreshes. text(row) is what the filter matches; empty is the
+  // message for no rows.
+  function pager(sel, rows, render, opts) {
+    opts = opts || {}; var table = document.querySelector(sel); if (!table) return;
+    pager.state = pager.state || {}; var st = pager.state[sel] = pager.state[sel] || { n: opts.n || 10, q: "" };
+    var wrap = table.parentElement, bar = wrap.previousElementSibling;
+    if (!bar || !bar.classList.contains("pager")) {
+      bar = document.createElement("div"); bar.className = "pager";
+      bar.innerHTML = '<input type="search" placeholder="filter this table…" aria-label="filter"> <select aria-label="rows per page"><option>10</option><option>25</option><option>50</option><option>100</option></select> <span class="count"></span>';
+      wrap.parentElement.insertBefore(bar, wrap);
+      bar.querySelector("input").oninput = function () { st.q = this.value.toLowerCase(); draw(); };
+      bar.querySelector("select").onchange = function () { st.n = Number(this.value); draw(); };
+      bar.querySelector("select").value = String(st.n);
+    }
+    function text(r) { return (opts.text ? opts.text(r) : JSON.stringify(r)).toLowerCase(); }
+    function draw() {
+      var f = st.q ? rows.filter(function (r) { return text(r).indexOf(st.q) >= 0; }) : rows;
+      table.tBodies[0].innerHTML = f.slice(0, st.n).map(render).join("") || '<tr><td colspan="99" class="muted">' + (opts.empty || "nothing here") + '</td></tr>';
+      bar.querySelector(".count").textContent = f.length > st.n ? "showing " + st.n + " of " + f.length : f.length + (f.length === 1 ? " row" : " rows");
+      if (opts.after) opts.after();
+    }
+    draw();
+  }
   // Every fetch a page starts goes through busy(): the bar at the top stays
   // on while at least one is in flight.
   function busy(p) {
@@ -282,7 +312,7 @@ export const NAV: { key: PageOptions["active"]; href: string; label: string }[] 
   { key: "packages", href: "/packages", label: "Packages" },
   { key: "security", href: "/security", label: "Security" },
   { key: "factory", href: "/factory", label: "Factory" },
-  { key: "contribute", href: "/contribute", label: "Contribute" },
+  { key: "contribute", href: "/contribute", label: "Contributors" },
   { key: "review", href: "/review", label: "Review" },
   { key: "get-started", href: "/get-started", label: "Get started" },
   { key: "how-it-works", href: "/how-it-works", label: "How it works" },

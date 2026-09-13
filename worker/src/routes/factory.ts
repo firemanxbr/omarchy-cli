@@ -431,24 +431,47 @@ export async function requeueExpiredLeases(env: Env): Promise<number> {
 
 // ---------- read ----------
 
-export async function handleFactory(env: Env): Promise<Response> {
+export async function handleFactory(env: Env, url?: URL): Promise<Response> {
+  const limit = Math.min(200, Math.max(10, Number(url?.searchParams.get("limit") ?? 60) || 60));
   const counts = await env.DB.prepare("SELECT status, arch, COUNT(*) AS n FROM build_tasks GROUP BY status, arch").all();
-  const workers = await env.DB.prepare("SELECT * FROM build_workers ORDER BY last_seen DESC LIMIT 50").all<{ last_seen: string; labels: string | null }>();
-  const tasks = await env.DB.prepare("SELECT * FROM build_tasks ORDER BY CASE status WHEN 'leased' THEN 0 WHEN 'queued' THEN 1 ELSE 2 END, id DESC LIMIT 60").all<TaskRow>();
-  const requests = await env.DB.prepare("SELECT * FROM build_requests ORDER BY CASE status WHEN 'requested' THEN 0 ELSE 1 END, id DESC LIMIT 60").all();
+  // Every worker belongs to someone: the project (trust project, granted by
+  // a maintainer; or the hosted fallback, owner NULL) or a contributor.
+  const workers = await env.DB.prepare(
+    "SELECT * FROM build_workers WHERE revoked_at IS NULL ORDER BY (last_seen > ?) DESC, last_seen DESC LIMIT 200",
+  )
+    .bind(new Date(Date.now() - WORKER_ALIVE_MINUTES * 60000).toISOString())
+    .all<{ last_seen: string; labels: string | null; owner: string | null; trust: string; packages: string | null }>();
+  const tasks = await env.DB.prepare("SELECT * FROM build_tasks ORDER BY CASE status WHEN 'leased' THEN 0 WHEN 'queued' THEN 1 ELSE 2 END, id DESC LIMIT ?").bind(limit).all<TaskRow>();
+  const requests = await env.DB.prepare("SELECT * FROM build_requests ORDER BY CASE status WHEN 'requested' THEN 0 ELSE 1 END, id DESC LIMIT ?").bind(limit).all();
   const alive = Date.now() - WORKER_ALIVE_MINUTES * 60000;
   return json(
     {
       generated_at: now(),
       lease_minutes: LEASE_MINUTES,
+      limit,
       counts: counts.results,
-      workers: workers.results.map((w) => ({ ...w, labels: w.labels ? JSON.parse(w.labels) : null, alive: Date.parse(w.last_seen) > alive })),
+      workers: workers.results.map((w) => ({
+        ...w,
+        labels: w.labels ? JSON.parse(w.labels) : null,
+        packages: w.packages ? JSON.parse(w.packages) : null,
+        alive: Date.parse(w.last_seen) > alive,
+        // omarchy: runs for the project (trusted, or the hosted fallback) · community: a contributor's
+        side: w.trust === "project" || w.owner === null ? "omarchy" : "community",
+      })),
       tasks: tasks.results.map((t) => ({ ...t, log_tail: undefined })),
       requests: requests.results,
     },
     200,
     { "cache-control": "public, max-age=10" },
   );
+}
+
+/** Ephemeral hosted workers (gh-*) that have not reported for a day are forgotten; the journal keeps their builds. */
+export async function pruneWorkers(env: Env): Promise<number> {
+  const res = await env.DB.prepare("DELETE FROM build_workers WHERE owner IS NULL AND id LIKE 'gh-%' AND last_seen < ?")
+    .bind(new Date(Date.now() - 86400000).toISOString())
+    .run();
+  return res.meta.changes ?? 0;
 }
 
 /**

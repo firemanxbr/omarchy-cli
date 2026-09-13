@@ -22,8 +22,11 @@ const BODY = String.raw`
 
   <section>
     <h2>Workers</h2>
-    <p class="sub">Alive means seen in the last ten minutes. A worker with no current task is asking for work every 30 seconds.</p>
-    <div class="table-wrap"><table id="workers"><thead><tr><th>Worker</th><th>Arch</th><th>Where</th><th>Building</th><th>Done / failed</th><th>Last seen</th></tr></thead><tbody></tbody></table></div>
+    <p class="sub">Every worker belongs to someone. <b>Omarchy workers</b> run for the project — trusted by a maintainer, or the hosted fallback for pool jobs — and take pool jobs and project builds; <b>community workers</b> are contributors' own and take their (or, if shared, anyone's) community builds. Alive means seen in the last ten minutes; an idle worker asks for work every 30 seconds. <label style="margin-left:8px"><input type="checkbox" id="all-workers"> show workers not seen recently</label></p>
+    <h3 style="margin:14px 0 4px">Omarchy workers</h3>
+    <div class="table-wrap"><table id="workers"><thead><tr><th>Worker</th><th>Arch</th><th>Where</th><th>Trust</th><th>Building</th><th>Done / failed</th><th>Last seen</th></tr></thead><tbody></tbody></table></div>
+    <h3 style="margin:18px 0 4px">Community workers</h3>
+    <div class="table-wrap"><table id="cworkers"><thead><tr><th>Worker</th><th>Owner</th><th>Arch</th><th>Mode</th><th>Building</th><th>Done / failed</th><th>Last seen</th></tr></thead><tbody></tbody></table></div>
   </section>
 
   <section>
@@ -45,21 +48,31 @@ const SCRIPT = String.raw`
     return '<span class="pill" style="color:' + c + ';border-color:' + c + '">' + esc(s === "leased" ? "building" : s) + '</span>';
   }
   function paramsLabel(t) { var p = {}; try { p = typeof t.params === "string" ? JSON.parse(t.params || "{}") : (t.params || {}); } catch (e) {} return [p.source, p.from && p.to ? p.from + " → " + p.to : null, p.ring].filter(Boolean).join(" · "); }
+  // A pool job's result, in words: what it did rather than its JSON.
+  function jobResult(t) {
+    var r = {}; try { r = typeof t.result === "string" ? JSON.parse(t.result) : (t.result || {}); } catch (e) { return String(t.result).slice(0, 90); }
+    if (t.kind === "sync") return "upstream " + num(r.upstream_total) + " · uploaded " + num(r.uploaded) + " · removed " + num(r.removed) + (r.failed ? " · failed " + num(r.failed) : "") + (r.release ? " · release " + r.release[0] : " · unchanged");
+    if (t.kind === "promote") return r.verdict === "promoted" ? "promoted, release " + r.release_id : r.verdict === "blocked" ? "blocked: " + (r.reasons || []).join("; ") : r.verdict === "rolled-back" ? "rolled back to " + r.to : r.verdict === "skip" ? "nothing to promote" : JSON.stringify(r);
+    if (t.kind === "health") return r.ok ? "healthy" : "unhealthy";
+    if (t.kind === "gc") return "kept the last " + r.keep + " releases per ring";
+    if (t.kind === "render") return "rendered " + (r.repos || []).join(", ");
+    return JSON.stringify(r).slice(0, 90);
+  }
   function took(ms) { if (ms == null) return "—"; var s = Math.round(ms / 1000); return s < 60 ? s + " s" : Math.floor(s / 60) + " min " + (s % 60) + " s"; }
   skeletonTiles("#tiles", 5); skeletonRows("#registry", 8, 2); skeletonRows("#workers", 6, 2); skeletonRows("#tasks", 8, 4); skeletonRows("#requests", 8, 2);
   function loadRegistry() {
     busy(fetch("/api/v1/factory/packages")).then(function (r) { return r.json(); }).then(function (d) {
-      $("#registry tbody").innerHTML = (d.packages || []).map(function (p) {
+      pager("#registry", d.packages || [], function (p) {
         var det = p.detected || {};
         return '<tr><td><b>' + esc(p.name) + '</b> <span class="src">' + esc(p.group) + '</span></td><td><a href="' + esc(p.url) + '">' + esc(p.url.replace(/^https?:\/\/(www\.)?github\.com\//, "")) + '</a></td><td>' + esc(p.owner) + '</td><td>' + esc((p.arches || []).join(", ")) + '</td>' +
           '<td>' + esc([det.build_system, det.language, det.license, det.latest_tag].filter(Boolean).join(" · ")) + '</td><td>' + statusPill(p.status) + (p.staged_builds ? ' <span class="muted">' + p.staged_builds + ' staged</span>' : '') + '</td><td>' + esc(p.detail || "") + '</td><td>' + ago(p.updated_at) + '</td></tr>';
-      }).join("") || '<tr><td colspan="8" class="muted">no package registered yet — <a href="/contribute">be the first</a></td></tr>';
+      }, { empty: 'no package registered yet — <a href="/contribute">be the first</a>', text: function (p) { return [p.name, p.group, p.owner, p.url, p.status].join(" "); } });
     }).catch(function () { $("#registry tbody").innerHTML = ""; });
   }
   var REPO = "${REPO_URL}";
   function load() {
     loadRegistry();
-    busy(fetch("/api/v1/factory")).then(function (r) { return r.json(); }).then(function (d) {
+    busy(fetch("/api/v1/factory?limit=100")).then(function (r) { return r.json(); }).then(function (d) {
       var count = function (st, arch) { return d.counts.filter(function (c) { return c.status === st && (!arch || c.arch === arch); }).reduce(function (n, c) { return n + c.n; }, 0); };
       var alive = d.workers.filter(function (w) { return w.alive; });
       var tiles = [
@@ -71,32 +84,41 @@ const SCRIPT = String.raw`
       ];
       tiles.forEach(function (t, i) { var el = $("#tiles"), cell = el.children[i]; if (!cell) { cell = document.createElement("div"); cell.className = "tile"; el.appendChild(cell); } setTile(cell, '<div class="k">' + t[0] + '</div><div class="v num">' + t[1] + '</div><div class="s">' + t[2] + '</div>'); });
       $("#updated").textContent = "Refreshed " + ago(d.generated_at) + " · live every 30 s";
-      $("#workers tbody").innerHTML = d.workers.map(function (w) {
+      var showAll = $("#all-workers").checked;
+      var ws = d.workers.filter(function (w) { return showAll || w.alive; });
+      pager("#workers", ws.filter(function (w) { return w.side === "omarchy"; }), function (w) {
         var where = w.labels && w.labels.where ? w.labels.where : (w.hostname || "—");
         return '<tr><td class="mono">' + esc(w.id) + (w.alive ? ' <span class="pill ok">alive</span>' : '') + '</td><td>' + esc(w.arch) + '</td><td>' + esc(where) + (w.version ? ' <span class="muted">pkg-repo ' + esc(w.version) + '</span>' : '') + '</td>' +
+          '<td>' + (w.trust === "project" ? 'project' + (w.trusted_by ? ' <span class="muted">by ' + esc(w.trusted_by) + '</span>' : '') : '<span class="muted">hosted fallback</span>') + '</td>' +
           '<td>' + (w.current_task ? '#' + w.current_task : '<span class="muted">idle</span>') + '</td><td>' + num(w.builds_done) + ' / ' + num(w.builds_failed) + '</td><td>' + ago(w.last_seen) + '</td></tr>';
-      }).join("") || '<tr><td colspan="6" class="muted">no worker has reported yet</td></tr>';
-      $("#tasks tbody").innerHTML = d.tasks.map(function (t) {
+      }, { empty: showAll ? "no Omarchy worker registered" : "no Omarchy worker alive — the project's machines are off; pool jobs wait (or a hosted fallback starts for them)", text: function (w) { return w.id + " " + w.arch + " " + (w.trusted_by || "") + " " + JSON.stringify(w.labels || {}); } });
+      pager("#cworkers", ws.filter(function (w) { return w.side === "community"; }), function (w) {
+        return '<tr><td class="mono">' + esc(w.id) + (w.alive ? ' <span class="pill ok">alive</span>' : '') + '</td><td>' + esc(w.owner || "") + '</td><td>' + esc(w.arch) + '</td><td>' + esc(w.mode) + (w.packages && w.packages.length ? ' <span class="muted">' + esc(w.packages.join(", ")) + '</span>' : '') + '</td>' +
+          '<td>' + (w.current_task ? '#' + w.current_task : '<span class="muted">idle</span>') + '</td><td>' + num(w.builds_done) + ' / ' + num(w.builds_failed) + '</td><td>' + ago(w.last_seen) + '</td></tr>';
+      }, { empty: showAll ? "no community worker registered yet" : "no community worker alive right now", text: function (w) { return w.id + " " + (w.owner || "") + " " + w.arch + " " + w.mode; } });
+      pager("#tasks", d.tasks, function (t) {
         var result = t.status === "staged"
           ? '<span class="mono">' + esc(t.result_filename || "") + '</span> <a class="run" href="/api/v1/factory/tasks/' + t.id + '/artifacts/build.log">log</a> <a class="run" href="/api/v1/factory/tasks/' + t.id + '/artifacts/PKGBUILD">PKGBUILD</a>'
-          : t.status === "done" && t.result_filename
+          : t.status === "done" && t.result_filename && t.result_filename !== "-"
           ? (t.publish === 0 ? '<span class="mono">' + esc(t.result_filename) + '</span>' : '<a href="/package/' + encodeURIComponent(t.name) + '?ring=edge&arch=' + t.arch + '" class="mono">' + esc(t.result_filename) + '</a>')
+          : t.status === "done" && t.result ? '<span class="muted">' + esc(jobResult(t)) + '</span>'
           : (t.error ? '<span class="muted" title="' + esc(t.error) + '">' + esc(t.error.slice(0, 90)) + '</span>' : '<span class="muted">—</span>');
         var what = t.kind && t.kind !== "build" ? '<b>' + esc(t.kind) + '</b> <span class="muted">' + esc(paramsLabel(t)) + '</span>' : '<b>' + esc(t.name) + '</b> <span class="src">' + esc(t.group) + '</span>' + (t.version ? ' <span class="mono muted">' + esc(t.version) + '</span>' : '');
         return '<tr><td>' + t.id + '</td><td>' + what + '</td><td>' + esc(t.arch) + '</td>' +
           '<td>' + statusPill(t.status) + (t.trust === "community" ? ' <span class="pill none" title="a contributor\'s build: goes to staging, a maintainer approves">' + esc(t.owner || "community") + '</span>' : '') + (t.publish === 0 && t.trust !== "community" ? ' <span class="pill none" title="built and measured, never published">dry run</span>' : '') + (t.attempts > 1 ? ' <span class="muted">attempt ' + t.attempts + '/' + t.max_attempts + '</span>' : '') + '</td><td>' + esc(t.reason) + '</td>' +
           '<td class="mono">' + esc(t.lease_owner || "") + '</td><td>' + took(t.duration_ms) + '</td><td>' + result + '</td></tr>';
-      }).join("") || '<tr><td colspan="8" class="muted">nothing queued or built yet</td></tr>';
-      $("#requests tbody").innerHTML = d.requests.map(function (r) {
+      }, { empty: "nothing queued or built yet", text: function (t) { return [t.id, t.kind, t.name, t.arch, t.status, t.reason, t.lease_owner, t.owner, paramsLabel(t)].join(" "); } });
+      pager("#requests", d.requests, function (r) {
         var links = (r.pr_url ? ' <a class="run" href="' + esc(r.pr_url) + '">pull request</a>' : '') + (r.issue_url ? ' <a class="run" href="' + esc(r.issue_url) + '">issue</a>' : '');
         return '<tr><td>' + r.id + '</td><td><b>' + esc(r.name) + '</b> <span class="src">' + esc(r.group) + '</span></td><td>' + (r.url ? '<a href="' + esc(r.url) + '">' + esc(r.url.replace(/^https?:\/\/(www\.)?/, "")) + '</a>' : '<span class="muted">—</span>') + '</td><td>' + esc(JSON.parse(r.arches || "[]").join(", ")) + '</td>' +
           '<td>' + statusPill(r.status) + (r.approved_by ? ' <span class="muted">by ' + esc(r.approved_by) + '</span>' : '') + links + '</td>' +
           '<td>' + esc(r.requested_by || "—") + '</td><td>' + esc(r.detail || r.reason || "") + '</td><td>' + ago(r.updated_at || r.created_at) + '</td></tr>';
-      }).join("") || '<tr><td colspan="8" class="muted">no requests</td></tr>';
+      }, { empty: "no requests", text: function (r) { return [r.name, r.group, r.url, r.status, r.requested_by].join(" "); } });
       endSkeleton();
     }).catch(function (e) { $("#updated").textContent = "failed: " + e; endSkeleton(); });
   }
   load();
+  $("#all-workers").onchange = load;
   setInterval(load, 30000);
   liveStats(function () {}, 120000);
 `;

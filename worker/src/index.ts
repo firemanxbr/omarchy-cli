@@ -268,7 +268,7 @@ async function api(method: string, path: string, url: URL, request: Request, env
   if (method === "GET" && path === "/graph") return handleGraph(url, env);
   if (method === "GET" && path === "/search") return handleSearch(url, env);
   if (method === "GET" && path === "/security") return handleSecurity(url, env);
-  if (method === "GET" && path === "/factory") return handleFactory(env);
+  if (method === "GET" && path === "/factory") return handleFactory(env, url);
   if (method === "GET" && path === "/factory/built") return handleBuilt(env);
   if (method === "GET" && path === "/factory/packages") return handleListPackages(env);
   if (method === "GET" && path === "/factory/trust") return handleTrustList(env);
