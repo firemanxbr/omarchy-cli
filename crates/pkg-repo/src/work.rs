@@ -98,6 +98,10 @@ pub fn run(opts: &WorkOptions) -> Result<()> {
         opts.api,
         opts.kinds.join(", ")
     );
+    // The keyrings the health check and the sync need, before the first job.
+    if let Err(e) = keyrings(opts) {
+        eprintln!("warning: keyrings not fetched yet ({e:#}); the first sync will retry");
+    }
     let mut idle = 0u64;
     let mut done = 0u32;
     loop {
