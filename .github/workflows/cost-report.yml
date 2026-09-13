@@ -1,0 +1,67 @@
+name: Cost report
+
+# Every morning: the pool's own estimate of this month's Cloudflare bill
+# (GET /api/v1/cost — computed daily by the brain from Cloudflare's
+# analytics, src/cost.ts) posted as a comment on the "Cost report" issue, so
+# GitHub e-mails it to whoever watches the issue. The run FAILS when the
+# projection reaches the warning line, which is one more e-mail. No secret
+# of the pool's is involved: the endpoint is public and the comment uses
+# the workflow's own token.
+
+on:
+  schedule:
+    - cron: "45 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  contents: read
+
+env:
+  OMARCHY_API: ${{ vars.OMARCHY_API }}
+  GH_TOKEN: ${{ github.token }}
+  WARN_USD: "15"
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read the estimate
+        id: cost
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 6); do
+            if curl -sf "$OMARCHY_API/api/v1/cost" -o cost.json; then break; fi
+            sleep 60
+          done
+          [[ -s cost.json ]] || { echo "::error::no estimate at $OMARCHY_API/api/v1/cost"; exit 1; }
+          jq . cost.json
+          {
+            echo "projected=$(jq -r .projected_usd cost.json)"
+            echo "mtd=$(jq -r .month_to_date_usd cost.json)"
+            echo "month=$(jq -r .month cost.json)"
+            echo "guard=$(jq -r '.guard // ""' cost.json)"
+          } >> "$GITHUB_OUTPUT"
+      - name: Post it on the Cost report issue
+        run: |
+          set -euo pipefail
+          n="$(gh issue list --label cost-report --state open --json number --jq '.[0].number // empty')"
+          if [[ -z "$n" ]]; then
+            gh label create cost-report --description "the daily Cloudflare bill estimate" --color 0e8a16 2>/dev/null || true
+            n="$(gh issue create --title "Cost report: this month's Cloudflare bill, estimated daily" --label cost-report \
+                  --body "One comment a day from the Cost report workflow: what this account's Cloudflare bill looks like so far this month and where it is heading, as the pool estimates it (docs/RUNBOOK.md, Costs). Subscribe to this issue to get it by e-mail." | grep -o '[0-9]*$')"
+          fi
+          body="$(jq -r --arg warn "$WARN_USD" '
+            def usd: "US$ " + (. | tostring);
+            "**\(.month)** — day \(.day_of_month) of \(.days_in_month) · estimated \(.estimated_at)\n\n" +
+            "| | |\n|---|---|\n| So far | **\(.month_to_date_usd | usd)** |\n| Projected for the month | **\(.projected_usd | usd)** |\n" +
+            (if .guard then "\n> ⚠️ **Over the guard (US$ 25): the jobs that write are paused** until the estimate is back under it.\n" else "" end) +
+            "\n| Item | Used | Included | So far | Projected |\n|---|---:|---:|---:|---:|\n" +
+            ([.lines[] | "| \(.item) | \(.used | if . > 1e6 then (./1e6 | floor | tostring) + " M" else (. * 100 | round / 100 | tostring) end) \(.unit) | \(.included | if . > 1e6 then (./1e6 | floor | tostring) + " M" else tostring end) | \(.month_to_date_usd | usd) | \(.projected_usd | usd) |"] | join("\n")) +
+            "\n\nBudget: the card is capped at US$ 30; Cloudflare e-mails at US$ 10, 20 and 28 of actual charges; the pool pauses writing jobs at a projected US$ 25."
+          ' cost.json)"
+          gh issue comment "$n" --body "$body"
+      - name: Warn when the projection reaches the line
+        run: |
+          p="${{ steps.cost.outputs.projected }}"
+          awk -v p="$p" -v w="$WARN_USD" 'BEGIN { exit !(p+0 >= w+0) }' && { echo "::error::projected US$ $p for ${{ steps.cost.outputs.month }} reaches the US$ $WARN_USD warning line"; exit 1; } || echo "projected US$ $p"

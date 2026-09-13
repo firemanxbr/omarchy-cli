@@ -51,6 +51,10 @@ pub struct SyncOptions {
     /// name the ring already serves from one of them is neither imported nor
     /// pinned (chaotic-aur defers to Arch and the OPR).
     pub defer_to: Vec<String>,
+    /// Leave the release to the caller: the report carries what to pin and
+    /// what to drop, so one release can cover several sources (a release
+    /// copies the ring's whole selection; D1 bills every row written).
+    pub defer_release: bool,
 }
 
 #[derive(Debug, Default)]
@@ -69,8 +73,13 @@ pub struct SyncReport {
     /// `(filename, upstream sha256)` of packages whose filename already holds a
     /// different object in the pool; the existing object was pinned instead.
     pub collisions: Vec<(String, String)>,
+    /// With `defer_release`: the sha256s to pin and the names to drop for
+    /// the ring to serve this source's current upstream (empty when unchanged).
+    pub pending_add: Vec<String>,
+    pub pending_remove: Vec<String>,
 }
 
+#[allow(clippy::too_many_lines)]
 pub fn run(api: &Api, opts: &SyncOptions) -> Result<SyncReport, RepoError> {
     let started = Instant::now();
     let base = opts.base_url.clone().unwrap_or_else(|| {
@@ -166,6 +175,12 @@ pub fn run(api: &Api, opts: &SyncOptions) -> Result<SyncReport, RepoError> {
         return Ok(report);
     }
 
+    if opts.defer_release {
+        report.pending_add = add;
+        report.pending_remove = remove;
+        post_sync_event(api, opts, &report, &base, started)?;
+        return Ok(report);
+    }
     let note = format!(
         "sync {} {}: {} new, {} removed, {} upstream",
         opts.source, opts.arch, report.uploaded, report.removed, report.upstream_total
@@ -518,6 +533,7 @@ mod tests {
             dry_run: true,
             keyring: None,
             defer_to: defer_to.iter().map(|s| (*s).to_owned()).collect(),
+            defer_release: false,
         }
     }
 

@@ -94,6 +94,10 @@ export interface Env {
   GITHUB_TOKEN?: string;
   /** Signs per-job tokens (jobtoken.ts); any random string. */
   JOB_TOKEN_SECRET?: string;
+  /** A Cloudflare API token with Analytics: Read, and the account, for the daily cost estimate (cost.ts). */
+  CLOUDFLARE_ANALYTICS_TOKEN?: string;
+  CLOUDFLARE_ACCOUNT_ID?: string;
+  CLOUDFLARE_D1_ID?: string;
   /** The pool's OpenPGP signing key (armored private key) and its passphrase, if any — signing.ts. */
   SIGNING_KEY?: string;
   SIGNING_KEY_PASSPHRASE?: string;
@@ -291,6 +295,11 @@ async function api(method: string, path: string, url: URL, request: Request, env
   if (method === "GET" && path === "/stats") return handleStats(env);
   if (method === "GET" && path === "/version") return json(version(env), 200, { "cache-control": "public, max-age=30" });
   if (method === "GET" && path === "/status") return handleServiceStatus(env);
+  if (method === "GET" && path === "/cost") {
+    const row = await env.DB.prepare("SELECT created_at, status, payload FROM events WHERE kind = 'cost' ORDER BY id DESC LIMIT 1").first<{ created_at: string; status: string; payload: string }>();
+    const guard = await env.DB.prepare("SELECT value FROM settings WHERE key = 'cost_guard'").first<{ value: string }>();
+    return json(row ? { estimated_at: row.created_at, status: row.status, guard: guard?.value ?? null, ...JSON.parse(row.payload) } : { error: "no estimate yet" }, row ? 200 : 404, { "cache-control": "public, max-age=300" });
+  }
   if (method === "GET" && path === "/signing-key") {
     const k = await publicKey(env);
     return k ? json(k, 200, { "cache-control": "public, max-age=3600" }) : json({ error: "the pool has no signing key configured" }, 404);

@@ -96,15 +96,46 @@ export async function releaseManifests(
   return out.map((o) => o.m);
 }
 
+/**
+ * What a release holds, computed once — a release is immutable — and kept
+ * on its row (migration 0015): the overview and the release views read
+ * three numbers instead of joining thousands of rows on every call.
+ */
 export async function releaseSummary(env: Env, releaseId: number): Promise<{ package_count: number; size_download: number }> {
-  const row = await env.DB.prepare(
+  const row = await env.DB.prepare("SELECT package_count, bytes FROM releases WHERE id = ?").bind(releaseId).first<{ package_count: number | null; bytes: number | null }>();
+  if (row && row.package_count !== null && row.bytes !== null) return { package_count: row.package_count, size_download: row.bytes };
+  const fresh = await env.DB.prepare(
     `SELECT COUNT(*) AS package_count, COALESCE(SUM(p.size_download), 0) AS size_download
        FROM release_packages rp JOIN packages p ON p.id = rp.package_id
       WHERE rp.release_id = ?`,
   )
     .bind(releaseId)
     .first<{ package_count: number; size_download: number }>();
-  return row ?? { package_count: 0, size_download: 0 };
+  const out = fresh ?? { package_count: 0, size_download: 0 };
+  await env.DB.prepare("UPDATE releases SET package_count = ?, bytes = ? WHERE id = ?").bind(out.package_count, out.size_download, releaseId).run();
+  return out;
+}
+
+export interface SourceSlice {
+  source: string;
+  arch: string;
+  packages: number;
+  bytes: number;
+}
+
+/** Per (source, arch) breakdown of a release, computed once and stored. */
+export async function releaseSources(env: Env, releaseId: number): Promise<SourceSlice[]> {
+  const row = await env.DB.prepare("SELECT sources FROM releases WHERE id = ?").bind(releaseId).first<{ sources: string | null }>();
+  if (row?.sources) return JSON.parse(row.sources) as SourceSlice[];
+  const fresh = await env.DB.prepare(
+    `SELECT p.source, p.repo_arch AS arch, COUNT(*) AS packages, COALESCE(SUM(p.size_download), 0) AS bytes
+       FROM release_packages rp JOIN packages p ON p.id = rp.package_id
+      WHERE rp.release_id = ? GROUP BY p.source, p.repo_arch ORDER BY p.repo_arch, p.source`,
+  )
+    .bind(releaseId)
+    .all<SourceSlice>();
+  await env.DB.prepare("UPDATE releases SET sources = ? WHERE id = ?").bind(JSON.stringify(fresh.results), releaseId).run();
+  return fresh.results;
 }
 
 function toBase64(gz: ArrayBuffer | number[]): string {

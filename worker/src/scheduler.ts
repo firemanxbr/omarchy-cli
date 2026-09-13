@@ -4,6 +4,7 @@ import { snapshotMetrics } from "./metrics";
 import { syncGovernance } from "./governance";
 import { syncRequests } from "./requests";
 import { checkUpdates } from "./updates";
+import { costGuard, dailyCost } from "./cost";
 
 /**
  * The pool's own scheduler. GitHub's cron is best-effort — on 2026-09-12 it
@@ -54,7 +55,11 @@ export const SYNC_SOURCES: { source: string; arch: string; ring: string; base_ur
 ];
 
 export const RULES: Rule[] = [
-  { workflow: "sync.yml", every: 60, job: { kind: "sync", params: {} } },
+  // Every three hours, one task per architecture: a release copies the
+  // ring's whole selection and D1 bills every row written, so the sources
+  // of an architecture are synced together and pinned as one release per
+  // ring (cost review, 2026-09-13).
+  { workflow: "sync.yml", every: 180, job: { kind: "sync", params: {} } },
   { workflow: "security.yml", every: 180, job: { kind: "security", params: {} } },
   { workflow: "factory-enqueue.yml", every: 60, job: { kind: "enqueue", params: {} } },
   { workflow: "promote.yml", at: { hour: 6, minute: 0 }, inputs: { from: "edge", to: "rc", note: "daily rc" }, job: { kind: "promote", params: { from: "edge", to: "rc", note: "daily rc" } } },
@@ -64,17 +69,23 @@ export const RULES: Rule[] = [
   { workflow: "gc.yml", at: { hour: 4, minute: 0, weekday: 0 }, job: { kind: "gc", params: {} } },
 ];
 
-/** The tasks a rule expands to in job mode: sync is one per source and architecture, health one per ring and architecture. */
+/** The tasks a rule expands to in job mode: sync is one per architecture (all its sources), health one per ring and architecture. */
 export function jobsOf(rule: Rule): { kind: string; params: Record<string, string>; arch: string }[] {
   const j = rule.job;
   if (!j) return [];
-  if (j.kind === "sync") return SYNC_SOURCES.map((s) => ({ kind: "sync", params: { ...s, defer_to: s.defer_to ?? "" }, arch: s.arch }));
+  if (j.kind === "sync") return ["x86_64", "aarch64"].map((arch) => syncJobFor(arch));
   if (j.kind === "health") {
     const out: { kind: string; params: Record<string, string>; arch: string }[] = [];
     for (const ring of ["edge", "rc", "stable"]) for (const arch of ["x86_64", "aarch64"]) out.push({ kind: "health", params: { ring, arch }, arch });
     return out;
   }
   return [{ kind: j.kind, params: j.params, arch: j.arch ?? "x86_64" }];
+}
+
+/** The sync task of one architecture: every source of it, in the order of the table, one release per ring at the end. */
+export function syncJobFor(arch: string): { kind: string; params: Record<string, string>; arch: string } {
+  const sources = SYNC_SOURCES.filter((s) => s.arch === arch).map((s) => ({ ...s, defer_to: s.defer_to ?? "" }));
+  return { kind: "sync", params: { arch, sources: JSON.stringify(sources) }, arch };
 }
 
 function jobMode(env: Env, kind: string): boolean {
@@ -215,10 +226,23 @@ export async function runScheduler(env: Env, now = new Date()): Promise<string[]
       log.push(`metrics: ${String(e)}`);
     }
   }
+  // The bill: estimated once a day after 06:30 UTC; the guard pauses the
+  // jobs that write when the month heads over budget (cost.ts).
+  if (now.getUTCHours() * 60 + now.getUTCMinutes() >= 6 * 60 + 30 && env.CLOUDFLARE_ANALYTICS_TOKEN) {
+    try {
+      const c = await dailyCost(env, now);
+      if (c !== "cost: estimated today") log.push(c);
+    } catch (e) {
+      log.push(`cost: ${String(e)}`);
+    }
+  }
+  const guard = await costGuard(env);
+  if (guard) log.push(`cost guard up — no sync, promote, render, security or enqueue jobs: ${guard}`);
   // Rules whose kind runs as pulled jobs: the cron creates the tasks; a
   // trusted worker anywhere does the work. No GitHub in the loop.
   for (const rule of RULES) {
     if (!rule.job || !jobMode(env, rule.job.kind)) continue;
+    if (guard && ["sync", "promote", "render", "security", "enqueue"].includes(rule.job.kind)) continue;
     for (const job of jobsOf(rule)) {
       try {
         const { due, why } = isDue({ ...rule, inputs: undefined }, await recentJobs(env, job.kind, job.params), now);

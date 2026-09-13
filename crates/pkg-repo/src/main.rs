@@ -402,6 +402,7 @@ fn main() -> Result<()> {
                 dry_run,
                 keyring,
                 defer_to,
+                defer_release: false,
             },
         ),
         Command::Promote {

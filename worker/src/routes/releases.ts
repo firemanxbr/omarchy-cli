@@ -1,7 +1,7 @@
 import { signingEnabled, detachedSignature } from "../signing";
 import { isRing, json, type Env, type Ring } from "../index";
 import { artifactKey, isRepoArch, SHORT } from "../r2";
-import { releaseManifests, releaseSummary, ringHead, type ManifestDetail, type ReleaseRow } from "../db";
+import { releaseManifests, releaseSummary, releaseSources, ringHead, type ManifestDetail, type ReleaseRow } from "../db";
 
 interface CreateRelease {
   ring: string;
@@ -103,10 +103,18 @@ export async function handleCreateRelease(request: Request, env: Env): Promise<R
       "INSERT INTO ring_heads (ring, release_id) VALUES (?, ?) ON CONFLICT(ring) DO UPDATE SET release_id = excluded.release_id",
     ).bind(ring, id),
   );
+  // The objects this release pins are "released" from now on (the overview
+  // counts them without touching release_packages again).
+  for (let i = 0; i < added.length; i += 2000) {
+    stmts.push(env.DB.prepare("UPDATE packages SET released = 1 WHERE released = 0 AND id IN (SELECT value FROM json_each(?))").bind(JSON.stringify(added.slice(i, i + 2000))));
+  }
   await env.DB.batch(stmts);
+  // Immutable from here: what it holds is computed once and kept on the row.
+  const summary = await releaseSummary(env, id);
+  await releaseSources(env, id);
 
   const release = await env.DB.prepare("SELECT * FROM releases WHERE id = ?").bind(id).first<ReleaseRow>();
-  return json({ release, ...(await releaseSummary(env, id)) }, 201);
+  return json({ release, ...summary }, 201);
 }
 
 /** Above this many manifests a caller must page (`limit`/`offset`). */
@@ -165,8 +173,7 @@ export async function handleGetRelease(ring: string, url: URL, env: Env): Promis
 export async function handleReleaseHistory(ring: string, env: Env): Promise<Response> {
   if (!isRing(ring)) return json({ error: "unknown ring" }, 404);
   const rows = await env.DB.prepare(
-    `SELECT r.*, (SELECT COUNT(*) FROM release_packages rp WHERE rp.release_id = r.id) AS package_count,
-            (h.release_id IS NOT NULL) AS is_head
+    `SELECT r.*, (h.release_id IS NOT NULL) AS is_head
        FROM releases r LEFT JOIN ring_heads h ON h.release_id = r.id
       WHERE r.ring = ? ORDER BY r.seq DESC LIMIT 50`,
   )

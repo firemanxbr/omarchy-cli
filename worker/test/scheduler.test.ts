@@ -10,9 +10,9 @@ describe("scheduler rules", () => {
 
   it("dispatches an interval workflow only once it is overdue and idle", () => {
     const now = at("2026-09-12T16:00:00Z");
-    expect(isDue(sync, [run("2026-09-12T15:20:00Z")], now).due).toBe(false); // 40 min ago, every 60
-    expect(isDue(sync, [run("2026-09-12T14:50:00Z")], now).due).toBe(true); // 70 min ago
-    expect(isDue(sync, [run("2026-09-12T14:50:00Z", "in_progress")], now).due).toBe(false);
+    expect(isDue(sync, [run("2026-09-12T13:20:00Z")], now).due).toBe(false); // 160 min ago, every 180
+    expect(isDue(sync, [run("2026-09-12T12:50:00Z")], now).due).toBe(true); // 190 min ago
+    expect(isDue(sync, [run("2026-09-12T12:50:00Z", "in_progress")], now).due).toBe(false);
     expect(isDue(sync, [], now).due).toBe(true); // never ran
   });
 

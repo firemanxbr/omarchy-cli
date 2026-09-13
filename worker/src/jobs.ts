@@ -5,7 +5,7 @@
  * a per-job token. No credential of the maintainer's touches the pool.
  */
 import { json, type Env } from "./index";
-import { createJob, SYNC_SOURCES } from "./scheduler";
+import { createJob, SYNC_SOURCES, syncJobFor } from "./scheduler";
 import type { Contributor } from "./routes/contributors";
 
 const RINGS = ["edge", "rc", "stable"];
@@ -18,6 +18,13 @@ export async function handleQueueJob(c: Contributor, request: Request, env: Env)
   let job: { kind: string; params: Record<string, string>; arch: string };
   switch (b.kind) {
     case "sync": {
+      // A whole architecture (one release per ring, like the scheduler's), or one source.
+      if (!s("source")) {
+        const arch = s("arch") || "x86_64";
+        if (!ARCHES.includes(arch)) return json({ error: "sync needs arch (x86_64, aarch64), or a source" }, 400);
+        job = syncJobFor(arch);
+        break;
+      }
       const src = SYNC_SOURCES.find((x) => x.source === s("source") && x.arch === (s("arch") || "x86_64") && x.ring === (s("ring") || "edge"));
       if (!src) return json({ error: "sync needs a known source, arch and ring", sources: SYNC_SOURCES.map((x) => `${x.source}/${x.arch}→${x.ring}`) }, 400);
       job = { kind: "sync", params: { ...src, defer_to: src.defer_to ?? "" }, arch: src.arch };

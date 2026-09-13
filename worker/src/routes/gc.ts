@@ -44,11 +44,21 @@ export async function handleUnreferenced(url: URL, env: Env): Promise<Response> 
   });
 }
 
-/** Deletes unreferenced packages: R2 objects first, then the index rows. */
+/**
+ * Deletes unreferenced packages: R2 objects first, then the index rows.
+ * Before that, the membership of every release outside retention is
+ * dropped: a release whose objects are being deleted cannot be served or
+ * rolled back to anyway, its row and note stay in the history, and
+ * release_packages (D1 bills every row read from it) shrinks to what the
+ * last `keep` releases per ring actually pin.
+ */
 export async function handleGc(url: URL, env: Env): Promise<Response> {
   const keep = Math.max(1, Number(url.searchParams.get("keep") ?? 3));
   const limit = Math.min(Number(url.searchParams.get("limit") ?? 200), 500);
-  const { packages } = await unreferenced(env, keep, graceOf(url));
+  const { protectedReleases, packages } = await unreferenced(env, keep, graceOf(url));
+  const pruned = await env.DB.prepare("DELETE FROM release_packages WHERE release_id NOT IN (SELECT value FROM json_each(?))")
+    .bind(JSON.stringify(protectedReleases))
+    .run();
   const victims = packages.slice(0, limit);
   let bytes = 0;
   for (const p of victims) {
@@ -58,10 +68,9 @@ export async function handleGc(url: URL, env: Env): Promise<Response> {
       env.DB.prepare("DELETE FROM package_requires WHERE package_id = ?").bind(p.id),
       env.DB.prepare("DELETE FROM package_files WHERE package_id = ?").bind(p.id),
       env.DB.prepare("DELETE FROM package_file_lists WHERE package_id = ?").bind(p.id),
-      env.DB.prepare("DELETE FROM release_packages WHERE package_id = ?").bind(p.id),
       env.DB.prepare("DELETE FROM packages WHERE id = ?").bind(p.id),
     ]);
     bytes += p.size_download;
   }
-  return json({ keep, deleted: victims.length, bytes, remaining: packages.length - victims.length });
+  return json({ keep, deleted: victims.length, bytes, remaining: packages.length - victims.length, membership_rows_pruned: pruned.meta.changes ?? 0 });
 }
