@@ -143,7 +143,9 @@ export async function handleStats(env: Env): Promise<Response> {
   ).all();
   const metricsSeries = await env.DB.prepare(
     `SELECT created_at, json_extract(payload, '$.pool.objects') AS objects, json_extract(payload, '$.pool.bytes') AS bytes,
-            json_extract(payload, '$.actions.running') AS running, json_extract(payload, '$.actions.runs') AS runs
+            COALESCE(json_extract(payload, '$.jobs.running'), json_extract(payload, '$.actions.running')) AS running,
+            COALESCE(json_extract(payload, '$.jobs.runs'), json_extract(payload, '$.actions.runs')) AS runs,
+            json_extract(payload, '$.workers.alive') AS workers
        FROM events WHERE kind = 'metrics' AND created_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-7 days') ORDER BY id`,
   ).all();
   const latestMetrics = await env.DB.prepare("SELECT payload, created_at FROM events WHERE kind = 'metrics' ORDER BY id DESC LIMIT 1").first<{ payload: string; created_at: string }>();

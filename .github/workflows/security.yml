@@ -11,9 +11,11 @@ name: Security
 # stable whose clean, newer version edge already serves is pulled in as one
 # release without waiting for the soak — rendered, health-checked on both
 # architectures and rolled back if that fails, like any promotion.
+# Manual only: the security run is a pulled job (`security` in JOB_KINDS —
+# the pool's scheduler queues it every three hours and a project worker
+# runs it: feeds, matches, fast-track, render, health, rollback). This
+# workflow remains for a run by hand on a GitHub runner.
 on:
-  schedule:
-    - cron: "40 */3 * * *"
   workflow_dispatch:
 
 concurrency:

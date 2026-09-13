@@ -51,7 +51,7 @@ bucket_name = "omarchy-factory-staging"
 DEFAULT_RING = "stable"
 # Task kinds the scheduler creates as pulled jobs (pkg-repo work) instead of
 # GitHub workflows: sync, promote, render, health, security, metrics, gc.
-JOB_KINDS = "gc,health,sync,promote"
+JOB_KINDS = "gc,health,sync,promote,security,metrics"
 # "Sign in with GitHub": the OAuth App's client id (the secret is a Worker
 # secret, GITHUB_OAUTH_CLIENT_SECRET). Empty = the token form only.
 GITHUB_OAUTH_CLIENT_ID = ""

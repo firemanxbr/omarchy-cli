@@ -11,7 +11,7 @@ workflows and the publisher.
 | Index API | https://pkgs.firemanxbr.org/api/v1/stats |
 | Pool (static, what pacman reads) | https://pool.firemanxbr.org/x86_64/ · `/aarch64/` |
 | Signing key | `docs/omarchy-staging.pub.asc` · https://pool.firemanxbr.org/omarchy-staging.pub.asc · https://pkgs.firemanxbr.org/api/v1/signing-key (expires 2027-09-12); the private key is the Worker secret `SIGNING_KEY` — nowhere else |
-| Workflows | Sync (hourly) · Promote (edge→rc 06:00 UTC, rc→stable 09:00 UTC after a one-day soak, evidence-gated, auto-rollback) · Health (daily, both arches) · GC (Sundays) · Metrics (every 30 min) · Release (every merge into `main`) |
+| Jobs (pulled by project workers) | Sync (hourly) · Promote (edge→rc 06:00 UTC, rc→stable 09:00 UTC after a one-day soak, evidence-gated, auto-rollback) · Health (daily, both arches) · Security (every 3 h, with fast-track) · GC (Sundays) · Metrics snapshot (every 30 min, by the brain itself) · Release (GitHub, every merge into `main`) |
 | Running version | https://pkgs.firemanxbr.org/api/v1/version · the chip in the dashboard header |
 
 ## Trust model
@@ -110,10 +110,12 @@ that release's run, or `git checkout vX.Y.Z && cd worker && npx wrangler deploy
 
 ## Security data
 
-`security.yml` (every 3 h) fetches the Arch and Debian trackers, KEV and EPSS,
+The `security` job (every 3 h, pulled by a project worker; `security.yml`
+does the same by hand) fetches the Arch and Debian trackers, KEV and EPSS,
 matches them (`pkg-repo security`) and then fast-tracks fixes into `rc` and
 `stable` (`pkg-repo fast-track`, `--min-severity medium`, exploited-in-the-wild
-always). Both are safe to run by hand with `--dry-run`. A wrong match is a
+always), renders, checks health on both architectures and rolls back a ring
+that fails. Both commands are safe to run by hand with `--dry-run`. A wrong match is a
 tracker's mistake or a name collision: open an issue with the package and the
 advisory id shown on the package page; the `same_project` heuristic in
 `crates/pkg-repo/src/security.rs` is where collisions are rejected.
@@ -122,12 +124,14 @@ advisory id shown on the package page; the `same_project` heuristic in
 
 GitHub's cron is best-effort (on 2026-09-12 it delayed the hourly sync by an
 hour and never started the half-hourly metrics). A Cloudflare cron trigger on
-the worker (`src/scheduler.ts`, every ten minutes) reads each workflow's recent
-runs and dispatches the ones that are overdue — intervals for sync (60 min),
-metrics (30 min) and security (3 h); daily slots for promote (06:00 edge→rc,
-09:00 rc→stable), health (08:30) and the Sunday GC — never doubling a run that
-is queued or in progress, and giving GitHub's own cron ten minutes' head start.
-Each dispatch is a `dispatch` line in the journal. It needs the worker secret
+the worker (`src/scheduler.ts`, every ten minutes) is the pool's own clock:
+intervals for sync (60 min) and security (3 h); daily slots for promote
+(06:00 edge→rc, 09:00 rc→stable), health (08:30) and the Sunday GC — each
+queued as a pulled job (below) when due and never doubled while one is
+queued or running; the metrics snapshot (30 min) it takes itself. Kinds not
+in `JOB_KINDS` are dispatched as workflows instead, and the factory's
+`factory-enqueue.yml`/`factory-update.yml` still are. Each dispatch is a
+`dispatch` line in the journal. Dispatching needs the worker secret
 `GITHUB_TOKEN` (fine-grained, this repository, *Actions: read and write*):
 
 ```bash
@@ -156,13 +160,14 @@ with a maintainer's contributor token; an admin names maintainers with
 `PATCH /factory/contributors/<login> {"role":"maintainer","areas":[…]}`
 (the publish token works for that while the transition lasts). Every task
 runs with a per-job token the pool issues at claim time (SECURITY.md);
-the worker's own token only claims. Kinds not listed in `JOB_KINDS` keep
-running as GitHub workflows, dispatched by the same scheduler; today
-`sync`, `promote`, `health` and `gc` are jobs (their workflows keep only
-`workflow_dispatch`, for manual runs), `security` and `metrics` still run
-on GitHub. When no project worker is idle, the scheduler starts one on a
-GitHub-hosted runner (`pool-worker.yml`) — the fallback fleet. Worker
-secrets: `JOB_TOKEN_SECRET` (any random string) signs the job tokens.
+the worker's own token only claims. Kinds not listed in `JOB_KINDS` would
+run as GitHub workflows, dispatched by the same scheduler; today `sync`,
+`promote`, `health`, `security` and `gc` are all jobs (their workflows keep
+only `workflow_dispatch`, for manual runs) and `metrics` is the brain's own
+snapshot — no pipeline step runs on GitHub any more. When no project
+worker is idle, the scheduler starts one on a GitHub-hosted runner
+(`pool-worker.yml`) — the fallback fleet. Worker secrets:
+`JOB_TOKEN_SECRET` (any random string) signs the job tokens.
 
 ## Maintainers: reviewing contributed builds
 

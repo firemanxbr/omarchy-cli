@@ -1,5 +1,6 @@
 import type { Env } from "./index";
 import { requeueExpiredLeases, pruneWorkers } from "./routes/factory";
+import { snapshotMetrics } from "./metrics";
 
 /**
  * The pool's own scheduler. GitHub's cron is best-effort — on 2026-09-12 it
@@ -51,7 +52,6 @@ export const SYNC_SOURCES: { source: string; arch: string; ring: string; base_ur
 
 export const RULES: Rule[] = [
   { workflow: "sync.yml", every: 60, job: { kind: "sync", params: {} } },
-  { workflow: "metrics.yml", every: 30 },
   { workflow: "security.yml", every: 180, job: { kind: "security", params: {} } },
   { workflow: "factory-enqueue.yml", every: 60 },
   { workflow: "promote.yml", at: { hour: 6, minute: 0 }, inputs: { from: "edge", to: "rc", note: "daily rc" }, job: { kind: "promote", params: { from: "edge", to: "rc", note: "daily rc" } } },
@@ -180,6 +180,14 @@ export async function runScheduler(env: Env, now = new Date()): Promise<string[]
     if (gone) log.push(`factory: ${gone} unregistered worker(s) forgotten`);
   } catch (e) {
     log.push(`factory requeue: ${String(e)}`);
+  }
+  // The metrics snapshot is the brain's own bookkeeping: no worker needed.
+  if (jobMode(env, "metrics")) {
+    try {
+      log.push(await snapshotMetrics(env, now));
+    } catch (e) {
+      log.push(`metrics: ${String(e)}`);
+    }
   }
   // Rules whose kind runs as pulled jobs: the cron creates the tasks; a
   // trusted worker anywhere does the work. No GitHub in the loop.
