@@ -186,11 +186,15 @@ role — approves or rejects:
 - **Reject** needs a note; the package returns to *registered* with the
   note in its detail, the staged objects expire with the rest.
 
-**Sign in with GitHub** (the header's *Sign in*) is a GitHub OAuth App:
-create one at *GitHub → Settings → Developer settings → OAuth Apps* with
-the callback URL `https://omarchy-pool.firemanxbr.org/auth/github/callback`
-(and the dashboard as homepage), then set `GITHUB_OAUTH_CLIENT_ID` in
-`wrangler.toml` and `npx wrangler secret put GITHUB_OAUTH_CLIENT_SECRET`.
+**Sign in with GitHub** (the header's *Sign in*) is the GitHub OAuth App
+`omarchy-pool` (firemanxbr's *Settings → Developer settings → OAuth Apps*;
+callback `https://omarchy-pool.firemanxbr.org/auth/github/callback`,
+homepage the dashboard, no device flow, expiring user tokens on — the
+token is used once, to read the login). Its client id is
+`GITHUB_OAUTH_CLIENT_ID` in `wrangler.toml`; the secret is set with
+`npx wrangler secret put GITHUB_OAUTH_CLIENT_SECRET` and rotated from the
+app's page (*Generate a new client secret*, set, then delete the old one).
+The logo is `docs/omarchy-pool-logo.png`.
 The session is an HttpOnly cookie on the dashboard's origin; the pages call
 the API same-origin. Without the app, the Contributors page still accepts a
 GitHub token used once.
