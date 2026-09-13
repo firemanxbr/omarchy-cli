@@ -46,7 +46,7 @@ const SEARCH_SCRIPT = String.raw`
       $("#results tbody").innerHTML = rows.map(function (p) {
         return '<tr><td><a href="/package/' + encodeURIComponent(p.name) + '?ring=' + ring + '&arch=' + arch + '"><b>' + esc(p.name) + '</b></a></td><td class="mono">' + esc(p.version) + '</td><td><span class="src">' + esc(p.source) + '</span></td><td class="muted">' + esc(p.description || "") + '</td><td class="num">' + bytes(p.size_download) + '</td></tr>';
       }).join("");
-    }).catch(function (e) { $("#hint").textContent = "search failed: " + e; });
+    }).catch(function (e) { $("#hint").textContent = "search failed: " + e; endSkeleton(); });
   }
   $("#q").value = q.get("q") || "";
   $("#q").addEventListener("input", function () { clearTimeout(timer); timer = setTimeout(function () { sync(); run(); }, 250); });
@@ -194,16 +194,16 @@ const PACKAGE_SCRIPT = String.raw`
 
   // The index can be busy during a bulk import; a transient 5xx gets retried.
   function loadPackage(attempt) {
-    if (attempt === 1) { skeletonRows("#rings", 6, 3); skeletonText("#desc"); ["#graph", "#sec-own", "#sec-exposed"].forEach(function (id) { var el = $(id); if (el && !el.innerHTML.trim()) el.innerHTML = '<div class="empty loading">Resolving dependencies and advisories</div>'; }); }
+    if (attempt === 1) { skeletonRows("#rings", 6, 3); skeletonText("#desc"); ["#graph", "#sec-own", "#sec-exposed"].forEach(function (id) { var el = $(id); if (el && !el.innerHTML.trim()) el.innerHTML = '<div class="empty loading skel">Resolving dependencies and advisories</div>'; }); }
     busy(fetch("/api/v1/package/" + encodeURIComponent(name) + "?ring=" + ring + "&arch=" + arch)).then(function (r) {
       if (r.status >= 500) throw new Error("index busy (HTTP " + r.status + ")");
       return r.json();
     }).then(function (d) {
-      if (d.error) { $("#desc").textContent = d.error; $("#graph").innerHTML = ""; return; }
-      render(d);
+      if (d.error) { endSkeleton(); $("#desc").textContent = d.error; $("#graph").innerHTML = ""; return; }
+      render(d); endSkeleton();
     }).catch(function (e) {
       if (attempt < 4) { $("#desc").textContent = "The index is busy (" + e.message + "); retrying…"; setTimeout(function () { loadPackage(attempt + 1); }, 4000 * attempt); }
-      else $("#desc").textContent = "Could not load this package right now: " + e.message + ". Reload to try again.";
+      else { endSkeleton(); $("#desc").textContent = "Could not load this package right now: " + e.message + ". Reload to try again."; }
     });
   }
   loadPackage(1);

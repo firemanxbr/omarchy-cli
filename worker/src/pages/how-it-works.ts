@@ -83,7 +83,7 @@ const BODY = String.raw`
     <p class="sub">Every three hours the objects the rings serve are matched against the Arch Security Tracker (exact, Arch's own versions), the Debian Security Tracker (same upstream projects, for what Arch has not triaged yet — with a confidence level, never as a certainty), CISA KEV and EPSS. Because the index knows what every binary loads, an advisory on a library also marks what <em>uses</em> it: the <a href="/security">Security page</a> shows the ring, the package page shows the chain, the graph marks the nodes.</p>
   </section>
 
-  <section>
+  <section id="factory">
     <h2>The factory: packages nobody ships yet</h2>
     <p class="sub">Three personas, three costs. <b>Users</b> only see the pool: signed databases, health checks, 48 hours from <code>edge</code> to <code>stable</code>, rollback. <b>Contributors</b> have something to package: they register it (a GitHub login and the project's URL — nobody to ask, nothing spent by the project), run the signed <code>omarchy-packaging</code> container wherever they like, with their own agent keys, and the build lands in <em>their</em> staging workspace with the PKGBUILD and the log. <b>Maintainers</b>, by area, approve staged builds with the evidence in front of them; an approved package enters <code>edge</code> as source <code>factory</code>, rebuilt on project infrastructure, and takes the same 48-hour path as everything else. New upstream releases of an approved package are bumped automatically. Every stage is on the <a href="/factory">Factory</a> page.</p>
   </section>

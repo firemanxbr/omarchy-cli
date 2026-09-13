@@ -73,7 +73,8 @@ const SCRIPT = String.raw`
           '<td>' + (v.exposure.declared || v.exposure.loads ? num(v.exposure.declared) + ' declared · ' + num(v.exposure.loads) + ' load it' : '<span class="muted">nothing</span>') + '</td>' +
           '<td>' + (v.fixed_in.length ? v.fixed_in.map(function (f) { return '<a href="/package/' + encodeURIComponent(v.name) + '?ring=' + f.ring + '&arch=' + arch + '">' + f.ring + ' ' + esc(f.version) + '</a>'; }).join(", ") : '<span class="muted">—</span>') + '</td></tr>';
       }).join("") || '<tr><td colspan="7" class="muted">nothing with an open advisory at this confidence level</td></tr>';
-    }).catch(function (e) { $("#updated").textContent = "failed: " + e; });
+      endSkeleton();
+    }).catch(function (e) { $("#updated").textContent = "failed: " + e; endSkeleton(); });
   }
   load();
   liveStats(function () {}, 120000);

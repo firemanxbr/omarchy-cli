@@ -122,13 +122,22 @@ const CSS = String.raw`
   #progress { position: fixed; top: 0; left: 0; height: 2px; width: 0; background: var(--green); z-index: 50; opacity: 0; transition: opacity .2s; }
   #progress.on { opacity: 1; animation: progress 1.6s ease-in-out infinite; }
   @keyframes progress { 0% { width: 0; margin-left: 0 } 50% { width: 60%; margin-left: 20% } 100% { width: 0; margin-left: 100% } }
-  .sk { display: inline-block; height: 12px; width: 70%; border-radius: 2px; background: linear-gradient(90deg, var(--line) 25%, var(--panel-2) 50%, var(--line) 75%); background-size: 200% 100%; animation: shimmer 1.2s linear infinite; vertical-align: middle; }
-  tr.sk td:nth-child(2n) .sk { width: 45%; } tr.sk td:nth-child(3n) .sk { width: 30%; }
-  .tile.sk .v .sk { height: 26px; width: 55%; } .tile.sk .s .sk { width: 80%; }
+  /* .skl is the shimmering bar; .skel marks a placeholder row or tile (removed when data lands). */
+  .skl { display: inline-block; height: 12px; width: 70%; border-radius: 2px; background: linear-gradient(90deg, var(--line) 25%, var(--panel-2) 50%, var(--line) 75%); background-size: 200% 100%; animation: shimmer 1.2s linear infinite; vertical-align: middle; }
+  tr.skel td:nth-child(2n) .skl { width: 45%; } tr.skel td:nth-child(3n) .skl { width: 30%; }
+  .tile.skel .v .skl { height: 26px; width: 55%; } .tile.skel .s .skl { width: 80%; }
   @keyframes shimmer { 0% { background-position: 200% 0 } 100% { background-position: -200% 0 } }
   .empty.loading { color: var(--dim); }
   .empty.loading::after { content: "…"; animation: dots 1.2s steps(4, end) infinite; }
   @keyframes dots { 0% { content: "" } 25% { content: "." } 50% { content: ".." } 75% { content: "..." } }
+
+  .form { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 12px 18px; align-items: end; margin: 14px 0; }
+  .form label { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--dim); letter-spacing: .04em; text-transform: uppercase; }
+  .form label .choice label { flex-direction: row; text-transform: none; letter-spacing: 0; font-size: 13.5px; color: var(--text); align-items: center; gap: 6px; }
+  .form input[type="text"], .form input[type="url"], .form select, .searchbar input[type="password"] { background: var(--bg-deep); border: 1px solid var(--line); color: var(--text); padding: 8px 10px; font: inherit; font-size: 13.5px; }
+  .form button, .searchbar button, table button { background: var(--panel-2); border: 1px solid var(--line); color: var(--text); padding: 8px 14px; font: inherit; font-size: 13.5px; cursor: pointer; }
+  .form button:hover, .searchbar button:hover, table button:hover { border-color: var(--green); }
+  table button { padding: 3px 9px; font-size: 12.5px; }
 
   table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
   th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
@@ -230,24 +239,27 @@ const HELPERS = String.raw`
     var el = $("#progress"); busy.n = (busy.n || 0) + 1; if (el) el.classList.add("on");
     return p.finally(function () { busy.n = Math.max(0, (busy.n || 1) - 1); if (!busy.n && el) el.classList.remove("on"); });
   }
-  // Placeholders until the first data arrives: rows for a table, cells for tiles.
+  // Placeholders until the first data arrives: rows for a table, cells for
+  // tiles. A render replaces a placeholder's content and drops the mark;
+  // endSkeleton() removes whatever placeholders are left over.
   function skeletonRows(tableSel, cols, rows) {
     var tb = document.querySelector(tableSel + " tbody"); if (!tb || tb.children.length) return;
-    var row = '<tr class="sk">' + new Array(cols + 1).join('<td><span class="sk"></span></td>') + '</tr>';
+    var row = '<tr class="skel">' + new Array(cols + 1).join('<td><span class="skl"></span></td>') + '</tr>';
     tb.innerHTML = new Array((rows || 4) + 1).join(row);
   }
   function skeletonTiles(sel, n) {
     var el = $(sel); if (!el || el.children.length) return;
-    el.innerHTML = new Array((n || 4) + 1).join('<div class="tile sk"><div class="k"><span class="sk"></span></div><div class="v"><span class="sk"></span></div><div class="s"><span class="sk"></span></div></div>');
+    el.innerHTML = new Array((n || 4) + 1).join('<div class="tile skel"><div class="k"><span class="skl"></span></div><div class="v"><span class="skl"></span></div><div class="s"><span class="skl"></span></div></div>');
   }
-  function skeletonText(sel) { var el = $(sel); if (el && !el.textContent.trim()) { el.className = (el.className + " empty loading").trim(); el.textContent = "Loading"; } }
+  function skeletonText(sel) { var el = $(sel); if (el && !el.textContent.trim()) { el.classList.add("empty", "loading"); el.textContent = "Loading"; } }
+  function endSkeleton() { document.querySelectorAll(".skel").forEach(function (el) { el.remove(); }); document.querySelectorAll(".empty.loading").forEach(function (el) { el.classList.remove("empty", "loading"); if (el.textContent === "Loading") el.textContent = ""; }); }
   // Numbers that change between refreshes flash briefly, so the page reads as live.
-  function setTile(el, html) { if (el.innerHTML !== html) { el.innerHTML = html; el.classList.remove("bump"); void el.offsetWidth; el.classList.add("bump"); } }
+  function setTile(el, html) { el.classList.remove("skel"); if (el.innerHTML !== html) { el.innerHTML = html; el.classList.remove("bump"); void el.offsetWidth; el.classList.add("bump"); } }
   function liveStats(render, everyMs) {
     function load() {
       serviceStatus();
       busy(fetch("/api/v1/stats")).then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
-        .then(function (d) { pipelineFrom(d); render(d); })
+        .then(function (d) { pipelineFrom(d); render(d); endSkeleton(); })
         .catch(function () {});
     }
     load();
@@ -259,7 +271,7 @@ export interface PageOptions {
   title: string;
   description: string;
   /** Which nav entry is highlighted. */
-  active: "overview" | "packages" | "security" | "factory" | "get-started" | "pipeline" | "how-it-works";
+  active: "overview" | "packages" | "security" | "factory" | "contribute" | "get-started" | "pipeline" | "how-it-works";
   body: string;
   script?: string;
   poolUrl: string;
@@ -271,6 +283,7 @@ export const NAV: { key: PageOptions["active"]; href: string; label: string }[] 
   { key: "packages", href: "/packages", label: "Packages" },
   { key: "security", href: "/security", label: "Security" },
   { key: "factory", href: "/factory", label: "Factory" },
+  { key: "contribute", href: "/contribute", label: "Contribute" },
   { key: "get-started", href: "/get-started", label: "Get started" },
   { key: "pipeline", href: "/#pipeline", label: "Pipeline" },
   { key: "how-it-works", href: "/how-it-works", label: "How it works" },
