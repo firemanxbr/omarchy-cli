@@ -140,6 +140,12 @@ grep -q '"via":"zlib"' <<<"$pkg_sec" || echo "note: xz is not exposed through zl
 status_body=$(curl -s "$OMARCHY_API/api/v1/status")
 grep -q '"state":"online"' <<<"$status_body" || { echo "service status not online: $status_body"; exit 1; }
 grep -q '"signing":true' <<<"$status_body" || { echo "status does not report signing: $status_body"; exit 1; }
+# A cached API answer tells the browser to keep it no longer than our own
+# expiry (the platform rewrites the stored copy's cache-control to hours).
+curl -s -o /dev/null "$OMARCHY_API/api/v1/stats"; hit_headers=$(curl -s -D - -o /dev/null "$OMARCHY_API/api/v1/stats")
+grep -qi "x-pool-cache: hit" <<<"$hit_headers" || { echo "second /stats was not served from the cache: $hit_headers"; exit 1; }
+ma=$(grep -i "^cache-control:" <<<"$hit_headers" | grep -o 'max-age=[0-9]*' | cut -d= -f2)
+[[ -n "$ma" && "$ma" -le 30 ]] || { echo "a cache hit must not extend the browser's max-age: $hit_headers"; exit 1; }
 echo "databases, signatures, package blobs, Range requests, stats, pages, security and service status OK"
 
 step "Factory: enqueue, claim with a lease, fail → requeue, complete after publish"

@@ -244,9 +244,15 @@ async function cachedApi(method: string, path: string, url: URL, request: Reques
   const hit = await cache.match(key);
   // The platform may rewrite cache-control on stored responses, so the
   // expiry we mean travels in a header of our own.
-  if (hit && Number(hit.headers.get("x-pool-expires") ?? 0) > Date.now()) {
+  const expires = Number(hit?.headers.get("x-pool-expires") ?? 0);
+  if (hit && expires > Date.now()) {
     const res = new Response(hit.body, hit);
     res.headers.set("x-pool-cache", "hit");
+    // The stored copy carries the platform's rewritten cache-control (hours),
+    // which a browser would honour: the dashboard then shows a four-hour-old
+    // pool. What the client may keep is what is left of our own expiry.
+    res.headers.set("cache-control", `public, max-age=${Math.max(1, Math.ceil((expires - Date.now()) / 1000))}`);
+    res.headers.delete("age");
     return res;
   }
   const res = await api(method, path, url, request, env);
