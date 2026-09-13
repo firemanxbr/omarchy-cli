@@ -63,6 +63,8 @@ import { handleSignPool } from "./routes/pool";
 import { signingEnabled, publicKey } from "./signing";
 import { reviewHtml } from "./pages/review";
 import { governanceHtml } from "./pages/governance";
+import { docsHtml } from "./pages/docs";
+import { workersHtml } from "./pages/workers";
 import { handleGetEvents, handlePostEvent } from "./routes/events";
 import { handleServiceStatus, handleStats } from "./routes/stats";
 import { handleGc, handleUnreferenced } from "./routes/gc";
@@ -150,8 +152,16 @@ export default {
         const c = await contributorOf(request, env);
         return c ? json({ login: c.login, name: c.name, avatar_url: c.avatar_url, role: c.role, areas: c.areas }, 200, { "cache-control": "no-store" }) : json({ error: "not signed in" }, 401, { "cache-control": "no-store" });
       }
-      if (path === "/get-started") return html(getStartedHtml(env.POOL_URL, version(env)));
-      if (path === "/how-it-works") return html(howItWorksHtml(env.POOL_URL, version(env)));
+      // Documentation: one section, its chapters under /docs; the old addresses redirect.
+      if (path === "/docs" || path === "/docs/") return html(docsHtml(env.POOL_URL, version(env)));
+      if (path === "/docs/get-started") return html(getStartedHtml(env.POOL_URL, version(env)));
+      if (path === "/docs/workers") return html(workersHtml(env.POOL_URL, version(env)));
+      if (path === "/docs/how-it-works") return html(howItWorksHtml(env.POOL_URL, version(env)));
+      if (path === "/docs/governance") return html(governanceHtml(env.POOL_URL, version(env)));
+      if (path === "/get-started" || path === "/how-it-works" || path === "/governance") {
+        url.pathname = `/docs${path}`;
+        return Response.redirect(url.toString(), 301);
+      }
       if (path === "/status") return html(statusHtml(env.POOL_URL, version(env)));
       if (path === "/api" || path === "/api/") return html(apiDocsHtml(env.POOL_URL, version(env)));
       if (path === "/packages") return html(packagesHtml(env.POOL_URL, version(env)));
@@ -159,7 +169,6 @@ export default {
       if (path === "/factory") return html(factoryHtml(env.POOL_URL, version(env)));
       if (path === "/contribute") return html(contributeHtml(env.POOL_URL, version(env)));
       if (path === "/review") return html(reviewHtml(env.POOL_URL, version(env)));
-      if (path === "/governance") return html(governanceHtml(env.POOL_URL, version(env)));
       if (path.startsWith("/package/")) return html(packageHtml(decodeURIComponent(path.slice("/package/".length)), env.POOL_URL, version(env)));
       return json({ error: "not found" }, 404);
     } catch (err) {

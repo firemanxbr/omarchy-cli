@@ -79,7 +79,8 @@ export function governanceHtml(poolUrl: string, version: RunningVersion): string
   return page({
     title: "Governance · omarchy-pool",
     description: "Contributors and maintainers, groups, and how a pull request is the only way to become a maintainer.",
-    active: "governance",
+    active: "docs",
+    doc: "governance",
     body: BODY,
     script: SCRIPT,
     poolUrl,

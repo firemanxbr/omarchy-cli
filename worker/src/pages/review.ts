@@ -19,7 +19,7 @@ const BODY = String.raw`
 
   <section>
     <h2>Trust</h2>
-    <p class="sub">Workers the project trusts to run pool jobs and project builds, and the people who may approve. A maintainer promotes a worker with <code>POST /api/v1/factory/workers/&lt;id&gt;/trust</code>; maintainers themselves are named by <code>factory/MAINTAINERS.toml</code> — see <a href="/governance">Governance</a>.</p>
+    <p class="sub">Workers the project trusts to run pool jobs and project builds, and the people who may approve. A maintainer promotes a worker with <code>POST /api/v1/factory/workers/&lt;id&gt;/trust</code>; maintainers themselves are named by <code>factory/MAINTAINERS.toml</code> — see <a href="/docs/governance">Governance</a>.</p>
     <div class="table-wrap"><table id="trust"><thead><tr><th>Worker</th><th>Owner</th><th>Arch</th><th>Trust</th><th>Granted by</th><th>Last seen</th></tr></thead><tbody></tbody></table></div>
     <div class="table-wrap" style="margin-top:12px"><table id="people"><thead><tr><th>Maintainer</th><th>Role</th><th>Areas</th><th>Last seen</th></tr></thead><tbody></tbody></table></div>
   </section>

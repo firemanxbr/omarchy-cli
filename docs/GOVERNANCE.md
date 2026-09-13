@@ -44,7 +44,7 @@ A group is an area of interest — `omarchy` (what Omarchy ships or depends
 on), `community` (everything else) today. Every package registers into one;
 its maintainers approve what is built for it and review
 `factory/pkgbuilds/<group>/`. The live list, with descriptions and
-maintainers, is on the dashboard's [Governance](https://omarchy-pool.firemanxbr.org/governance)
+maintainers, is on the dashboard's [Governance](https://omarchy-pool.firemanxbr.org/docs/governance)
 page and at `GET /api/v1/factory/groups`.
 
 ## What a maintainer does

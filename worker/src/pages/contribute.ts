@@ -10,7 +10,7 @@ import { REPO_URL } from "../meta";
 
 const BODY = String.raw`
   <h1>Contribute a package</h1>
-  <p class="lede">You have something to package for Omarchy. Register it here — no permission needed, nothing spent by the project — then run the project's signed worker image on your own machine — the same tools a maintainer uses, with your own agent if you want one — and the build, its PKGBUILD, log and manifest land in your staging workspace as evidence. A maintainer of the group does not use what you built: they rebuild it from your recipe on a worker the project trusts, and approve it knowing it already works. Nobody knows better than you how your software should be compiled and packaged; the maintainer learns it from you. New upstream releases come back to your worker the same way. <a href="/governance">Contributors and maintainers →</a> · <a href="/how-it-works#factory">How the factory works →</a></p>
+  <p class="lede">You have something to package for Omarchy. Register it here — no permission needed, nothing spent by the project — then run the project's signed worker image on your own machine — the same tools a maintainer uses, with your own agent if you want one — and the build, its PKGBUILD, log and manifest land in your staging workspace as evidence. A maintainer of the group does not use what you built: they rebuild it from your recipe on a worker the project trusts, and approve it knowing it already works. Nobody knows better than you how your software should be compiled and packaged; the maintainer learns it from you. New upstream releases come back to your worker the same way. <a href="/docs/governance">Contributors and maintainers →</a> · <a href="/docs/how-it-works#factory">How the factory works →</a></p>
 
   <section id="signin">
     <h2>1. Who you are</h2>
@@ -32,7 +32,7 @@ const BODY = String.raw`
       <form id="pkg-form" class="form" onsubmit="return false">
         <label>Project URL <input type="url" id="pkg-url" placeholder="https://github.com/you/project" required></label>
         <label>Package name <input type="text" id="pkg-name" placeholder="(repository name)" pattern="[a-z0-9@._+-]+"></label>
-        <label>Group <select id="pkg-group"><option value="community">community</option></select> <span class="sub">who reviews it — <a href="/governance">Governance</a></span></label>
+        <label>Group <select id="pkg-group"><option value="community">community</option></select> <span class="sub">who reviews it — <a href="/docs/governance">Governance</a></span></label>
         <label>Architectures <span class="choice"><label><input type="checkbox" id="pkg-x86" checked> x86_64</label> <label><input type="checkbox" id="pkg-arm" checked> aarch64</label></span></label>
         <label>Release tag <input type="text" id="pkg-release" placeholder="(latest)"></label>
         <label>PKGBUILD in your repo <input type="text" id="pkg-path" placeholder="(none — drafted) e.g. packaging/PKGBUILD"></label>
@@ -48,7 +48,7 @@ const BODY = String.raw`
 
     <section>
       <h2>4. A worker of yours</h2>
-      <p class="sub">Builds happen on your machine, with your resources (and your agent's key, if you want PKGBUILDs drafted and corrected for you — the pool never holds one). Register a worker, then run the signed image with the token it gives you — shown once. It builds <b>your</b> packages; start it with <code>WORKER_SHARED=1</code> to donate it to anyone's.</p>
+      <p class="sub">Builds happen on your machine, with your resources (and your agent's key, if you want PKGBUILDs drafted and corrected for you — the pool never holds one). Register a worker, then run the signed image with the token it gives you — shown once. It builds <b>your</b> packages; start it with <code>WORKER_SHARED=1</code> to donate it to anyone's. Step by step, for Docker Desktop and Podman: <a href="/docs/workers">Run a worker</a>.</p>
       <form id="worker-form" class="form" onsubmit="return false">
         <label>Name <input type="text" id="w-name" placeholder="laptop" required></label>
         <label>Architecture <select id="w-arch"><option>x86_64</option><option>aarch64</option></select></label>

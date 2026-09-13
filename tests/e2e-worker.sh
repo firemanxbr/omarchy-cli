@@ -137,9 +137,12 @@ dash_body=$(curl -s "$OMARCHY_API/")
 grep -q "tested before they reach you" <<<"$dash_body" || {
   echo "dashboard not served; response head:"; head -c 600 <<<"$dash_body"; echo
   echo "--- worker log tail ---"; tail -20 "$E2E/wrangler.log"; exit 1; }
-for p in /get-started /how-it-works /status /api /contribute /factory; do
+for p in /docs /docs/get-started /docs/workers /docs/how-it-works /docs/governance /status /api /contribute /factory; do
   body=$(curl -s "$OMARCHY_API$p"); grep -q "omarchy-pool" <<<"$body" || { echo "page $p not served"; exit 1; }
 done
+# The old addresses of the documentation chapters redirect into the section.
+[[ "$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' "$OMARCHY_API/how-it-works")" == "301 $OMARCHY_API/docs/how-it-works" ]] || { echo "/how-it-works must redirect to /docs/how-it-works"; exit 1; }
+gpage=$(curl -s "$OMARCHY_API/governance" -L); grep -q "Becoming a maintainer" <<<"$gpage" || { echo "governance page not served"; exit 1; }
 search_body=$(curl -s "$OMARCHY_API/api/v1/search?q=zlib&ring=stable")
 grep -q '"name":"zlib"' <<<"$search_body" || { echo "search did not find zlib: $search_body"; exit 1; }
 pkg_body=$(curl -s "$OMARCHY_API/api/v1/package/zlib?ring=stable")
@@ -221,7 +224,7 @@ fac3=$(curl -s "$OMARCHY_API/api/v1/factory?limit=50"); grep -q '"id":"w3","arch
 review=$(curl -s "$OMARCHY_API/api/v1/factory/review"); grep -q '"staged"' <<<"$review" || { echo "review list not served: $review"; exit 1; }
 groups=$(curl -s "$OMARCHY_API/api/v1/factory/groups"); grep -q '"maintainers":\["e2e"\]' <<<"$groups" || { echo "groups not served from the governance table: $groups"; exit 1; }
 me=$(curl -s "$OMARCHY_API/api/v1/factory/me" -H "authorization: Bearer omc_e2e"); grep -q '"role":"maintainer"' <<<"$me" || { echo "the seeded maintainer is not one: $me"; exit 1; }
-gpage=$(curl -s "$OMARCHY_API/governance"); grep -q "Becoming a maintainer" <<<"$gpage" || { echo "governance page not served"; exit 1; }
+gpage=$(curl -s "$OMARCHY_API/docs/governance"); grep -q "Becoming a maintainer" <<<"$gpage" || { echo "governance page not served"; exit 1; }
 # No shared secret: a maintainer runs jobs by hand (queued, not executed with their token); a contributor cannot.
 mauth=(-H "authorization: Bearer omc_e2e" -H "content-type: application/json")
 qj=$(curl -s -X POST "$OMARCHY_API/api/v1/factory/jobs" "${mauth[@]}" -d '{"kind":"health","params":{"ring":"stable","arch":"x86_64"}}')

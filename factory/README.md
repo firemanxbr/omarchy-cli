@@ -173,6 +173,14 @@ process on the host holds only its own token, publishes the result and the
 pool signs it — no key ever sits on a worker. A host builds its own
 architecture natively and the other one emulated (`--arch`).
 
+The easiest way is the container image
+`ghcr.io/firemanxbr/omarchy-pool-worker` (both architectures, signed, tagged
+with the pool's release; `factory/image/Containerfile.pool-worker`), which
+holds `pkg-repo work` and starts each build as a sibling container through
+the runtime's socket — the dashboard's *Run a worker* page has the exact
+commands for Docker Desktop and Podman. Without a container, the release
+binaries do the same:
+
 ```bash
 # once: the pool's publisher (from the releases, or cargo build --release -p pkg-repo)
 export OMARCHY_API=https://pkgs.firemanxbr.org OMARCHY_POOL=https://pool.firemanxbr.org
@@ -243,7 +251,8 @@ factory/
                                   `--container` (the contributor's one-task-per-container mode)
   MAINTAINERS.toml                the governance file: groups and their maintainers (docs/GOVERNANCE.md)
   bin/check-governance            validates it and generates .github/CODEOWNERS from it
-  image/Containerfile             the Omarchy Packaging image (signed, both architectures); image/compose.yml runs it
+  image/Containerfile             the Omarchy Packaging image — a contributor's worker (signed, both architectures); image/compose.yml runs it
+  image/Containerfile.pool-worker the Omarchy Pool Worker image — a project worker, built by the release workflow
   bin/pkgbuild-meta               PKGBUILD → arches and version, without executing it as you
   pkgbuilds/<group>/<name>/       reviewed PKGBUILDs; CODEOWNERS per group
 .github/workflows/factory-update.yml    daily: pull requests bumping the project's own recipes (reviewed, never auto-merged)

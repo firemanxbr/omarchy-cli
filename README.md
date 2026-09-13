@@ -17,7 +17,7 @@ https://pool.firemanxbr.org · API at https://pkgs.firemanxbr.org/api/v1
 ## Use it
 
 Three steps, generated for your ring and architecture on
-[Get started](https://omarchy-pool.firemanxbr.org/get-started):
+[Get started](https://omarchy-pool.firemanxbr.org/docs/get-started):
 
 ```bash
 # 1. trust the key that signs the databases (packages keep their upstream signatures)
@@ -57,7 +57,7 @@ omarchy-cli upgrade --security-only
 
 ## How it works
 
-Read [How it works](https://omarchy-pool.firemanxbr.org/how-it-works) on the
+Read [How it works](https://omarchy-pool.firemanxbr.org/docs/how-it-works) on the
 dashboard, or [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design:
 the pool and index, the release model, promotion by evidence (health + ABI gate,
 one-day soak, automatic rollback), the sources, the security layer, the pipeline.
