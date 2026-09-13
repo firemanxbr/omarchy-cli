@@ -136,7 +136,7 @@ echo "--- status"; /repo/omarchy-cli status
 echo "--- upgrade"; /repo/omarchy-cli upgrade --noconfirm 2>&1 | grep -vE 'warning: database file'
 echo "--- pacman -Q xz"; pacman -Q xz 2>/dev/null
 echo "--- status after"; /repo/omarchy-cli status | grep -E 'Pinned|Updates'
-echo "--- upgrade again"; /repo/omarchy-cli upgrade --noconfirm | grep -q 'Nothing to do'
+echo "--- upgrade again"; /repo/omarchy-cli upgrade --noconfirm | grep 'Nothing to do' >/dev/null   # read it all: grep -q closes the pipe early and the client panics on EPIPE
 CHECK
   "$RUNTIME" run --rm --platform linux/amd64 ${RUN_EXTRA[@]+"${RUN_EXTRA[@]}"} -v "$E:/repo:ro" "$CURRENT" bash /repo/check.sh
 else
