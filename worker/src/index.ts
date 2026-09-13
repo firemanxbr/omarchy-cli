@@ -298,7 +298,8 @@ async function api(method: string, path: string, url: URL, request: Request, env
   if (method === "GET" && path === "/cost") {
     const row = await env.DB.prepare("SELECT created_at, status, payload FROM events WHERE kind = 'cost' ORDER BY id DESC LIMIT 1").first<{ created_at: string; status: string; payload: string }>();
     const guard = await env.DB.prepare("SELECT value FROM settings WHERE key = 'cost_guard'").first<{ value: string }>();
-    return json(row ? { estimated_at: row.created_at, status: row.status, guard: guard?.value ?? null, ...JSON.parse(row.payload) } : { error: "no estimate yet" }, row ? 200 : 404, { "cache-control": "public, max-age=300" });
+    // `guard` is the live setting (a maintainer may have lifted it), not the estimate's verdict.
+    return json(row ? { estimated_at: row.created_at, status: row.status, ...JSON.parse(row.payload), guard: guard?.value ?? null } : { error: "no estimate yet" }, row ? 200 : 404, { "cache-control": "public, max-age=300" });
   }
   if (method === "GET" && path === "/signing-key") {
     const k = await publicKey(env);
