@@ -24,24 +24,22 @@ export async function handleStats(env: Env): Promise<Response> {
     rings.push({ ring, release: head, package_count: summary.package_count, bytes: summary.size_download, sources, artifacts: artifacts.results });
   }
 
-  const pool = await env.DB.prepare(
-    "SELECT COUNT(*) AS objects, COALESCE(SUM(size_download), 0) AS bytes, COUNT(DISTINCT name) AS names FROM packages",
-  ).first<{ objects: number; bytes: number; names: number }>();
-  // Objects some release pinned: a flag on the package (set at release
-  // creation), not a scan of release_packages.
-  const anyRelease = await env.DB.prepare(
-    "SELECT COUNT(*) AS objects, COALESCE(SUM(size_download), 0) AS bytes FROM packages WHERE released = 1",
-  ).first<{ objects: number; bytes: number }>();
-  const bySource = await env.DB.prepare(
-    "SELECT source, repo_arch AS arch, COUNT(*) AS objects, COALESCE(SUM(size_download), 0) AS bytes FROM packages GROUP BY source, repo_arch ORDER BY repo_arch, source",
-  ).all();
-  // The two aggregates that need release_packages (what the heads pin,
-  // what GC would reclaim) come from the last metrics snapshot: computed
-  // every thirty minutes, not on every request.
-  const snap = await env.DB.prepare("SELECT payload FROM events WHERE kind = 'metrics' ORDER BY id DESC LIMIT 1").first<{ payload: string }>();
-  const snapPool = snap ? ((JSON.parse(snap.payload) as { pool?: Record<string, number> }).pool ?? {}) : {};
-  const referenced = { objects: snapPool.referenced_objects ?? null, bytes: snapPool.referenced_bytes ?? null };
-  const reclaimable = { objects: snapPool.reclaimable_objects ?? 0, bytes: snapPool.reclaimable_bytes ?? 0 };
+  // Everything pool-wide (totals, per source, what the heads pin, what GC
+  // would reclaim) comes from the last metrics snapshot: the packages table
+  // changes at most every few hours, this page is asked for every 30
+  // seconds from every edge location, and D1 bills every row read. Without
+  // a snapshot yet (a fresh deployment), the cheap totals are computed live.
+  const snap = await env.DB.prepare("SELECT payload, created_at FROM events WHERE kind = 'metrics' ORDER BY id DESC LIMIT 1").first<{ payload: string; created_at: string }>();
+  const snapPool = snap ? ((JSON.parse(snap.payload) as { pool?: Record<string, unknown> }).pool ?? {}) : {};
+  const n = (k: string) => (typeof snapPool[k] === "number" ? (snapPool[k] as number) : null);
+  const live = snap && n("names") !== null
+    ? null
+    : await env.DB.prepare("SELECT COUNT(*) AS objects, COALESCE(SUM(size_download), 0) AS bytes, COUNT(DISTINCT name) AS names FROM packages").first<{ objects: number; bytes: number; names: number }>();
+  const pool = live ?? { objects: n("objects") ?? 0, bytes: n("bytes") ?? 0, names: n("names") ?? 0 };
+  const anyRelease = { objects: n("objects") ?? pool.objects, bytes: n("released_bytes") ?? pool.bytes };
+  const bySource = { results: Array.isArray(snapPool.by_source) ? (snapPool.by_source as unknown[]) : [] };
+  const referenced = { objects: n("referenced_objects"), bytes: n("referenced_bytes") };
+  const reclaimable = { objects: n("reclaimable_objects") ?? 0, bytes: n("reclaimable_bytes") ?? 0 };
 
   const releases = await env.DB.prepare(
     `SELECT r.id, r.ring, r.seq, r.parent_id, r.source_id, r.note, r.created_at, r.package_count,
@@ -147,7 +145,7 @@ export async function handleStats(env: Env): Promise<Response> {
       generated_at: new Date().toISOString(),
       version: version(env),
       rings,
-      pool: { ...pool, by_source: bySource.results, referenced_by_heads: referenced, referenced_by_any_release: anyRelease, reclaimable },
+      pool: { ...pool, by_source: bySource.results, referenced_by_heads: referenced, referenced_by_any_release: anyRelease, reclaimable, snapshot_at: snap?.created_at ?? null },
       coverage,
       series: {
         imports_daily: importsDaily.results,

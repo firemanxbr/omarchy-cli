@@ -15,7 +15,10 @@ export async function snapshotMetrics(env: Env, now = new Date()): Promise<strin
   const since = new Date(now.getTime() - 7 * 86400000).toISOString();
   const alive = new Date(now.getTime() - 10 * 60000).toISOString();
 
-  const pool = await env.DB.prepare("SELECT COUNT(*) AS objects, COALESCE(SUM(size_download), 0) AS bytes FROM packages").first<{ objects: number; bytes: number }>();
+  const pool = await env.DB.prepare("SELECT COUNT(*) AS objects, COALESCE(SUM(size_download), 0) AS bytes, COUNT(DISTINCT name) AS names FROM packages").first<{ objects: number; bytes: number; names: number }>();
+  const bySource = await env.DB.prepare(
+    "SELECT source, repo_arch AS arch, COUNT(*) AS objects, COALESCE(SUM(size_download), 0) AS bytes FROM packages GROUP BY source, repo_arch ORDER BY repo_arch, source",
+  ).all<{ source: string; arch: string; objects: number; bytes: number }>();
   const referenced = await env.DB.prepare("SELECT COALESCE(SUM(size_download), 0) AS bytes FROM packages WHERE released = 1").first<{ bytes: number }>();
   // What the three heads pin (distinct objects): the one place this join runs.
   const heads = await env.DB.prepare(
@@ -84,6 +87,8 @@ export async function snapshotMetrics(env: Env, now = new Date()): Promise<strin
     pool: {
       objects: pool?.objects ?? 0,
       bytes: pool?.bytes ?? 0,
+      names: pool?.names ?? 0,
+      by_source: bySource.results,
       released_bytes: referenced?.bytes ?? 0,
       referenced_objects: heads?.objects ?? 0,
       referenced_bytes: heads?.bytes ?? 0,
