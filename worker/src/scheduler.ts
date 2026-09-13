@@ -100,9 +100,11 @@ export function isDue(rule: Rule, runs: RunSummary[], now: Date): { due: boolean
  * starts one there. It is a worker like any other: it claims from Cloudflare.
  */
 export async function factoryDemand(env: Env, now = new Date()): Promise<{ arch: string; queued: number; alive: number }[]> {
+  // "alive" here means alive *and idle*: a worker busy with a nine-hour
+  // build does not serve the queue behind it.
   const rows = await env.DB.prepare(
     `SELECT arch, COUNT(*) AS queued,
-            (SELECT COUNT(*) FROM build_workers w WHERE w.arch = t.arch AND w.last_seen > ?) AS alive
+            (SELECT COUNT(*) FROM build_workers w WHERE w.arch = t.arch AND w.last_seen > ? AND w.current_task IS NULL) AS alive
        FROM build_tasks t WHERE status = 'queued' GROUP BY arch`,
   )
     .bind(new Date(now.getTime() - 10 * 60000).toISOString())
@@ -145,7 +147,7 @@ export async function runScheduler(env: Env, now = new Date()): Promise<string[]
   try {
     for (const d of await factoryDemand(env, now)) {
       if (d.alive > 0) {
-        log.push(`factory ${d.arch}: ${d.queued} queued, ${d.alive} worker(s) alive`);
+        log.push(`factory ${d.arch}: ${d.queued} queued, ${d.alive} idle worker(s)`);
         continue;
       }
       const runs = await recentRuns(env, "factory-worker.yml");
@@ -157,7 +159,7 @@ export async function runScheduler(env: Env, now = new Date()): Promise<string[]
       await dispatch(env, "factory-worker.yml", { arch: d.arch });
       log.push(`factory ${d.arch}: hosted worker dispatched for ${d.queued} queued task(s)`);
       await env.DB.prepare("INSERT INTO events (kind, ring, source, status, summary, payload) VALUES ('dispatch', NULL, 'factory', 'ok', ?, ?)")
-        .bind(`hosted ${d.arch} build worker started by the pool scheduler — ${d.queued} task(s) queued, no worker alive`, JSON.stringify({ workflow: "factory-worker.yml", arch: d.arch, queued: d.queued }))
+        .bind(`hosted ${d.arch} build worker started by the pool scheduler — ${d.queued} task(s) queued, no idle worker`, JSON.stringify({ workflow: "factory-worker.yml", arch: d.arch, queued: d.queued }))
         .run();
     }
   } catch (e) {

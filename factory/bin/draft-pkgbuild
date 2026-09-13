@@ -14,7 +14,7 @@ Checksums are left as SKIP for updpkgsums.
 import argparse, json, os, re, sys, urllib.request, urllib.error, base64
 
 GH = "https://api.github.com"
-FILES = ["Cargo.toml", "go.mod", "package.json", "pyproject.toml", "setup.py", "CMakeLists.txt",
+FILES = ["Cargo.toml", "Cargo.lock", "go.mod", "package.json", "pyproject.toml", "setup.py", "CMakeLists.txt",
          "meson.build", "Makefile", "configure.ac", "configure", "build.zig", "Gemfile", "mix.exs", "CMakePresets.json"]
 
 
@@ -50,20 +50,28 @@ def analyze(url, name):
         if f in top:
             blob = gh(f"/repos/{owner}/{repo}/contents/{f}?ref={ref}")
             if blob and blob.get("encoding") == "base64":
-                files[f] = base64.b64decode(blob["content"]).decode("utf-8", "replace")[:6000]
+                files[f] = base64.b64decode(blob["content"]).decode("utf-8", "replace")[:(200000 if f == "Cargo.lock" else 6000)]
+            elif blob is None and f == "Cargo.lock":
+                pass
+            elif blob and blob.get("download_url"):
+                # Files above 1 MB come without content; the lock file is the only one that matters.
+                if f == "Cargo.lock":
+                    files[f] = urllib.request.urlopen(blob["download_url"], timeout=30).read().decode("utf-8", "replace")[:400000]
     readme = ""
     rd = gh(f"/repos/{owner}/{repo}/readme?ref={ref}")
     if rd and rd.get("encoding") == "base64":
         readme = base64.b64decode(rd["content"]).decode("utf-8", "replace")[:5000]
     licenses = [t["path"] for t in top.values() if re.match(r"(?i)^(LICENSE|COPYING|LICENCE)", t["path"])]
     assets = [a["name"] for a in (rel or {}).get("assets", [])]
-    return {
+    out = {
         "owner": owner, "repo": repo, "url": f"https://github.com/{owner}/{repo}", "name": name or repo.lower(),
         "description": (meta.get("description") or "").strip(), "license_spdx": (meta.get("license") or {}).get("spdx_id"),
         "language": meta.get("language"), "tag": tag, "pkgver": (tag or "0").lstrip("v").replace("-", "_") if tag else None,
         "default_branch": meta.get("default_branch"), "top_level": sorted(top.keys())[:80], "license_files": licenses,
         "release_assets": assets, "files": files, "readme": readme,
     }
+    out["native_deps_hint"] = rust_depends(out)
+    return out
 
 
 def build_system(a):
@@ -81,6 +89,29 @@ def build_system(a):
     return "unknown"
 
 
+# Native libraries behind the usual -sys crates: what a Rust binary links.
+SYS_CRATES = {
+    "libgit2-sys": "libgit2", "openssl-sys": "openssl", "libsqlite3-sys": "sqlite", "libz-sys": "zlib", "zstd-sys": "zstd",
+    "bzip2-sys": "bzip2", "lzma-sys": "xz", "curl-sys": "curl", "libssh2-sys": "libssh2", "alsa-sys": "alsa-lib",
+    "freetype-sys": "freetype2", "fontconfig-sys": "fontconfig", "servo-fontconfig-sys": "fontconfig", "expat-sys": "expat",
+    "gtk4-sys": "gtk4", "gtk-sys": "gtk3", "gdk4-sys": "gtk4", "glib-sys": "glib2", "cairo-sys-rs": "cairo", "pango-sys": "pango",
+    "gdk-pixbuf-sys": "gdk-pixbuf2", "libadwaita-sys": "libadwaita", "gstreamer-sys": "gstreamer", "dbus-sys": "dbus", "libdbus-sys": "dbus",
+    "x11-dl": "libx11", "x11": "libx11", "xcb": "libxcb", "wayland-sys": "wayland", "libpulse-sys": "libpulse", "libudev-sys": "systemd-libs",
+    "oniguruma": "oniguruma", "onig_sys": "oniguruma", "libxml": "libxml2", "sdl2-sys": "sdl2", "libmpv-sys": "mpv", "pcre2-sys": "pcre2",
+    "jemalloc-sys": "jemalloc", "libusb1-sys": "libusb", "hidapi": "hidapi", "libseccomp-sys": "libseccomp", "nettle-sys": "nettle",
+    "libgpg-error-sys": "libgpg-error", "gpgme-sys": "gpgme", "libsodium-sys": "libsodium", "ffmpeg-sys-next": "ffmpeg", "libvips": "libvips",
+}
+
+
+def rust_depends(a):
+    lock = a["files"].get("Cargo.lock", "")
+    crates = set(re.findall(r'^name = "([^"]+)"', lock, re.M))
+    deps = sorted({SYS_CRATES[c] for c in crates if c in SYS_CRATES})
+    # git2 with the vendored feature needs nothing; the lock cannot tell, so
+    # the dependency is declared and makepkg's namcap says if it is unused.
+    return deps
+
+
 def template(a):
     """A conservative PKGBUILD without a model: the common build systems."""
     bs = build_system(a)
@@ -93,7 +124,9 @@ def template(a):
     common = f'pkgname={n}\npkgver={v}\npkgrel=1\npkgdesc="{desc}"\narch=(\'x86_64\' \'aarch64\')\nurl="{u}"\nlicense=(\'{lic}\')\n'
     srcdir = f'"$srcdir/{a["repo"]}-{a["tag"].lstrip("v")}"'
     if bs == "rust":
-        return head + common + "makedepends=('cargo')\n" + src + f'''
+        deps = rust_depends(a)
+        dep_line = ("depends=(" + " ".join(f"'{d}'" for d in deps) + ")\n") if deps else ""
+        return head + common + dep_line + "makedepends=('cargo')\n" + src + f'''
 prepare() {{
   cd {srcdir}
   cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
@@ -191,8 +224,10 @@ def claude(a, previous, log, hint):
     key = os.environ["ANTHROPIC_API_KEY"]
     rules = open(os.path.join(os.path.dirname(__file__), "..", "prompts", "pkgbuild.md")).read()
     facts = {k: v for k, v in a.items() if k not in ("files", "readme")}
-    user = "Project facts:\n" + json.dumps(facts, indent=1) + "\n\n"
+    user = "Project facts (native_deps_hint: Arch packages behind the -sys crates in Cargo.lock):\n" + json.dumps(facts, indent=1) + "\n\n"
     for f, body in a["files"].items():
+        if f == "Cargo.lock":
+            continue
         user += f"--- {f} ---\n{body}\n\n"
     user += "--- README (head) ---\n" + a["readme"] + "\n"
     if previous:
