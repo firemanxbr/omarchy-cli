@@ -43,10 +43,6 @@ jobs:
           toolchain: 1.98.1
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release -p pkg-repo
-      - name: Import signing key
-        run: |
-          echo "${{ secrets.OMARCHY_GPG_KEY }}" | gpg --batch --import
-          echo "OMARCHY_GPG_KEYID=${{ secrets.OMARCHY_GPG_KEYID }}" >> "$GITHUB_ENV"
       - name: Fetch upstream keyrings
         # Every imported package must carry a signature by a key in the upstream
         # project's keyring: archlinux.gpg (from the archlinux-keyring package),
@@ -97,7 +93,7 @@ jobs:
         if: always()
         run: |
           for ring in $TOUCHED; do for arch in x86_64 aarch64; do
-            target/release/pkg-repo render --ring "$ring" --arch "$arch" --sign "$OMARCHY_GPG_KEYID"
+            target/release/pkg-repo render --ring "$ring" --arch "$arch"
           done; done
           [[ -z "$TOUCHED" ]] && echo "nothing changed; nothing to render" || true
       - name: Report failure

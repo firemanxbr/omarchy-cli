@@ -30,8 +30,9 @@ Promoting a release copies and re-uploads most of that data, so a bump takes
   points at the same selection: an index write, no bytes move. Rollback is the same
   write pointing at an earlier selection; history is append-only.
 * **Generated pacman databases** — for each ring and source the publisher renders
-  `omarchy-<source>-<ring>.db` and `.files` in `repo-add` format, signs them with GPG,
-  and stores them **beside the packages** (`<arch>/omarchy-core-stable.db`). pacman
+  `omarchy-<source>-<ring>.db` and `.files` in `repo-add` format and uploads them;
+  the Worker signs them with its own OpenPGP key (a secret that never leaves
+  Cloudflare, `worker/src/signing.ts`) and stores them **beside the packages** (`<arch>/omarchy-core-stable.db`). pacman
   reads the bucket's custom domain directly — `Server = https://pool…/$arch` — and
   the only thing that differs between rings is the repository name. No worker, no
   redirect on the read path.

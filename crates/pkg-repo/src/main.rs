@@ -196,7 +196,8 @@ enum Command {
         #[command(flatten)]
         args: GateArgs,
     },
-    /// Renders, signs and uploads the pacman databases of a ring's current release,
+    /// Renders and uploads the pacman databases of a ring's current release
+    /// (the pool signs them as it stores them),
     /// one `omarchy-<source>-<ring>` repo per source.
     Render {
         #[command(flatten)]
@@ -205,7 +206,8 @@ enum Command {
         ring: String,
         #[arg(long, default_value = "x86_64")]
         arch: String,
-        /// GPG key id; omit to upload unsigned databases.
+        /// Local GPG key id, only for a pool without its own signing key
+        /// (the pool signs what it stores; the flag is then ignored).
         #[arg(long)]
         sign: Option<String>,
     },
@@ -252,7 +254,8 @@ enum Command {
             default_value = "/var/tmp/omarchy-pool-worker"
         )]
         work_dir: PathBuf,
-        /// Key id that signs rendered databases (until the pool signs them itself).
+        /// Local GPG key id, only for a pool without its own signing key
+        /// (the pool signs what it stores; the flag is then ignored).
         #[arg(long, env = "OMARCHY_GPG_KEYID")]
         sign: Option<String>,
         /// A checkout of the repository (its tests/ scripts); cloned into the work dir when absent.

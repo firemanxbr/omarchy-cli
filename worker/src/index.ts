@@ -55,6 +55,8 @@ import { jobOf } from "./jobtoken";
 import { handleTrustWorker, handleSetRole, handleTrustList } from "./routes/contributors";
 import { handleReviewList, handleApprove, handleReject, handleApprovals } from "./routes/review";
 import { handleAuthStart, handleAuthCallback, handleLogout } from "./routes/auth";
+import { handleSignPool } from "./routes/pool";
+import { signingEnabled, publicKey } from "./signing";
 import { reviewHtml } from "./pages/review";
 import { handleGetEvents, handlePostEvent } from "./routes/events";
 import { handleServiceStatus, handleStats } from "./routes/stats";
@@ -91,6 +93,9 @@ export interface Env {
   FACTORY_TOKEN?: string;
   /** Signs per-job tokens (jobtoken.ts); any random string. */
   JOB_TOKEN_SECRET?: string;
+  /** The pool's OpenPGP signing key (armored private key) and its passphrase, if any — signing.ts. */
+  SIGNING_KEY?: string;
+  SIGNING_KEY_PASSPHRASE?: string;
   /** GitHub OAuth App for "Sign in with GitHub" (routes/auth.ts). */
   GITHUB_OAUTH_CLIENT_ID?: string;
   GITHUB_OAUTH_CLIENT_SECRET?: string;
@@ -277,6 +282,10 @@ async function api(method: string, path: string, url: URL, request: Request, env
   if (method === "GET" && path === "/stats") return handleStats(env);
   if (method === "GET" && path === "/version") return json(version(env), 200, { "cache-control": "public, max-age=30" });
   if (method === "GET" && path === "/status") return handleServiceStatus(env);
+  if (method === "GET" && path === "/signing-key") {
+    const k = await publicKey(env);
+    return k ? json(k, 200, { "cache-control": "public, max-age=3600" }) : json({ error: "the pool has no signing key configured" }, 404);
+  }
   if (method === "GET" && path === "/graph") return handleGraph(url, env);
   if (method === "GET" && path === "/search") return handleSearch(url, env);
   if (method === "GET" && path === "/security") return handleSecurity(url, env);
@@ -319,6 +328,9 @@ async function api(method: string, path: string, url: URL, request: Request, env
   }
   if ((m = path.match(/^\/pool\/([0-9a-f]{64})\/sig$/)) && method === "PUT") {
     return (await authorize(request, env, "pool:write")) ?? handlePutPoolSig(m[1], url, request, env);
+  }
+  if ((m = path.match(/^\/pool\/([0-9a-f]{64})\/sign$/)) && method === "POST") {
+    return (await authorize(request, env, "pool:write")) ?? handleSignPool(m[1], url, env);
   }
   if ((m = path.match(/^\/pool\/([0-9a-f]{64})\/multipart$/)) && method === "POST") {
     return (await authorize(request, env, "pool:write")) ?? handleMultipartCreate(m[1], url, env);

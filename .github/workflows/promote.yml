@@ -143,10 +143,6 @@ jobs:
           toolchain: 1.98.1
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release -p pkg-repo
-      - name: Import signing key
-        run: |
-          echo "${{ secrets.OMARCHY_GPG_KEY }}" | gpg --batch --import
-          echo "OMARCHY_GPG_KEYID=${{ secrets.OMARCHY_GPG_KEYID }}" >> "$GITHUB_ENV"
       - name: Remember the current head (rollback target)
         id: previous
         run: echo "id=$(target/release/pkg-repo head --ring "${{ needs.plan.outputs.to }}" || true)" >> "$GITHUB_OUTPUT"
@@ -171,7 +167,7 @@ jobs:
       - name: Render
         run: |
           for arch in x86_64 aarch64; do
-            target/release/pkg-repo render --ring "${{ needs.plan.outputs.to }}" --arch "$arch" --sign "$OMARCHY_GPG_KEYID"
+            target/release/pkg-repo render --ring "${{ needs.plan.outputs.to }}" --arch "$arch"
           done
       - name: Health of ${{ needs.plan.outputs.to }} (x86_64)
         run: tests/health-check.sh "${{ needs.plan.outputs.to }}" x86_64
@@ -202,10 +198,6 @@ jobs:
           toolchain: 1.98.1
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release -p pkg-repo
-      - name: Import signing key
-        run: |
-          echo "${{ secrets.OMARCHY_GPG_KEY }}" | gpg --batch --import
-          echo "OMARCHY_GPG_KEYID=${{ secrets.OMARCHY_GPG_KEYID }}" >> "$GITHUB_ENV"
       - name: Confirm or roll back
         env:
           TO: ${{ needs.plan.outputs.to }}
@@ -232,7 +224,7 @@ jobs:
           fi
           target/release/pkg-repo rollback --ring "$TO" --to "$PREVIOUS" --note "automatic rollback: health failed after promotion from $FROM (x86_64=$X86, aarch64=$ARM)"
           for arch in x86_64 aarch64; do
-            target/release/pkg-repo render --ring "$TO" --arch "$arch" --sign "$OMARCHY_GPG_KEYID"
+            target/release/pkg-repo render --ring "$TO" --arch "$arch"
           done
           target/release/pkg-repo event --kind rollback --ring "$TO" --source "$FROM" --status warn \
             --summary "$FROM → $TO: release $head failed health (x86_64=$X86, aarch64=$ARM); rolled back to $PREVIOUS" \

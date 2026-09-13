@@ -15,6 +15,11 @@ routes = [
 [observability]
 enabled = true
 
+# Signing hashes whole package objects inside the Worker (src/signing.ts);
+# the largest ones (browsers) need more CPU than the default budget.
+[limits]
+cpu_ms = 120000
+
 # The pool's own scheduler (src/scheduler.ts): every ten minutes, dispatch the
 # workflows GitHub's cron has not run on time. Needs the GITHUB_TOKEN secret.
 [triggers]

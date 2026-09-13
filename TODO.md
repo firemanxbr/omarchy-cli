@@ -69,8 +69,8 @@ request (see [CONTRIBUTING.md](CONTRIBUTING.md)), and keep
 
 - [ ] **Production keys and hosting.** The staging database key is throwaway and
       the pool lives on a personal account; moving to omarchy.org means a key in
-      the team's custody (the workflows only need `OMARCHY_GPG_KEY` /
-      `OMARCHY_GPG_KEYID`), the Cloudflare resources in the team's account, and
+      the team's custody (one Worker secret, `SIGNING_KEY`, RUNBOOK *Rotate the
+      signing key*), the Cloudflare resources in the team's account, and
       `STABLE_ENVIRONMENT=stable` if the team wants a human before stable moves.
 - [ ] **Native install engine.** `poc/crates/pkg-store` (redb state + journaled,
       crash-safe transactions) is implemented and tested but not wired into the
@@ -104,7 +104,7 @@ request (see [CONTRIBUTING.md](CONTRIBUTING.md)), and keep
 ## Housekeeping
 
 - [ ] Rotate the staging key (`docs/omarchy-staging.pub.asc`, expires 2027-09-12)
-      before it expires; the workflows read it from the `OMARCHY_GPG_KEY` secret.
+      before it expires; it is the Worker secret `SIGNING_KEY` (RUNBOOK).
 - [ ] Pin the `archlinux:base` / `menci/archlinuxarm:base` image digests used by
       the e2e, health and ABI scripts for reproducible runs.
 - [ ] The `events` table grows by ~1.5k rows a month from the metrics snapshots;

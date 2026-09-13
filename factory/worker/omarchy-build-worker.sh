@@ -8,7 +8,7 @@
 #   build   → a FRESH Arch container per task (x86_64: archlinux:base-devel,
 #             aarch64: menci/archlinuxarm:base-devel), no secrets inside:
 #             fetch the PKGBUILD at the task's commit, makepkg as a plain user
-#   sign    → on this host, gpg --detach-sign with the factory key
+#   sign    → by the pool, with its own key, as the result is published
 #   pool    → pkg-repo publish --source factory --ring edge; pkg-repo render edge
 #   report  → POST …/tasks/<id>/complete  (or …/fail: the task goes back to the queue)
 #
@@ -22,8 +22,6 @@
 #   OMARCHY_POOL           https://pool.firemanxbr.org (builds can depend on earlier factory builds)
 #   FACTORY_TOKEN          bearer token for the factory endpoints
 #   OMARCHY_PUBLISH_TOKEN  bearer token pkg-repo uses to publish and render
-#   OMARCHY_GPG_KEYID      key id in this host's GnuPG keyring (GNUPGHOME) that signs packages and databases
-#   OMARCHY_GPG_KEY        …or an armored private key to import into a private keyring first
 #   WORKER_ARCH            architecture to build for (default: this host's; another one runs emulated)
 #   WORKER_ID              default <hostname>-<arch>-<random>
 #   WORKER_LABELS          JSON shown on the Factory page, e.g. {"where":"laptop"}
@@ -266,7 +264,6 @@ sha256() { if command -v sha256sum >/dev/null; then sha256sum "$1" | cut -d' ' -
 prepare() {
   : "${FACTORY_TOKEN:?FACTORY_TOKEN is required}"
   : "${OMARCHY_PUBLISH_TOKEN:?OMARCHY_PUBLISH_TOKEN is required}"
-  : "${OMARCHY_GPG_KEYID:?OMARCHY_GPG_KEYID is required}"
   RUNTIME="$(command -v podman || command -v docker || true)"
   [[ -n "$RUNTIME" ]] || { log "podman or docker is required"; exit 2; }
   HOST_ARCH="$(uname -m)"; [[ "$HOST_ARCH" == arm64 ]] && HOST_ARCH=aarch64
@@ -299,14 +296,8 @@ prepare() {
   fi
   WORKER_VERSION="$("$PKG_REPO" --version 2>/dev/null | awk '{print $2}')"
 
-  # The signing key: an armored key goes into a private keyring; otherwise
-  # the caller's GNUPGHOME already holds it.
-  if [[ -n "${OMARCHY_GPG_KEY:-}" ]]; then
-    export GNUPGHOME="$WORK/gnupg"; mkdir -p "$GNUPGHOME" && chmod 700 "$GNUPGHOME"
-    printf '%s' "$OMARCHY_GPG_KEY" | gpg --batch --import >/dev/null 2>&1
-    unset OMARCHY_GPG_KEY
-  fi
-  gpg --batch --list-secret-keys "$OMARCHY_GPG_KEYID" >/dev/null 2>&1 || { log "signing key $OMARCHY_GPG_KEYID is not in the keyring"; exit 2; }
+  # No key on this host: the pool signs what it stores (SECURITY.md).
+  curl -sS "$OMARCHY_API/api/v1/status" | grep -q '"signing":true' || { log "the pool at $OMARCHY_API does not sign its objects; nothing here can"; exit 2; }
   "$RUNTIME" pull -q --platform "$PLATFORM" "$IMAGE" >/dev/null
 }
 
@@ -349,11 +340,8 @@ build() { # task json
       # A dry run: keep the result on this host, publish nothing.
       mkdir -p "$WORK/dry-run" && cp "${pkgs[@]}" "$WORK/dry-run/" && echo "dry run: result kept in $WORK/dry-run, not published"
     else
-      for p in "${pkgs[@]}"; do
-        gpg --batch --yes --detach-sign --local-user "$OMARCHY_GPG_KEYID" --output "$p.sig" "$p"
-      done
       "$PKG_REPO" publish --source factory --ring edge --arch "$ARCH" --note "factory task $id: $name ($reason)" "${pkgs[@]}"
-      "$PKG_REPO" render --ring edge --arch "$ARCH" --sign "$OMARCHY_GPG_KEYID"
+      "$PKG_REPO" render --ring edge --arch "$ARCH"
     fi
   ) >"$logfile" 2>&1
   status=$?

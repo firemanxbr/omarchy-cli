@@ -10,7 +10,7 @@ workflows and the publisher.
 | Dashboard | https://omarchy-pool.firemanxbr.org |
 | Index API | https://pkgs.firemanxbr.org/api/v1/stats |
 | Pool (static, what pacman reads) | https://pool.firemanxbr.org/x86_64/ · `/aarch64/` |
-| Database signing key | `docs/omarchy-staging.pub.asc` · https://pool.firemanxbr.org/omarchy-staging.pub.asc (expires 2027-09-12) |
+| Signing key | `docs/omarchy-staging.pub.asc` · https://pool.firemanxbr.org/omarchy-staging.pub.asc · https://pkgs.firemanxbr.org/api/v1/signing-key (expires 2027-09-12); the private key is the Worker secret `SIGNING_KEY` — nowhere else |
 | Workflows | Sync (hourly) · Promote (edge→rc 06:00 UTC, rc→stable 09:00 UTC after a one-day soak, evidence-gated, auto-rollback) · Health (daily, both arches) · GC (Sundays) · Metrics (every 30 min) · Release (every merge into `main`) |
 | Running version | https://pkgs.firemanxbr.org/api/v1/version · the chip in the dashboard header |
 
@@ -21,8 +21,12 @@ workflows and the publisher.
   (`archlinux.gpg`, `archlinuxarm.gpg`, `omarchy.gpg` — built by
   `tests/fetch-keyrings.sh`). A machine using the pool verifies packages with the
   keys it already trusts (`archlinux-keyring`, `archlinuxarm-keyring`, Omarchy's).
-* **Only the databases are signed by the staging key.** Trusting the pool means
-  trusting one key for `omarchy-*-<ring>.db`; nothing else.
+* **The pool signs with its own key, inside the Worker.** Databases are signed
+  as they are stored (`PUT /releases/:id/artifacts/db|files`); a package the
+  factory built is signed on request (`POST /pool/:sha256/sign`) against the
+  bytes actually stored. Trusting the pool means trusting one key for
+  `omarchy-*-<ring>.db` and `factory` packages; nothing else. No worker,
+  runner or repository holds the key (SECURITY.md).
 * **The pool is append-only.** The worker refuses to overwrite an existing object;
   the only deletions are retention (`gc`), which never touches anything the last
   three releases of any ring reference, nor anything younger than seven days.
@@ -67,12 +71,12 @@ pkg-repo head --ring stable                                    # current release
 tests/abi-gate.sh rc x86_64                                    # ABI check of rc's upgrades, exit 2 on blockers
 ```
 
-Locally, with `OMARCHY_API`, `OMARCHY_PUBLISH_TOKEN` (and the GPG key) set:
+Locally, with `OMARCHY_API` and `OMARCHY_PUBLISH_TOKEN` set:
 
 ```bash
 pkg-repo releases --ring stable                    # history, head marked *
 pkg-repo rollback --ring stable --to <release id>  # then render
-pkg-repo render --ring stable --arch x86_64 --sign <key id>
+pkg-repo render --ring stable --arch x86_64        # the pool signs what it stores
 pkg-repo gc --keep 3                               # report; add --delete to free the pool
 ```
 
@@ -143,7 +147,7 @@ had, and a **project worker** pulls and runs them:
 ```bash
 # on any machine with podman/docker, python3, curl, git (the health and ABI
 # scripts) — a droplet, a laptop, a Hetzner box
-pkg-repo work --worker-token omw_… --sign "$OMARCHY_GPG_KEYID" --labels '{"where":"droplet-1"}'
+pkg-repo work --worker-token omw_… --labels '{"where":"droplet-1"}'
 ```
 
 The worker is registered like any other (`POST /factory/workers`) and a
@@ -212,8 +216,8 @@ tasks from the pool ([factory/README.md](../factory/README.md)). Day to day:
 - **Workers**: contributors' builds run on their workers; project builds
   (approvals, `factory/pkgbuilds`) on project-trusted workers — today the
   Mac (`pkg-repo work`, one process per architecture). No GitHub runner
-  builds packages; a queued build waits for a project worker. Project
-  workers hold the signing key until the pool signs its own objects.
+  builds packages; a queued build waits for a project worker. Workers
+  hold no key: the pool signs what they publish.
 - **New upstream versions**: `factory-update.yml` (daily, 05:45 UTC from the
   scheduler) checks each PKGBUILD's GitHub upstream, bumps `pkgver`
   (`pkgrel=1`), refreshes checksums with `updpkgsums` and opens one pull
@@ -267,20 +271,29 @@ npx wrangler d1 execute omarchy-repo --remote --command "DELETE FROM release_art
 gh workflow run sync.yml -f limit=0
 ```
 
-## Rotate the database signing key
+## Rotate the signing key
+
+The private key lives only in the Worker secret `SIGNING_KEY` (armored
+OpenPGP; `SIGNING_KEY_PASSPHRASE` when it has one). Generate it on a
+trusted machine, pipe it straight into the secret and keep no copy:
 
 ```bash
 export GNUPGHOME=~/.cache/omarchy-cli-poc/gnupg
 gpg --batch --quiet --passphrase '' --quick-generate-key "Omarchy Staging Signing <staging@firemanxbr.org>" ed25519 sign 1y
 KEY=$(gpg --list-keys --with-colons staging@firemanxbr.org | awk -F: '/^fpr/{print $10; exit}')   # newest
 gpg --armor --export "$KEY" > docs/omarchy-staging.pub.asc
-gpg --batch --armor --export-secret-keys "$KEY" | gh secret set OMARCHY_GPG_KEY
-gh secret set OMARCHY_GPG_KEYID --body "$KEY"
-cd worker && npx wrangler r2 object put omarchy-packages/omarchy-staging.pub.asc --file ../docs/omarchy-staging.pub.asc --remote
-gh workflow run promote.yml -f from=rc -f to=rc   # re-render each ring with the new key
+cd worker
+gpg --batch --armor --export-secret-keys "$KEY" | npx wrangler secret put SIGNING_KEY
+npx wrangler r2 object put omarchy-packages/omarchy-staging.pub.asc --file ../docs/omarchy-staging.pub.asc --remote
+cd .. && gpg --batch --yes --delete-secret-keys "$KEY"   # the Worker is the only holder
+curl -s https://pkgs.firemanxbr.org/api/v1/signing-key | jq .fingerprint   # the new key
+for ring in edge rc stable; do for arch in x86_64 aarch64; do pkg-repo render --ring $ring --arch $arch; done; done
 ```
 
 Clients must import the new public key (`pacman-key --add … && --lsign-key`).
+Packages the factory built under the old key keep their signatures — those
+verify against the old public key until each package is rebuilt (a
+`POST /pool/:sha256/sign` per stored object re-signs them with the new one).
 
 ## Add a source or an architecture
 

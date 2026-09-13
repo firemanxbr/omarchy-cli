@@ -39,16 +39,11 @@ jobs:
           sha256sum -c "$name.tar.gz.sha256"
           tar -xzf "$name.tar.gz" && mkdir -p bin && cp "$name"/* bin/ && echo "$PWD/bin" >> "$GITHUB_PATH"
           echo "$tag"
-      - name: Import the database signing key (until the pool signs its own databases)
-        env:
-          OMARCHY_GPG_KEY: ${{ secrets.OMARCHY_GPG_KEY }}
-        run: printf '%s' "$OMARCHY_GPG_KEY" | gpg --batch --import
       - name: Work until the queue is empty
         env:
           OMARCHY_API: ${{ vars.OMARCHY_API }}
           OMARCHY_POOL: ${{ vars.OMARCHY_POOL }}
           OMARCHY_WORKER_TOKEN: ${{ secrets.FACTORY_TOKEN }}
-          OMARCHY_GPG_KEYID: ${{ secrets.OMARCHY_GPG_KEYID }}
           WORKER_ID: gh-pool-${{ inputs.arch }}-${{ github.run_id }}
         run: |
           pkg-repo work --arch "${{ inputs.arch }}" --idle-exit "${{ inputs.idle_exit }}" --repo-dir "$PWD" --work-dir "$RUNNER_TEMP/pool-worker" \
