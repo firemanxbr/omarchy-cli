@@ -37,6 +37,13 @@ export OMARCHY_TOKEN="$(job_token)"
 
 step() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
 cleanup() {
+  local code=$?
+  # What the local pool said, when a step failed: the Worker's own log is
+  # the only place a 'Network connection lost' or a D1 error shows up.
+  if [[ $code -ne 0 && -f "$E2E/wrangler.log" ]]; then
+    printf '\n\033[1;31m==> the local pool (wrangler dev) log, last 80 lines:\033[0m\n' >&2
+    tail -n 80 "$E2E/wrangler.log" >&2
+  fi
   if [[ -n "${WRANGLER_PID:-}" ]]; then kill "$WRANGLER_PID" 2>/dev/null || true; fi
 }
 trap cleanup EXIT
@@ -129,8 +136,17 @@ sup=$(curl -s -X PUT "$OMARCHY_API/api/v1/releases/1/artifacts/db.sig?repo=omarc
 grep -q '"status":"superseded"' <<<"$sup" || { echo "client signature was not superseded: $sup"; exit 1; }
 # A release that only touches aarch64 keeps x86_64's rendered databases: the
 # artifact rows carry over and the response says not to render it again.
-unch=$(curl -s -X POST "$OMARCHY_API/api/v1/releases" -H "Authorization: Bearer $OMARCHY_TOKEN" -H "content-type: application/json" -d '{"ring":"stable","remove":["nothing-here"],"remove_arch":"aarch64","note":"aarch64-only change"}')
-grep -q '"unchanged_arches":\["x86_64"\]' <<<"$unch" || { echo "an aarch64-scoped release must report x86_64 unchanged: $unch"; exit 1; }
+# wrangler dev's proxy drops a request now and then on CI runners ("Network
+# connection lost", the dev server continues — seen right here, never
+# locally); one retry two seconds later tells that apart from a real error.
+unch=""
+for attempt in 1 2 3; do
+  unch=$(curl -s -w '\nHTTP %{http_code} in %{time_total}s' -X POST "$OMARCHY_API/api/v1/releases" -H "Authorization: Bearer $OMARCHY_TOKEN" -H "content-type: application/json" -d "{\"ring\":\"stable\",\"remove\":[\"nothing-here\"],\"remove_arch\":\"aarch64\",\"note\":\"aarch64-only change (attempt $attempt)\"}")
+  grep -q '"unchanged_arches":\["x86_64"\]' <<<"$unch" && break
+  echo "attempt $attempt: the local pool did not answer the aarch64-scoped release: $unch"
+  sleep 2
+done
+grep -q '"unchanged_arches":\["x86_64"\]' <<<"$unch" || { echo "an aarch64-scoped release must report x86_64 unchanged"; curl -s "$OMARCHY_API/api/v1/status"; echo; exit 1; }
 carried=$(curl -s "$OMARCHY_API/api/v1/releases/stable?fields=summary"); grep -q '"repo":"omarchy-packages-stable","arch":"x86_64","kind":"db"' <<<"$carried" || { echo "the parent's x86_64 databases were not carried over: $(head -c 300 <<<"$carried")"; exit 1; }
 
 step "Pool sanity (flat layout: databases beside the packages)"

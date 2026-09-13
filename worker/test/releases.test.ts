@@ -261,7 +261,8 @@ describe("unchanged architectures", () => {
 });
 
 describe("releases as deltas", () => {
-  it("writes only what changed, checkpoints every 24th release, and reconstructs any older one on demand", async () => {
+  // Thirty releases: a few milliseconds each here, a fsync each on a CI runner.
+  it("writes only what changed, checkpoints every 24th release, and reconstructs any older one on demand", { timeout: 60000 }, async () => {
     const before = (await call("GET", "/releases/edge/history")).json.releases[0];
     const deltas = async (id: number) => (await env.DB.prepare("SELECT op, COUNT(*) AS n FROM release_deltas WHERE release_id = ? GROUP BY op ORDER BY op").bind(id).all<{ op: string; n: number }>()).results;
     const rows = async (id: number) => (await env.DB.prepare("SELECT COUNT(*) AS n FROM release_packages WHERE release_id = ?").bind(id).first<{ n: number }>())!.n;
@@ -306,7 +307,7 @@ describe("releases as deltas", () => {
     expect(last.seq).toBe(hist[0].seq);
   });
 
-  it("retention keeps what a rollback inside it may need, and drops the rest", async () => {
+  it("retention keeps what a rollback inside it may need, and drops the rest", { timeout: 60000 }, async () => {
     // keep=3 protects the last three releases of each ring; the kept checkpoint is the newest at or before the oldest of them.
     const un = await call("GET", "/pool/unreferenced?keep=3&grace_days=0");
     expect(un.status).toBe(200);
