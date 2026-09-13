@@ -110,7 +110,8 @@ jobs:
           git checkout -q -B "$branch" origin/main
           mkdir -p "$dir"
           stage drafting "drafting the PKGBUILD from $URL"
-          PR_URL=""; attempt=0; ok=false; log=""
+          # A second run for the same project continues on its branch and pull request.
+          PR_URL="$(gh pr list --head "$branch" --state open --json url -q '.[0].url // ""')"; attempt=0; ok=false; log=""
           while (( attempt < 3 )); do
             attempt=$((attempt + 1))
             # 1. Draft (or correct, from the previous attempt's log).
