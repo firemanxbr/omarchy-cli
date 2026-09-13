@@ -151,3 +151,22 @@ group's maintainers, never auto-merged.
 Role changes are `role` events, approvals are rows a maintainer signed with
 their login (`GET /api/v1/factory/approvals`), trust decisions are `trust`
 events. The file's history on GitHub is the history of who decided what.
+
+### Track record, per group
+
+A profile (`/user/<login>`, `GET /api/v1/users/<login>` → `record`) sums
+that record per group, so it says where a person has done the work — not
+who they are. Per group, as a contributor: distinct packages a maintainer
+let in, builds that produced evidence (staged), of which bumps, builds
+their workers did for other people (donated compute), rejections. As a
+maintainer: approvals, rejections, and approvals whose project rebuild
+then failed. One number per group, so that the formula is public and dull:
+
+```
+score = 3·let in + staged + bumps + for others − 2·rejected      (contributed)
+      + 2·approvals + rejections − 3·rebuilds failed              (maintained)
+```
+
+It orders the groups on a profile and nothing else: no rank, no badge, no
+threshold. Becoming a maintainer is still a pull request another
+maintainer approves, with this record as one thing they look at.

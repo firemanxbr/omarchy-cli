@@ -76,11 +76,6 @@ request (see [CONTRIBUTING.md](CONTRIBUTING.md)), and keep
 
 ## Larger (needs a design conversation first)
 
-- [ ] **Reputation, per group.** An abstract score for contributors (packages
-      that reached the pool, bumps built, reviews received) and for maintainers
-      (approvals, rollbacks avoided) per area of interest — games, kernel, … —
-      so that profiles say "good in this area". Later; the record it would be
-      computed from (approvals, bump events, role lines) already exists.
 - [ ] **Audit the rebuild too.** The second agent reads the staged
       evidence; a second pass on the project's own rebuild (its log and
       `.PKGINFO` against the staged ones) would catch a recipe that builds
@@ -145,7 +140,8 @@ step a pulled job with a per-job token, no shared secret, GitHub only
 releasing · signing inside the Worker · governance from a file, two roles ·
 the cost estimate, the guard and the daily report · one worker image for
 everyone, nobody approves their own package · the second agent (the audit
-of a staged build, attached to its evidence).
+of a staged build, attached to its evidence) · the track record per group
+on profiles.
 
 ## Factory findings (2026-09-12)
 

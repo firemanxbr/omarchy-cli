@@ -13,6 +13,12 @@ const BODY = String.raw`
   </div>
   <div class="tiles" id="tiles"></div>
 
+  <section id="record-section" hidden>
+    <h2>Track record</h2>
+    <p class="sub">Per group, from the record the pool keeps anyway — what this person brought that a maintainer let in, what they built, what they decided. One number per group, with a formula anyone can check (<a href="/docs/governance">Governance</a>): it says where the work was done, not who someone is.</p>
+    <div class="table-wrap"><table id="record"><thead><tr><th>Group</th><th>Contributed</th><th>Maintained</th><th>Score</th></tr></thead><tbody></tbody></table></div>
+  </section>
+
   <section>
     <h2>Packages</h2>
     <p class="sub">Registered by this contributor: the name is theirs, their worker builds it, a maintainer of the group reviews it.</p>
@@ -62,6 +68,15 @@ const SCRIPT = String.raw`
       ["Workers", num(d.workers.filter(function (w) { return !w.revoked_at; }).length), num(d.workers.filter(function (w) { return w.alive; }).length) + " alive now"]
     ];
     $("#tiles").innerHTML = tiles.map(function (t) { return '<div class="tile"><div class="k">' + t[0] + '</div><div class="v num">' + t[1] + '</div><div class="s">' + t[2] + '</div></div>'; }).join("");
+    if ((d.record || []).length) {
+      $("#record-section").hidden = false;
+      pager("#record", d.record, function (r) {
+        var c = r.contributed, m = r.maintained;
+        var contributed = [c.approved ? num(c.approved) + " let in" : "", c.staged ? num(c.staged) + " staged" : "", c.bumps ? num(c.bumps) + " bump" + (c.bumps === 1 ? "" : "s") : "", c.donated ? num(c.donated) + " for others" : "", c.rejected ? num(c.rejected) + " rejected" : ""].filter(Boolean).join(" · ") || "—";
+        var maintained = [m.approvals ? num(m.approvals) + " approval" + (m.approvals === 1 ? "" : "s") : "", m.rejections ? num(m.rejections) + " rejection" + (m.rejections === 1 ? "" : "s") : "", m.rebuilds_failed ? num(m.rebuilds_failed) + " rebuild" + (m.rebuilds_failed === 1 ? "" : "s") + " failed" : ""].filter(Boolean).join(" · ") || "—";
+        return '<tr><td><a href="/docs/governance"><b>' + esc(r.group) + '</b></a></td><td>' + contributed + '</td><td>' + maintained + '</td><td class="num">' + num(r.score) + '</td></tr>';
+      });
+    }
     pager("#packages", d.packages, function (p) {
       var arches = []; try { arches = JSON.parse(p.arches || "[]"); } catch (e) {}
       return '<tr><td><a href="/package/' + encodeURIComponent(p.name) + '"><b>' + esc(p.name) + '</b></a></td><td>' + esc(p.group) + '</td><td>' + (p.url ? '<a href="' + esc(p.url) + '">' + esc(p.url.replace(/^https?:\/\/(www\.)?github\.com\//, "")) + '</a>' : '') + '</td><td>' + esc(arches.join(", ")) + '</td><td>' + pill(p.status) + '</td><td>' + esc(p.detail || "") + '</td></tr>';
