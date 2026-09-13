@@ -149,7 +149,7 @@ export default {
       // Sign in with GitHub: cookie session for the dashboard's pages.
       if (path === "/auth/github" && method === "GET") return handleAuthStart(url, env);
       if (path === "/auth/github/callback" && method === "GET") return handleAuthCallback(url, request, env);
-      if (path === "/auth/logout") return handleLogout(url);
+      if (path === "/auth/logout") return handleLogout(url, request, env);
       if (path === "/auth/me" && method === "GET") {
         const c = await contributorOf(request, env);
         return c ? json({ login: c.login, name: c.name, avatar_url: c.avatar_url, role: c.role, areas: c.areas }, 200, { "cache-control": "no-store" }) : json({ error: "not signed in" }, 401, { "cache-control": "no-store" });

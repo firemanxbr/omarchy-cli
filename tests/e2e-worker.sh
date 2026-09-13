@@ -75,8 +75,8 @@ npx wrangler d1 execute omarchy-repo --local --persist-to "$WRANGLER_STATE" --co
      ('w2', 'aarch64', 'e2e', '$W2_HASH', 'shared', 'project', 'e2e', '2000-01-01T00:00:00Z'),
      ('w3', 'aarch64', 'e2e-contributor', '$W3_HASH', 'dedicated', 'community', NULL, '2000-01-01T00:00:00Z');
    INSERT INTO factory_groups (name, description, maintainers) VALUES ('community', 'everything else', '[\"e2e\"]');
-   INSERT INTO contributors (login, token_hash, role, areas) VALUES ('e2e', '$C_HASH', 'maintainer', '[\"community\"]'),
-     ('e2e-contributor', '$(printf %s omc_e2e_contributor | sha256sum | cut -d' ' -f1)', 'contributor', '[]')" >/dev/null
+   INSERT INTO contributors (login, token_hash, session_hash, role, areas) VALUES ('e2e', '$C_HASH', '$(printf %s oms_e2e | sha256sum | cut -d' ' -f1)', 'maintainer', '[\"community\"]'),
+     ('e2e-contributor', '$(printf %s omc_e2e_contributor | sha256sum | cut -d' ' -f1)', NULL, 'contributor', '[]')" >/dev/null
 npx wrangler dev --ip 0.0.0.0 --port "$PORT" --persist-to "$WRANGLER_STATE" \
   --env-file "$E2E/.dev.vars" --var "POOL_URL:http://$HOST_FROM_CONTAINER:$PORT/pool" > "$E2E/wrangler.log" 2>&1 &
 WRANGLER_PID=$!
@@ -225,6 +225,11 @@ review=$(curl -s "$OMARCHY_API/api/v1/factory/review"); grep -q '"staged"' <<<"$
 groups=$(curl -s "$OMARCHY_API/api/v1/factory/groups"); grep -q '"maintainers":\["e2e"\]' <<<"$groups" || { echo "groups not served from the governance table: $groups"; exit 1; }
 me=$(curl -s "$OMARCHY_API/api/v1/factory/me" -H "authorization: Bearer omc_e2e"); grep -q '"role":"maintainer"' <<<"$me" || { echo "the seeded maintainer is not one: $me"; exit 1; }
 gpage=$(curl -s "$OMARCHY_API/docs/governance"); grep -q "Becoming a maintainer" <<<"$gpage" || { echo "governance page not served"; exit 1; }
+# The browser session (cookie omc=oms_…) signs the dashboard in; signing out invalidates it on the server, not only in the browser.
+sme=$(curl -s "$OMARCHY_API/auth/me" -H "cookie: omc=oms_e2e"); grep -q '"login":"e2e"' <<<"$sme" || { echo "the seeded session does not sign in: $sme"; exit 1; }
+[[ "$(curl -s -o /dev/null -w '%{http_code}' "$OMARCHY_API/auth/logout" -H "cookie: omc=oms_e2e")" == 302 ]] || { echo "logout must redirect"; exit 1; }
+[[ "$(curl -s -o /dev/null -w '%{http_code}' "$OMARCHY_API/auth/me" -H "cookie: omc=oms_e2e")" == 401 ]] || { echo "a signed-out session must stop working"; exit 1; }
+[[ "$(curl -s -o /dev/null -w '%{http_code}' "$OMARCHY_API/api/v1/factory/me" -H "authorization: Bearer omc_e2e")" == 200 ]] || { echo "signing out of the browser must not revoke the CLI token"; exit 1; }
 # A worker learns what its registration is (the image decides its mode from this).
 wself=$(curl -s "$OMARCHY_API/api/v1/factory/workers/self" -H "authorization: Bearer omw_e2e_w3"); grep -q '"trust":"community"' <<<"$wself" && grep -q '"owner":"e2e-contributor"' <<<"$wself" || { echo "workers/self did not describe the registration: $wself"; exit 1; }
 [[ "$(curl -s -o /dev/null -w '%{http_code}' "$OMARCHY_API/api/v1/factory/workers/self")" == 401 ]] || { echo "workers/self must need a worker token"; exit 1; }
