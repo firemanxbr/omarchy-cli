@@ -4,7 +4,7 @@
 # signature verification. Posts a `health` event either way.
 #
 # Usage: tests/health-check.sh <ring> [arch]   (arch: x86_64 | aarch64)
-# Env:   OMARCHY_API, OMARCHY_POOL, OMARCHY_PUBLISH_TOKEN
+# Env:   OMARCHY_API, OMARCHY_POOL, OMARCHY_TOKEN
 #        OMARCHY_KEYRINGS  directory from tests/fetch-keyrings.sh (omarchy.gpg verifies the OPR's packages)
 # The container is what an Omarchy machine has: the distribution's keyring
 # plus Omarchy's key. chaotic-aur is opt-in and needs its own keyring, so its

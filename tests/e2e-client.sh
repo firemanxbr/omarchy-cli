@@ -25,7 +25,18 @@ else
   HOST_FROM_CONTAINER="host.docker.internal"; RUN_EXTRA=(--add-host=host.docker.internal:host-gateway)
 fi
 export OMARCHY_API="http://127.0.0.1:$PORT"
-export OMARCHY_PUBLISH_TOKEN="e2e-token"
+# A job token for the local pool, minted the way the brain mints them
+# (HMAC over the claims with JOB_TOKEN_SECRET): what a worker gets at claim
+# time. Every scope, a day long — the e2e is the whole pipeline at once.
+JOB_SECRET="e2e-jobs"
+job_token() {
+  local claims payload sig
+  claims=$(jq -nc '{t:0,k:"e2e",s:["pool:write","release:edge","release:rc","release:stable","artifacts:*:edge","artifacts:*:rc","artifacts:*:stable","security:write","gc","events","factory:write"],e:((now|floor)+86400),w:"e2e"}')
+  payload=$(printf %s "$claims" | openssl base64 -A | tr '+/' '-_' | tr -d '=')
+  sig=$(printf %s "$payload" | openssl dgst -sha256 -hmac "$JOB_SECRET" -binary | openssl base64 -A | tr '+/' '-_' | tr -d '=')
+  echo "omj.$payload.$sig"
+}
+export OMARCHY_TOKEN="$(job_token)"
 CURRENT="docker.io/library/archlinux:base"
 OLD="docker.io/library/archlinux:base-20210131.0.14634"
 
@@ -49,7 +60,7 @@ cargo build -q --release -p pkg-repo
 PKG_REPO="$ROOT/target/release/pkg-repo"
 cd "$ROOT/worker"
 STATE="$E2E/wrangler-state"
-echo "PUBLISH_TOKEN=$OMARCHY_PUBLISH_TOKEN" > "$E2E/.dev.vars"
+echo "JOB_TOKEN_SECRET=$JOB_SECRET" > "$E2E/.dev.vars"
 npx wrangler d1 migrations apply omarchy-repo --local --persist-to "$STATE" >/dev/null
 npx wrangler dev --ip 0.0.0.0 --port "$PORT" --persist-to "$STATE" \
   --env-file "$E2E/.dev.vars" --var "POOL_URL:http://$HOST_FROM_CONTAINER:$PORT/pool" > "$E2E/wrangler.log" 2>&1 &

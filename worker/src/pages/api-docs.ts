@@ -6,7 +6,7 @@ import type { RunningVersion } from "../meta";
 
 const BODY = String.raw`
   <h1>API</h1>
-  <p class="lede">Everything this site shows comes from a small JSON API at <code>https://pkgs.firemanxbr.org/api/v1</code>. Reads need no authentication and allow cross-origin requests; writes need the publish token and are what the pipeline uses.</p>
+  <p class="lede">Everything this site shows comes from a small JSON API at <code>https://pkgs.firemanxbr.org/api/v1</code>. Reads need no authentication and allow cross-origin requests; writes need the per-job token a worker gets when it claims a task — there is no shared secret — or, on the factory's own routes, a maintainer's token.</p>
 
   <section>
     <h2>Read</h2>
@@ -49,8 +49,8 @@ curl -s  https://pool.firemanxbr.org/x86_64/omarchy-core-stable.db | tar -tz | h
   </section>
 
   <section>
-    <h2>Write (pipeline only)</h2>
-    <p class="sub">Bearer <code>PUBLISH_TOKEN</code>. Used by <code>pkg-repo</code> from GitHub Actions; documented in the repository's <a href="https://github.com/firemanxbr/omarchy-pool/blob/main/docs/ARCHITECTURE.md">architecture notes</a>.</p>
+    <h2>Write (jobs only)</h2>
+    <p class="sub">Bearer <code>omj.…</code>: the per-job token issued at <code>POST /factory/claim</code>, scoped to what that task needs (<code>pool:write</code>, <code>release:&lt;ring&gt;</code>, <code>artifacts:*:&lt;ring&gt;</code>, <code>security:write</code>, <code>gc</code>, <code>events</code>) and valid for its lease. Used by <code>pkg-repo work</code>; documented in <a href="https://github.com/firemanxbr/omarchy-pool/blob/main/SECURITY.md">SECURITY.md</a>. A maintainer queues one of these jobs by hand with <code>POST /factory/jobs</code>.</p>
     <div class="table-wrap"><table><thead><tr><th>Endpoint</th><th>What it does</th></tr></thead><tbody>
       <tr><td><code>PUT /pool/:sha256?filename=&amp;arch=</code> · <code>/sig</code> · <code>/multipart</code></td><td>Store a package object (integrity-checked, never overwritten) and its upstream signature.</td></tr>
       <tr><td><code>POST /pool/:sha256/sign?filename=&amp;arch=</code></td><td>The pool signs a package it built (source <em>factory</em>) with its own key; the key never leaves the service.</td></tr>

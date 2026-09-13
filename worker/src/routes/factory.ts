@@ -16,7 +16,7 @@ import { issueJobToken, scopesFor, type JobClaims } from "../jobtoken";
  * writes use the job token the claim issued.
  *
  * A lease that expires (worker died, build hung) goes back to the queue on
- * the scheduler's next tick. Maintainers / the pipeline (publish token):
+ * the scheduler's next tick. Maintainers (their token) or the enqueue job:
  *
  *   POST /factory/requests              {name, group?, arches?, requested_by?, reason?}
  *   POST /factory/requests/:id/approve  {approved_by, pkgbuild_ref}  → tasks per arch
@@ -104,7 +104,7 @@ export async function providedBy(env: Env, name: string): Promise<{ source: stri
  * them). Per architecture: the OPR ships many names for x86_64 only, and
  * those are exactly what the factory builds for aarch64.
  */
-function splitByUpstream(provided: { source: string; arch: string; version: string }[], arches: string[], override: boolean | undefined): { build: string[]; skipped: { arch: string; source: string; version: string }[] } {
+export function splitByUpstream(provided: { source: string; arch: string; version: string }[], arches: string[], override: boolean | undefined): { build: string[]; skipped: { arch: string; source: string; version: string }[] } {
   const skipped: { arch: string; source: string; version: string }[] = [];
   const build = arches.filter((arch) => {
     const hit = provided.find((p) => p.arch === arch && !["factory", "chaotic"].includes(p.source));
@@ -249,7 +249,7 @@ async function touchWorker(env: Env, w: { worker: string; arch: string; hostname
     .run();
 }
 
-const ALL_KINDS = ["build", "sync", "promote", "render", "health", "security", "metrics", "gc"];
+const ALL_KINDS = ["build", "sync", "promote", "render", "health", "security", "metrics", "gc", "enqueue"];
 
 export async function handleClaim(request: Request, env: Env, actor: Actor): Promise<Response> {
   const b = (await request.json()) as { arch?: string; hostname?: string; labels?: unknown; version?: string; kinds?: unknown; shared?: unknown };
@@ -370,6 +370,8 @@ export async function handleComplete(id: number, request: Request, env: Env, act
     await env.DB.prepare("UPDATE build_workers SET last_seen = ?, current_task = NULL, builds_done = builds_done + 1 WHERE id = ?").bind(now(), who).run();
     await env.DB.prepare("UPDATE factory_packages SET status = 'staged', detail = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE name = ?")
       .bind(`${b.version ?? ""} built for ${task.arch} by ${who}; waiting for a maintainer`, task.name).run();
+    await env.DB.prepare("UPDATE build_requests SET status = 'review', detail = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE name = ? AND status IN ('requested', 'drafting', 'validating')")
+      .bind(`built for ${task.arch} by ${who}; staged for a maintainer (task ${id})`, task.name).run();
     await event(env, "build", "ok", `${task.name} ${b.version ?? ""} built for ${task.arch} by ${who}${b.duration_ms ? " in " + Math.round(b.duration_ms / 60000) + " min" : ""} — staged for a maintainer (${task.owner})`, { task: id, arch: task.arch, sha256: b.sha256, filename: b.filename, worker: who, owner: task.owner, staged_prefix: prefix, duration_ms: b.duration_ms ?? null });
     return json({ task: id, status: "staged", staged_prefix: prefix });
   }

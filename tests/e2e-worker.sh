@@ -22,7 +22,18 @@ else
   HOST_FROM_CONTAINER="host.docker.internal"; RUN_EXTRA=(--add-host=host.docker.internal:host-gateway)
 fi
 export OMARCHY_API="http://127.0.0.1:$PORT"
-export OMARCHY_PUBLISH_TOKEN="e2e-token"
+# A job token for the local pool, minted the way the brain mints them
+# (HMAC over the claims with JOB_TOKEN_SECRET): what a worker gets at claim
+# time. Every scope, a day long — the e2e is the whole pipeline at once.
+JOB_SECRET="e2e-jobs"
+job_token() {
+  local claims payload sig
+  claims=$(jq -nc '{t:0,k:"e2e",s:["pool:write","release:edge","release:rc","release:stable","artifacts:*:edge","artifacts:*:rc","artifacts:*:stable","security:write","gc","events","factory:write"],e:((now|floor)+86400),w:"e2e"}')
+  payload=$(printf %s "$claims" | openssl base64 -A | tr '+/' '-_' | tr -d '=')
+  sig=$(printf %s "$payload" | openssl dgst -sha256 -hmac "$JOB_SECRET" -binary | openssl base64 -A | tr '+/' '-_' | tr -d '=')
+  echo "omj.$payload.$sig"
+}
+export OMARCHY_TOKEN="$(job_token)"
 
 step() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
 cleanup() {
@@ -49,7 +60,7 @@ WRANGLER_STATE="$E2E/wrangler-state"
 # The pool holds the signing key (SECURITY.md): the throwaway key goes in as
 # the Worker secret, armored on one dotenv line.
 SIGNING_KEY="$(gpg --batch --armor --export-secret-keys "$KEYID" | awk '{printf "%s\\n", $0}')"
-printf 'PUBLISH_TOKEN=%s\nJOB_TOKEN_SECRET=e2e-jobs\nSIGNING_KEY="%s"\n' "$OMARCHY_PUBLISH_TOKEN" "$SIGNING_KEY" > "$E2E/.dev.vars"
+printf 'JOB_TOKEN_SECRET=%s\nSIGNING_KEY="%s"\n' "$JOB_SECRET" "$SIGNING_KEY" > "$E2E/.dev.vars"
 npx wrangler d1 migrations apply omarchy-repo --local --persist-to "$WRANGLER_STATE" >/dev/null
 # Two registered project workers (what POST /factory/workers + a maintainer's
 # trust produce), seeded straight into the local index: their tokens are
@@ -63,7 +74,8 @@ npx wrangler d1 execute omarchy-repo --local --persist-to "$WRANGLER_STATE" --co
      ('w1', 'aarch64', 'e2e', '$W1_HASH', 'shared', 'project', 'e2e', '2000-01-01T00:00:00Z'),
      ('w2', 'aarch64', 'e2e', '$W2_HASH', 'shared', 'project', 'e2e', '2000-01-01T00:00:00Z');
    INSERT INTO factory_groups (name, description, maintainers) VALUES ('community', 'everything else', '[\"e2e\"]');
-   INSERT INTO contributors (login, token_hash, role, areas) VALUES ('e2e', '$C_HASH', 'maintainer', '[\"community\"]')" >/dev/null
+   INSERT INTO contributors (login, token_hash, role, areas) VALUES ('e2e', '$C_HASH', 'maintainer', '[\"community\"]'),
+     ('e2e-contributor', '$(printf %s omc_e2e_contributor | sha256sum | cut -d' ' -f1)', 'contributor', '[]')" >/dev/null
 npx wrangler dev --ip 0.0.0.0 --port "$PORT" --persist-to "$WRANGLER_STATE" \
   --env-file "$E2E/.dev.vars" --var "POOL_URL:http://$HOST_FROM_CONTAINER:$PORT/pool" > "$E2E/wrangler.log" 2>&1 &
 WRANGLER_PID=$!
@@ -107,7 +119,7 @@ curl -so "$E2E/stable.db" "$OMARCHY_API/pool/x86_64/omarchy-packages-stable.db"
 curl -so "$E2E/stable.db.sig" "$OMARCHY_API/pool/x86_64/omarchy-packages-stable.db.sig"
 gpg --verify "$E2E/stable.db.sig" "$E2E/stable.db" 2>/dev/null || { echo "the pool's database signature does not verify"; exit 1; }
 # A client's own signature is not taken over the pool's.
-sup=$(curl -s -X PUT "$OMARCHY_API/api/v1/releases/1/artifacts/db.sig?repo=omarchy-packages-stable&arch=x86_64" -H "Authorization: Bearer $OMARCHY_PUBLISH_TOKEN" --data-binary 'not a signature')
+sup=$(curl -s -X PUT "$OMARCHY_API/api/v1/releases/1/artifacts/db.sig?repo=omarchy-packages-stable&arch=x86_64" -H "Authorization: Bearer $OMARCHY_TOKEN" --data-binary 'not a signature')
 grep -q '"status":"superseded"' <<<"$sup" || { echo "client signature was not superseded: $sup"; exit 1; }
 
 step "Pool sanity (flat layout: databases beside the packages)"
@@ -134,7 +146,7 @@ grep -q '"shown_ring":"stable"' <<<"$pkg_body" || { echo "package page data miss
 # Security: an advisory on the served zlib object shows up in the ring's report,
 # and what loads libz.so.1 counts as exposed.
 zlib_sha=$(python3 -c 'import json,sys; d=json.load(sys.stdin); print([p["sha256"] for p in d["packages"] if p["name"]=="zlib"][0])' <<<"$(curl -s "$OMARCHY_API/api/v1/releases/stable?fields=summary")")
-auth=(-H "authorization: Bearer $OMARCHY_PUBLISH_TOKEN" -H "content-type: application/json")
+auth=(-H "authorization: Bearer $OMARCHY_TOKEN" -H "content-type: application/json")
 curl -sf -X PUT "$OMARCHY_API/api/v1/security/advisories" "${auth[@]}" -d '{"advisories":[{"id":"arch:AVG-9999:zlib","source":"arch","package":"zlib","cves":["CVE-2099-0001"],"severity":"high","status":"vulnerable","fixed":null,"url":"https://security.archlinux.org/AVG-9999"}],"cves":[{"cve":"CVE-2099-0001","kev":true,"epss":0.9}]}' >/dev/null
 curl -sf -X PUT "$OMARCHY_API/api/v1/security/matches" "${auth[@]}" -d "{\"matches\":[{\"sha256\":\"$zlib_sha\",\"advisory\":\"arch:AVG-9999:zlib\",\"match\":\"exact\",\"status\":\"vulnerable\"}]}" >/dev/null
 sec_body=$(curl -s "$OMARCHY_API/api/v1/security?ring=stable")
@@ -163,7 +175,7 @@ grep -q '"source":"packages"' <<<"$enq" || { echo "enqueue did not name who ship
 refused=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/enqueue" "${auth[@]}" -d '{"name":"xz","group":"community","pkgbuild_ref":"deadbeef","reason":"x","arches":["x86_64"]}')
 [[ "$refused" == 409 ]] || { echo "expected 409 for a name upstream ships, got $refused"; exit 1; }
 tid=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["tasks"][0])' <<<"$enq")
-[[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/claim" "${auth[@]}" -d '{"arch":"aarch64"}')" == 401 ]] || { echo "publish token must not claim"; exit 1; }
+[[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/claim" "${auth[@]}" -d '{"arch":"aarch64"}')" == 403 ]] || { echo "a job token must not claim"; exit 1; }
 [[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/claim" -H "authorization: Bearer omw_unknown" -H "content-type: application/json" -d '{"arch":"aarch64"}')" == 401 ]] || { echo "an unregistered worker token must not claim"; exit 1; }
 [[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/claim" "${w1[@]}" -d '{"arch":"x86_64"}')" == 400 ]] || { echo "a worker claims only its registered architecture"; exit 1; }
 claim=$(curl -s -X POST "$OMARCHY_API/api/v1/factory/claim" "${w1[@]}" -d '{"arch":"aarch64","hostname":"e2e"}')
@@ -197,9 +209,17 @@ review=$(curl -s "$OMARCHY_API/api/v1/factory/review"); grep -q '"staged"' <<<"$
 groups=$(curl -s "$OMARCHY_API/api/v1/factory/groups"); grep -q '"maintainers":\["e2e"\]' <<<"$groups" || { echo "groups not served from the governance table: $groups"; exit 1; }
 me=$(curl -s "$OMARCHY_API/api/v1/factory/me" -H "authorization: Bearer omc_e2e"); grep -q '"role":"maintainer"' <<<"$me" || { echo "the seeded maintainer is not one: $me"; exit 1; }
 gpage=$(curl -s "$OMARCHY_API/governance"); grep -q "Becoming a maintainer" <<<"$gpage" || { echo "governance page not served"; exit 1; }
+# No shared secret: a maintainer runs jobs by hand (queued, not executed with their token); a contributor cannot.
+mauth=(-H "authorization: Bearer omc_e2e" -H "content-type: application/json")
+qj=$(curl -s -X POST "$OMARCHY_API/api/v1/factory/jobs" "${mauth[@]}" -d '{"kind":"health","params":{"ring":"stable","arch":"x86_64"}}')
+grep -q '"task":' <<<"$qj" || { echo "a maintainer could not queue a job: $qj"; exit 1; }
+[[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/jobs" -H "authorization: Bearer omc_e2e_contributor" -H "content-type: application/json" -d '{"kind":"gc"}')" == 403 ]] || { echo "a contributor must not queue jobs"; exit 1; }
+[[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/jobs" "${mauth[@]}" -d '{"kind":"promote","params":{"from":"edge","to":"edge"}}')" == 400 ]] || { echo "bad job params must be refused"; exit 1; }
+[[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/events" "${mauth[@]}" -d '{"kind":"note","status":"ok","summary":"a maintainer wrote this"}')" == 201 ]] || { echo "a maintainer must be able to write a journal note"; exit 1; }
+[[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/pool/gc" "${mauth[@]}")" == 401 ]] || { echo "a maintainer token must not write to the pool directly (jobs do)"; exit 1; }
 rpage=$(curl -s "$OMARCHY_API/review"); grep -q "Review" <<<"$rpage" || { echo "review page not served"; exit 1; }
 # A signature for bytes the pool does not serve under that filename is refused.
-[[ "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$OMARCHY_API/api/v1/pool/$(printf 'a%.0s' {1..64})/sig?filename=xz-5.8.4-1-x86_64.pkg.tar.zst&arch=x86_64" -H "authorization: Bearer $OMARCHY_PUBLISH_TOKEN" --data-binary "@$E2E/pkgs/xz-5.8.4-1-x86_64.pkg.tar.zst.sig")" == 409 ]] || { echo "a mismatching signature must be refused"; exit 1; }
+[[ "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$OMARCHY_API/api/v1/pool/$(printf 'a%.0s' {1..64})/sig?filename=xz-5.8.4-1-x86_64.pkg.tar.zst&arch=x86_64" -H "authorization: Bearer $OMARCHY_TOKEN" --data-binary "@$E2E/pkgs/xz-5.8.4-1-x86_64.pkg.tar.zst.sig")" == 409 ]] || { echo "a mismatching signature must be refused"; exit 1; }
 echo "factory queue, lease, requeue, guard and completion OK"
 
 step "pacman in $IMAGE against the worker mirror"

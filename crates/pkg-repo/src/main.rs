@@ -26,8 +26,9 @@ struct Remote {
     /// Base URL of the edge API, e.g. `https://pkgs.firemanxbr.org`.
     #[arg(long, env = "OMARCHY_API")]
     api: String,
-    /// Publish token (bearer).
-    #[arg(long, env = "OMARCHY_PUBLISH_TOKEN", hide_env_values = true)]
+    /// Bearer token: the per-job token a worker got at claim time, or a
+    /// maintainer's contributor token for what maintainers do by hand.
+    #[arg(long, env = "OMARCHY_TOKEN", hide_env_values = true)]
     token: String,
 }
 
@@ -238,7 +239,7 @@ enum Command {
         #[arg(long)]
         shared: bool,
         /// Job kinds to pull (repeatable).
-        #[arg(long = "kind", default_values_t = ["build".to_owned(), "sync".to_owned(), "render".to_owned(), "promote".to_owned(), "health".to_owned(), "security".to_owned(), "gc".to_owned()])]
+        #[arg(long = "kind", default_values_t = ["build".to_owned(), "sync".to_owned(), "render".to_owned(), "promote".to_owned(), "health".to_owned(), "security".to_owned(), "enqueue".to_owned(), "gc".to_owned()])]
         kinds: Vec<String>,
         /// Free JSON shown on the Factory page, e.g. {"where":"droplet-1"}.
         #[arg(long, default_value = "{}")]
@@ -318,6 +319,27 @@ enum Command {
         #[arg(long)]
         payload: Option<String>,
     },
+    /// Queues a pool job by hand, as a maintainer: sync, promote, render,
+    /// health, security, enqueue or gc. A project worker runs it with a
+    /// per-job token; the maintainer's token only queues.
+    Job {
+        #[command(flatten)]
+        remote: Remote,
+        /// sync | promote | render | health | security | enqueue | gc
+        kind: String,
+        /// Parameters as key=value (sync: source, arch, ring · promote: from, to, note · render/health: ring, arch · gc: keep).
+        #[arg(long = "param", value_parser = parse_param)]
+        params: Vec<(String, String)>,
+        /// Architecture of the worker that should run it (security, enqueue).
+        #[arg(long)]
+        arch: Option<String>,
+    },
+}
+
+fn parse_param(s: &str) -> Result<(String, String), String> {
+    s.split_once('=')
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .ok_or_else(|| format!("'{s}' is not key=value"))
 }
 
 #[allow(clippy::too_many_lines)] // one arm per subcommand, each a one-liner
@@ -486,6 +508,25 @@ fn main() -> Result<()> {
             }),
             payload.as_deref(),
         ),
+        Command::Job {
+            remote,
+            kind,
+            params,
+            arch,
+        } => {
+            let body = serde_json::json!({
+                "kind": kind,
+                "params": params.into_iter().map(|(k, v)| (k, serde_json::Value::String(v))).collect::<serde_json::Map<String, serde_json::Value>>(),
+                "arch": arch,
+            });
+            let queued = api(&remote)?.post_json("/factory/jobs", &body)?;
+            println!(
+                "queued as task {} ({} — a project worker runs it; the Factory page follows it)",
+                queued["task"],
+                queued["job"]["kind"].as_str().unwrap_or(&kind)
+            );
+            Ok(())
+        }
     }
 }
 

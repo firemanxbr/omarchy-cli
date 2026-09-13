@@ -92,12 +92,11 @@ check, and the security layer's advisories.
 | a job token | that task's writes, until its lease ends | expires by itself; the task can be cancelled |
 | a project worker's token | claims of pool jobs — each still executed with a scoped job token — until revoked | a maintainer revokes the worker |
 | a maintainer's token | approvals in their groups, worker trust | a governance pull request removes the login; approvals are journaled and reversible (rollback) |
-| the publish token (transition) | any write to the pool | rotate the secret and the GitHub secret; retire it sooner |
 | the signing key | signatures on bad content — only through the Worker's own routes, since the key is a secret of the service | rotate: `wrangler secret put SIGNING_KEY`, re-render every ring, users import the new public key (RUNBOOK) |
 
 ## Roadmap
 
 1. ~~Per-job scoped tokens; project workers registered and trusted by a maintainer; pool jobs pulled by workers~~ — live (v0.0.40).
 2. ~~Signing inside the pool's Worker: the key becomes a Worker secret; `publish` and `render` stop signing on workers; the GitHub secret is deleted~~ — live (v0.0.49). A client's `.sig` for a database is superseded; a package signature must match the stored bytes.
-3. ~~Retire `FACTORY_TOKEN`~~ — gone (v0.0.50): every worker, the hosted fallback included, is a registration with its own token. ~~The pipeline's last workflows become jobs~~ — done (v0.0.51: `security` is a pulled job, the metrics snapshot is the brain's own). Retire the publish token: maintainers use personal tokens, the factory's enqueue/update workflows become jobs, GitHub keeps only the release.
+3. ~~Retire `FACTORY_TOKEN`~~ — gone (v0.0.50). ~~The pipeline's last workflows become jobs~~ — done (v0.0.51). ~~Retire the publish token~~ — gone (v0.0.56): writes need a per-job token; maintainers act by queueing jobs (`POST /factory/jobs`) and on the factory's own routes with their contributor token; the PKGBUILD reconcile (`enqueue`) and package requests (issues, read by the brain) left GitHub with it. GitHub keeps only the release (`CLOUDFLARE_API_TOKEN`) and the scheduler's dispatch token for the two workflows it still starts.
 4. ~~Phase 2: maintainers by area, approval as a recorded action, rebuild at approval on project workers~~ — live (v0.0.42). A promotion gate for the `factory` source is unnecessary: nothing unapproved enters `edge`.

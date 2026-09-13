@@ -102,6 +102,9 @@ export function scopesFor(kind: string, id: number, trust: string, params: Recor
     case "gc":
       s.push("gc");
       break;
+    case "enqueue":
+      s.push("factory:write");
+      break;
     default:
       break;
   }

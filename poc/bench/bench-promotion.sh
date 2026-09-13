@@ -17,7 +17,17 @@ BENCH="$ROOT/target/bench"
 PORT="${OMARCHY_BENCH_PORT:-8791}"
 RUNTIME="$(command -v podman || command -v docker || true)"
 export OMARCHY_API="http://127.0.0.1:$PORT"
-export OMARCHY_PUBLISH_TOKEN="bench-token"
+# A job token for the local pool, minted the way the brain mints them
+# (HMAC over the claims with JOB_TOKEN_SECRET): every scope, a day long.
+JOB_SECRET="bench-jobs"
+job_token() {
+  local claims payload sig
+  claims=$(jq -nc '{t:0,k:"bench",s:["pool:write","release:edge","release:rc","release:stable","artifacts:*:edge","artifacts:*:rc","artifacts:*:stable","security:write","gc","events","factory:write"],e:((now|floor)+86400),w:"bench"}')
+  payload=$(printf %s "$claims" | openssl base64 -A | tr '+/' '-_' | tr -d '=')
+  sig=$(printf %s "$payload" | openssl dgst -sha256 -hmac "$JOB_SECRET" -binary | openssl base64 -A | tr '+/' '-_' | tr -d '=')
+  echo "omj.$payload.$sig"
+}
+export OMARCHY_TOKEN="$(job_token)"
 
 step() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
 ms() { python3 -c 'import time; print(int(time.time()*1000))'; }
@@ -37,7 +47,7 @@ npx wrangler d1 migrations apply omarchy-repo --local --persist-to "$STATE" >/de
 t0=$(ms); npx wrangler d1 execute omarchy-repo --local --persist-to "$STATE" --file "$BENCH/seed.sql" >/dev/null; t1=$(ms)
 echo "seeded in $((t1 - t0)) ms ($(du -h "$BENCH/seed.sql" | cut -f1) of SQL)"
 
-echo "PUBLISH_TOKEN=$OMARCHY_PUBLISH_TOKEN" > "$BENCH/.dev.vars"
+echo "JOB_TOKEN_SECRET=$JOB_SECRET" > "$BENCH/.dev.vars"
 npx wrangler dev --ip 0.0.0.0 --port "$PORT" --persist-to "$STATE" --env-file "$BENCH/.dev.vars" > "$BENCH/wrangler.log" 2>&1 &
 WRANGLER_PID=$!
 for _ in $(seq 1 60); do

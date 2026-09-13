@@ -1,6 +1,6 @@
 //! The operations behind the CLI commands — and behind `pkg-repo work`, the
 //! worker that pulls the same operations as jobs from the pool. Each takes an
-//! `Api` (whose bearer token is the publish token on the command line, or a
+//! `Api` (whose bearer token is a maintainer's on the command line, or a
 //! per-job token on a worker) and reports to the journal.
 
 use std::collections::BTreeMap;
