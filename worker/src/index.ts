@@ -22,6 +22,7 @@
  *   GET  /api/v1/search?q=&ring=&arch=          package search within a ring
  *   GET  /api/v1/package/:name[/files]?ring=&arch=  package page data: rings, manifest, edges
  *   GET  /api/v1/security?ring=&arch=             open advisories in a ring and what they expose
+ *   GET  /api/v1/security/components              what the rings' packages embed (Go modules, crates), for OSV
  *   PUT  /api/v1/security/advisories|matches       vulnerability data from the Security workflow
  *   POST /api/v1/security/prune?before=
  *   GET  /api/v1/factory · POST /factory/{claim,requests,enqueue,jobs} · /factory/tasks/:id/{heartbeat,complete,fail,cancel,approve,reject,artifacts/<file>}
@@ -43,7 +44,7 @@ import { handleGetPackage, handleKnownPackages, handlePostPackage } from "./rout
 import { handleCreateRelease, handleGetRelease, handleReleaseHistory, handlePutArtifact, handleReleaseDiff } from "./routes/releases";
 import { handleGraph } from "./routes/graph";
 import { handlePackage, handlePackageFiles, handleSearch } from "./routes/search";
-import { handlePrune, handlePutAdvisories, handlePutMatches, handleSecurity } from "./routes/security";
+import { handlePrune, handlePutAdvisories, handlePutMatches, handleSecurity, handleComponents } from "./routes/security";
 import {
   handleApproveRequest, handleCancelTask, handleClaim, handleComplete, handleCreateRequest, handleEnqueue, handleFactory, handleFail,
   handleHeartbeat, handleRejectRequest, handleTask, handleBuilt, handleUpdateRequest,
@@ -369,6 +370,7 @@ async function api(method: string, path: string, url: URL, request: Request, env
   if (method === "PUT" && path === "/security/advisories") return (await authorize(request, env, "security:write")) ?? handlePutAdvisories(request, env);
   if (method === "PUT" && path === "/security/matches") return (await authorize(request, env, "security:write")) ?? handlePutMatches(request, env);
   if (method === "POST" && path === "/security/prune") return (await authorize(request, env, "security:write")) ?? handlePrune(url, env);
+  if (method === "GET" && path === "/security/components") return handleComponents(env);
   if ((m = path.match(/^\/package\/([A-Za-z0-9@._+-]+)$/)) && method === "GET") return handlePackage(m[1], url, env);
   if ((m = path.match(/^\/package\/([A-Za-z0-9@._+-]+)\/files$/)) && method === "GET") return handlePackageFiles(m[1], url, env);
   if (method === "GET" && path === "/events") return handleGetEvents(url, env);

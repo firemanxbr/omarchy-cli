@@ -256,6 +256,11 @@ tasks from the pool ([factory/README.md](../factory/README.md)). Day to day:
   the overview's coverage section counts the AUR-synced recipes `stable`
   still serves — the number to drive to zero. `provenance` lines in the
   journal record each scan that changed something.
+- **OSV**: the security job also asks OSV about what the served packages
+  embed (Go modules, cargo-auditable crates — `GET /api/v1/security/components`;
+  only packages indexed since the extractor learned to read build information
+  carry them). Records are cached under the worker's `osv/` directory;
+  `pkg-repo security --osv-cache DIR` by hand, omit the flag to skip OSV.
 - **The audit** (the second agent, GOVERNANCE.md): every staged community
   build queues an `audit` task. A project worker takes it only when it
   was started with an agent key in its environment — `ANTHROPIC_API_KEY`,

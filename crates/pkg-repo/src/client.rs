@@ -621,6 +621,26 @@ impl Api {
         })
     }
 
+    /// `GET` a JSON document from any URL (a public feed), retrying on 5xx.
+    pub fn get_external_json(&self, url: &str) -> Result<serde_json::Value, RepoError> {
+        with_retry("get_external_json", || {
+            let resp = self.http.get(url).send()?;
+            Ok(Self::check(resp)?.json()?)
+        })
+    }
+
+    /// `POST` JSON to any URL (a public API), retrying on 5xx.
+    pub fn post_external_json(
+        &self,
+        url: &str,
+        body: &serde_json::Value,
+    ) -> Result<serde_json::Value, RepoError> {
+        with_retry("post_external_json", || {
+            let resp = self.http.post(url).json(body).send()?;
+            Ok(Self::check(resp)?.json()?)
+        })
+    }
+
     /// `PUT` raw bytes to an authenticated endpoint (a staging artifact), retrying on 5xx.
     pub fn put_bytes(&self, path: &str, bytes: &[u8]) -> Result<(), RepoError> {
         with_retry("put_bytes", || {

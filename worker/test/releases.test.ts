@@ -71,6 +71,8 @@ describe("embedded components", () => {
   it("are indexed one row per module or crate, and come back with the package", async () => {
     const rows = await env.DB.prepare("SELECT ecosystem, name, version FROM package_components ORDER BY ecosystem").all();
     expect(rows.results).toEqual([{ ecosystem: "Go", name: "golang.org/x/crypto", version: "v0.21.0" }, { ecosystem: "crates.io", name: "openssl", version: "0.10.64" }]);
+    // Served by no ring yet: the security job's view is empty until a release pins curl.
+    expect((await call("GET", "/security/components")).json.components).toEqual([]);
   });
 });
 
@@ -94,6 +96,9 @@ describe("POST /releases", () => {
     const head = await call("GET", "/releases/edge?fields=summary");
     expect(head.json.release.id).toBe(r2.json.release.id);
     expect(head.json.packages.map((p: any) => `${p.name}/${p.arch}`).sort()).toEqual(["curl/x86_64", "xz/aarch64", "xz/x86_64", "zlib/aarch64", "zlib/x86_64"]);
+    // curl is served now: what it embeds is what the security job asks OSV about.
+    const comps = (await call("GET", "/security/components?after=release")).json.components; // a fresh key: cached five minutes
+    expect(comps).toEqual([{ ecosystem: "Go", name: "golang.org/x/crypto", version: "v0.21.0", sha256s: [shas["curl-x86"]] }, { ecosystem: "crates.io", name: "openssl", version: "0.10.64", sha256s: [shas["curl-x86"]] }]);
   });
 
   it("refuses a sha256 the index does not have", async () => {

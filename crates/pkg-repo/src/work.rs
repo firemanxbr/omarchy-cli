@@ -1094,6 +1094,7 @@ fn fetch_feeds(opts: &WorkOptions, job: &Api) -> Result<SecurityOptions> {
         debian: Some(feeds.join("debian.json")),
         kev: Some(feeds.join("kev.json")),
         epss: Some(epss),
+        osv_cache: Some(opts.work_dir.join("osv")),
         rings: vec!["edge".into(), "rc".into(), "stable".into()],
         dry_run: false,
     })

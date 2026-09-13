@@ -66,6 +66,10 @@ struct SecurityArgs {
     /// FIRST EPSS scores CSV (decompressed).
     #[arg(long)]
     epss: Option<PathBuf>,
+    /// Ask OSV about what the served packages embed (Go modules, crates);
+    /// the directory caches OSV's records. Omit to skip OSV.
+    #[arg(long)]
+    osv_cache: Option<PathBuf>,
     /// Rings whose served objects are matched (repeatable).
     #[arg(long = "ring", default_values_t = ["edge".to_owned(), "rc".to_owned(), "stable".to_owned()])]
     rings: Vec<String>,
@@ -605,6 +609,7 @@ fn run_security(remote: &Remote, args: SecurityArgs) -> Result<()> {
             debian: args.debian,
             kev: args.kev,
             epss: args.epss,
+            osv_cache: args.osv_cache,
             rings: args.rings,
             dry_run: args.dry_run,
         },

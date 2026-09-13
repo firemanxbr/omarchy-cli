@@ -105,6 +105,29 @@ export async function handlePrune(url: URL, env: Env): Promise<Response> {
   return json({ pruned: { matches: m.meta.changes, advisories: a.meta.changes } });
 }
 
+/**
+ * GET /security/components — what the rings' packages embed (Go modules,
+ * crates.io crates), one entry per (ecosystem, name, version) with the
+ * sha256 of every served object that embeds it. The security job asks OSV
+ * about these; no soname would ever reveal them.
+ */
+export async function handleComponents(env: Env): Promise<Response> {
+  const rows = await env.DB.prepare(
+    `SELECT c.ecosystem, c.name, c.version, p.sha256
+       FROM package_components c JOIN packages p ON p.id = c.package_id
+      WHERE p.id IN (SELECT package_id FROM ring_packages)
+      ORDER BY c.ecosystem, c.name, c.version`,
+  ).all<{ ecosystem: string; name: string; version: string; sha256: string }>();
+  const out = new Map<string, { ecosystem: string; name: string; version: string; sha256s: string[] }>();
+  for (const r of rows.results) {
+    const k = `${r.ecosystem}\0${r.name}\0${r.version}`;
+    const e = out.get(k) ?? { ecosystem: r.ecosystem, name: r.name, version: r.version, sha256s: [] };
+    e.sha256s.push(r.sha256);
+    out.set(k, e);
+  }
+  return json({ components: [...out.values()] }, 200, { "cache-control": "public, max-age=300" });
+}
+
 /** Open advisories on the objects a ring serves, and what depends on them. */
 export async function handleSecurity(url: URL, env: Env): Promise<Response> {
   const ring = url.searchParams.get("ring") ?? env.DEFAULT_RING;
