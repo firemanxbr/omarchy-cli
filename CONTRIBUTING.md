@@ -34,6 +34,6 @@ of truth and is compiled into the binaries (`omarchy-cli --version`).
 
 ```bash
 cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace
-(cd worker && npm ci && npm run typecheck)
+(cd worker && npm ci && npm run typecheck && npm test)   # the Worker's tests run inside workerd, in seconds
 tests/e2e-worker.sh          # needs docker or podman
 ```

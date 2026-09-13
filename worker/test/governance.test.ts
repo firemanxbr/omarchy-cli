@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parseGovernance } from "../src/governance";
+// The repository's own file, as text (Vite's ?raw): the tests run inside workerd, which has no filesystem.
+import repositoryFile from "../../factory/MAINTAINERS.toml?raw";
 
 const FILE = `
 [groups.omarchy]
@@ -25,9 +27,8 @@ describe("governance file", () => {
     expect(() => parseGovernance(`title = "x"`)).toThrow(/groups/);
   });
 
-  it("accepts the repository's own file", async () => {
-    const fs = await import("node:fs");
-    const g = parseGovernance(fs.readFileSync(new URL("../../factory/MAINTAINERS.toml", import.meta.url), "utf8"));
+  it("accepts the repository's own file", () => {
+    const g = parseGovernance(repositoryFile);
     expect(g.length).toBeGreaterThan(0);
     for (const x of g) expect(x.maintainers.length).toBeGreaterThan(0);
   });

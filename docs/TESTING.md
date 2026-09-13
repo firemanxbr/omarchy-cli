@@ -13,7 +13,7 @@ cargo test --workspace
 ```
 
 CI (`.github/workflows/ci.yml`) runs exactly these on x86_64 **and** arm64 runners,
-plus the worker typecheck, on every pull request. The three end-to-end scripts
+plus the worker typecheck and its tests, on every pull request. The three end-to-end scripts
 below also run in GitHub Actions (`.github/workflows/e2e.yml`) on native x86_64
 runners, where the Arch container needs no emulation. Both are required checks on
 `main`, and `release.yml` runs them once more on the merged commit before it tags a
@@ -64,9 +64,25 @@ cargo run -p pkg-extract -- index crates/pkg-extract/tests/fixtures -o /tmp/inde
 ```bash
 cd worker && npm install
 npm run typecheck
+npm test                   # vitest inside workerd: unit and integration tests, about a second
 npm run db:migrate:local   # applies migrations to a local D1
 npm run dev                # http://localhost:8787 with local D1 + R2
 ```
+
+`npm test` runs every file in `worker/test/` **inside the Workers runtime**
+(`@cloudflare/vitest-pool-workers`, `vitest.config.ts`): a local D1 with every
+migration applied before each file (`test/setup.ts`), a local R2, the
+bindings of `wrangler.toml` plus a test `JOB_TOKEN_SECRET`. Nothing reaches
+the network. Two kinds of tests live there:
+
+| File | What is covered |
+|---|---|
+| `releases.test.ts` | the release logic through the Worker's own `fetch`: manifests indexed into the pool, `POST /releases` — first release, adds on top of the head, replace-by-name within an architecture, `remove` / `remove_arch`, promote `edge → rc → stable` by copying the source head, rollback to an earlier release (lineage, history, `is_head`), the scopes each ring needs; `GET /releases/:ring` paged in `(name, arch)` order with `release_id` pinning, `arch=`, `include=files`; `GET /graph?arch=` (declared dependencies and provides, per architecture); `GET /stats` before any metrics snapshot |
+| `factory.test.ts` | the factory's brain: claims with worker tokens (own architecture only, project vs community), leases and per-job tokens, heartbeat, fail → requeue, complete after the package is indexed, the agent a worker reports; a community build staging its evidence (the builder cannot write `audit.*`, the package is for maintainers, the rest is public), the audit queued and taken only by a project worker declaring the kind, the report attached and its verdict on `/factory/review`; approvals — a contributor cannot, a maintainer cannot approve their own package while another maintainer exists, the rebuild queued at project trust, the record and the profile's track record |
+| `jobtoken`, `scheduler`, `governance`, `updates`, `metrics`, `cost`, `signing` | the pure functions: tokens and scopes, the scheduler's rules, the governance file, bump detection, the metrics snapshot shape, the bill estimate, OpenPGP signing |
+
+The end-to-end script below covers the same paths with real containers and
+real pacman; the unit tests are what a pull request runs in seconds.
 
 Keep `worker/src/manifest.schema.json` in sync with the Rust types:
 
