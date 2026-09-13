@@ -10,11 +10,16 @@
 //! the last promotion into `from` must be at least `soak_days` old, so what
 //! reaches `stable` has been served by `rc` that long (syncs of the OPR
 //! channel into the ring do not reset the clock). A ring with nothing
-//! rendered for an architecture (`warn`) is not evidence against it. When the
-//! head of `to` already came from the head of `from`, there is nothing to
-//! promote.
+//! rendered for an architecture (`warn`) is not evidence against it. The
+//! security layer is evidence too: a package `to` serves clean that `from`
+//! would replace with a version under an open advisory (exact match,
+//! medium or worse, or exploited in the wild) blocks the promotion — the
+//! fast-track pulls fixes forward, the gate never pushes a known hole. When
+//! the head of `to` already came from the head of `from`, there is nothing
+//! to promote.
 
 use crate::client::{Api, Event};
+use crate::security::{security_regressions, SecurityView};
 use crate::RepoError;
 
 pub struct GateOptions<'a> {
@@ -58,6 +63,8 @@ pub struct ArchEvidence {
     pub errors_in_window: usize,
     /// Status of the latest recent `abi` check of `from`, if any was recorded.
     pub abi_status: Option<String>,
+    /// Packages `to` serves clean that `from` would replace with a version under an open advisory.
+    pub security_regressions: usize,
 }
 
 #[derive(Debug)]
@@ -69,7 +76,8 @@ pub struct GateReport {
 /// Pure decision: `events` are `health` and `abi` events (any ring), `now`
 /// unix seconds, `from_promoted_at` when the content of `from` last arrived
 /// there by promotion (unix seconds; `None` when `from` was never promoted
-/// into, e.g. `edge`).
+/// into, e.g. `edge`), `security` the regressions per architecture
+/// (`security::security_regressions`, one list per entry of `opts.arches`).
 #[must_use]
 pub fn evaluate(
     events: &[Event],
@@ -77,6 +85,7 @@ pub fn evaluate(
     from_head: Option<u64>,
     to_source: Option<u64>,
     from_promoted_at: Option<i64>,
+    security: &[Vec<String>],
     opts: &GateOptions<'_>,
 ) -> GateReport {
     let mut reasons = Vec::new();
@@ -88,7 +97,11 @@ pub fn evaluate(
         reasons.push(reason);
     }
 
-    for arch in opts.arches {
+    for (i, arch) in opts.arches.iter().enumerate() {
+        let regressions = security.get(i).map_or(&[][..], Vec::as_slice);
+        for r in regressions {
+            reasons.push(format!("{arch}: {r}"));
+        }
         let mut of_arch: Vec<&Event> = events
             .iter()
             .filter(|e| {
@@ -156,6 +169,7 @@ pub fn evaluate(
             checks_in_window: in_window.len(),
             errors_in_window: errors,
             abi_status: abi.map(|e| e.status.clone()),
+            security_regressions: regressions.len(),
         });
     }
 
@@ -213,7 +227,24 @@ pub fn run(api: &Api, opts: &GateOptions<'_>) -> Result<GateReport, RepoError> {
     let from_history = api.history(opts.from)?.releases;
     let from_promoted_at = last_promotion(&from_history).and_then(|r| parse_iso8601(&r.created_at));
     let now = now_unix();
-    let report = evaluate(&events, now, from_head, to_source, from_promoted_at, opts);
+    // The security layer's view of `from`, per architecture: what a
+    // promotion would carry into `to` that `to` serves clean today.
+    let mut security = Vec::new();
+    for arch in opts.arches {
+        let view: SecurityView = serde_json::from_value(
+            api.get_json(&format!("/security?ring={}&arch={arch}", opts.from))?,
+        )?;
+        security.push(security_regressions(&view, opts.to, "medium"));
+    }
+    let report = evaluate(
+        &events,
+        now,
+        from_head,
+        to_source,
+        from_promoted_at,
+        &security,
+        opts,
+    );
 
     let (status, summary) = match &report.verdict {
         Verdict::Promote => (
@@ -237,7 +268,7 @@ pub fn run(api: &Api, opts: &GateOptions<'_>) -> Result<GateReport, RepoError> {
     println!("{summary}");
     for e in &report.evidence {
         println!(
-            "  {:<8} health {} ({}) · {} check(s) in {} day(s), {} failed · abi {}",
+            "  {:<8} health {} ({}) · {} check(s) in {} day(s), {} failed · abi {} · security regressions {}",
             e.arch,
             e.latest_status.as_deref().unwrap_or("none"),
             e.latest_age_hours
@@ -245,7 +276,8 @@ pub fn run(api: &Api, opts: &GateOptions<'_>) -> Result<GateReport, RepoError> {
             e.checks_in_window,
             opts.soak_days,
             e.errors_in_window,
-            e.abi_status.as_deref().unwrap_or("not checked")
+            e.abi_status.as_deref().unwrap_or("not checked"),
+            e.security_regressions
         );
     }
     if opts.dry_run {
@@ -265,7 +297,7 @@ pub fn run(api: &Api, opts: &GateOptions<'_>) -> Result<GateReport, RepoError> {
             "evidence": report.evidence.iter().map(|e| serde_json::json!({
                 "arch": e.arch, "latest_status": e.latest_status, "latest_age_hours": e.latest_age_hours,
                 "checks_in_window": e.checks_in_window, "errors_in_window": e.errors_in_window,
-                "abi_status": e.abi_status,
+                "abi_status": e.abi_status, "security_regressions": e.security_regressions,
             })).collect::<Vec<_>>(),
         }
     }))?;
@@ -384,7 +416,15 @@ mod tests {
             ev(2, "rc", "aarch64", "ok", "2026-09-12T06:01:00Z"),
             ev(3, "edge", "x86_64", "error", "2026-09-12T06:02:00Z"), // other ring, ignored
         ];
-        let r = evaluate(&events, NOW, Some(10), Some(7), None, &opts(&arches, 3));
+        let r = evaluate(
+            &events,
+            NOW,
+            Some(10),
+            Some(7),
+            None,
+            &[],
+            &opts(&arches, 3),
+        );
         assert_eq!(r.verdict, Verdict::Promote);
     }
 
@@ -396,7 +436,7 @@ mod tests {
             ev(2, "rc", "aarch64", "warn", "2026-09-12T06:01:00Z"),
         ];
         assert_eq!(
-            evaluate(&events, NOW, Some(10), None, None, &opts(&arches, 3)).verdict,
+            evaluate(&events, NOW, Some(10), None, None, &[], &opts(&arches, 3)).verdict,
             Verdict::Promote
         );
     }
@@ -409,7 +449,7 @@ mod tests {
             ev(2, "rc", "aarch64", "error", "2026-09-12T06:01:00Z"),
         ];
         let Verdict::Block(reasons) =
-            evaluate(&failed, NOW, Some(10), None, None, &opts(&arches, 3)).verdict
+            evaluate(&failed, NOW, Some(10), None, None, &[], &opts(&arches, 3)).verdict
         else {
             panic!("expected block")
         };
@@ -422,7 +462,7 @@ mod tests {
             ev(2, "rc", "aarch64", "ok", "2026-09-12T06:01:00Z"),
         ];
         let Verdict::Block(reasons) =
-            evaluate(&stale, NOW, Some(10), None, None, &opts(&arches, 3)).verdict
+            evaluate(&stale, NOW, Some(10), None, None, &[], &opts(&arches, 3)).verdict
         else {
             panic!("expected block")
         };
@@ -430,7 +470,7 @@ mod tests {
 
         let missing = vec![ev(1, "rc", "x86_64", "ok", "2026-09-12T06:00:00Z")];
         assert!(matches!(
-            evaluate(&missing, NOW, Some(10), None, None, &opts(&arches, 3)).verdict,
+            evaluate(&missing, NOW, Some(10), None, None, &[], &opts(&arches, 3)).verdict,
             Verdict::Block(_)
         ));
     }
@@ -443,10 +483,10 @@ mod tests {
             ev(2, "rc", "x86_64", "error", "2026-09-11T06:00:00Z"), // 1 day ago
             ev(1, "rc", "x86_64", "error", "2026-09-01T06:00:00Z"), // 11 days ago
         ];
-        let r = evaluate(&events, NOW, Some(10), None, None, &opts(&arches, 3));
+        let r = evaluate(&events, NOW, Some(10), None, None, &[], &opts(&arches, 3));
         assert_eq!(r.evidence[0].errors_in_window, 1);
         assert!(matches!(r.verdict, Verdict::Block(_)));
-        let r = evaluate(&events, NOW, Some(10), None, None, &opts(&arches, 0));
+        let r = evaluate(&events, NOW, Some(10), None, None, &[], &opts(&arches, 0));
         assert_eq!(
             r.evidence[0].errors_in_window, 0,
             "a zero-day window only sees the latest"
@@ -461,14 +501,14 @@ mod tests {
             ev(1, "rc", "x86_64", "ok", "2026-09-12T06:00:00Z"),
             kind_ev("abi", 2, "rc", "x86_64", "error", "2026-09-12T06:05:00Z"),
         ];
-        let r = evaluate(&events, NOW, Some(10), None, None, &opts(&arches, 0));
+        let r = evaluate(&events, NOW, Some(10), None, None, &[], &opts(&arches, 0));
         assert!(
             matches!(&r.verdict, Verdict::Block(reasons) if reasons[0].contains("ABI check of rc failed"))
         );
         assert_eq!(r.evidence[0].abi_status.as_deref(), Some("error"));
 
         events[1].created_at = "2026-09-01T06:05:00Z".into(); // stale: not evidence
-        let r = evaluate(&events, NOW, Some(10), None, None, &opts(&arches, 0));
+        let r = evaluate(&events, NOW, Some(10), None, None, &[], &opts(&arches, 0));
         assert_eq!(r.verdict, Verdict::Promote);
         assert_eq!(r.evidence[0].abi_status, None);
     }
@@ -484,6 +524,7 @@ mod tests {
             Some(10),
             None,
             Some(NOW - 3600),
+            &[],
             &opts(&arches, 3),
         );
         assert!(
@@ -498,6 +539,7 @@ mod tests {
             Some(10),
             None,
             Some(NOW - 4 * 86_400),
+            &[],
             &opts(&arches, 3),
         );
         assert_eq!(r.verdict, Verdict::Promote);
@@ -508,6 +550,7 @@ mod tests {
             Some(10),
             None,
             Some(NOW - 60),
+            &[],
             &opts(&arches, 0),
         );
         assert_eq!(r.verdict, Verdict::Promote);
@@ -542,10 +585,46 @@ mod tests {
     fn skips_when_target_already_serves_the_source_head() {
         let arches = vec!["x86_64".to_owned()];
         let events = vec![ev(1, "rc", "x86_64", "ok", "2026-09-12T06:00:00Z")];
-        let r = evaluate(&events, NOW, Some(10), Some(10), None, &opts(&arches, 0));
+        let r = evaluate(
+            &events,
+            NOW,
+            Some(10),
+            Some(10),
+            None,
+            &[],
+            &opts(&arches, 0),
+        );
         assert!(matches!(r.verdict, Verdict::Skip(_)));
         assert_eq!(r.verdict.exit_code(), 3);
-        let r = evaluate(&events, NOW, None, None, None, &opts(&arches, 0));
+        let r = evaluate(&events, NOW, None, None, None, &[], &opts(&arches, 0));
         assert!(matches!(r.verdict, Verdict::Block(_)));
+    }
+
+    #[test]
+    fn a_security_regression_blocks_and_is_counted_per_arch() {
+        let arches = vec!["x86_64".to_owned(), "aarch64".to_owned()];
+        let events = vec![
+            ev(1, "rc", "x86_64", "ok", "2026-09-12T06:20:00Z"),
+            ev(2, "rc", "aarch64", "ok", "2026-09-12T06:20:00Z"),
+        ];
+        let security = vec![vec!["djvulibre 3.5.30.1-1 (high; arch:AVG-2907:djvulibre) would replace clean 3.5.29-1 in rc".to_owned()], vec![]];
+        let r = evaluate(
+            &events,
+            NOW,
+            Some(10),
+            None,
+            None,
+            &security,
+            &opts(&arches, 0),
+        );
+        match r.verdict {
+            Verdict::Block(reasons) => {
+                assert_eq!(reasons.len(), 1);
+                assert!(reasons[0].starts_with("x86_64: djvulibre"), "{reasons:?}");
+            }
+            other => panic!("expected a block, got {other:?}"),
+        }
+        assert_eq!(r.evidence[0].security_regressions, 1);
+        assert_eq!(r.evidence[1].security_regressions, 0);
     }
 }
