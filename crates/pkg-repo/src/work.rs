@@ -55,6 +55,10 @@ pub struct Task {
     pub arch: String,
     pub trust: String,
     #[serde(default)]
+    pub group: String,
+    #[serde(default)]
+    pub pkgbuild_ref: String,
+    #[serde(default)]
     pub params: serde_json::Value,
     #[serde(default)]
     pub attempts: u32,
@@ -136,10 +140,25 @@ pub fn run(opts: &WorkOptions) -> Result<()> {
         let job = Api::new(&opts.api, &token.lock().unwrap().clone())?;
         match outcome {
             Ok(o) => {
+                let sha = o
+                    .result
+                    .get("sha256")
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::Value::String("-".into()));
+                let filename = o
+                    .result
+                    .get("filename")
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::Value::String("-".into()));
+                let version = o
+                    .result
+                    .get("version")
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null);
                 job.post_json_as(
                     &token.lock().unwrap().clone(),
                     &format!("/factory/tasks/{}/complete", task.id),
-                    &serde_json::json!({ "summary": o.summary, "result": o.result, "duration_ms": took, "sha256": "-", "filename": "-" }),
+                    &serde_json::json!({ "summary": o.summary, "result": o.result, "duration_ms": took, "sha256": sha, "filename": filename, "version": version }),
                 )?;
                 eprintln!("task {}: done — {} ({} s)", task.id, o.summary, took / 1000);
             }
@@ -267,6 +286,7 @@ fn execute(opts: &WorkOptions, task: &Task, token: &Arc<Mutex<String>>) -> Resul
                 result: serde_json::json!({ "keep": keep }),
             })
         }
+        "build" => build_job(opts, &job, task),
         other => Err(anyhow!("this worker does not run '{other}' jobs")),
     }
 }
@@ -407,6 +427,138 @@ fn script(
         .status()
         .with_context(|| format!("running {rel}"))?;
     Ok(status.success())
+}
+
+/// A project build: the PKGBUILD (from the repository, a contributor's
+/// repository, a draft, or a staged build a maintainer approved) built in a
+/// fresh Arch container by the pipeline's own script, then signed,
+/// published into edge as source `factory` and rendered — by this worker,
+/// with the job's credential. Community builds stay with the container
+/// image (`omarchy-build-worker --container`); this executor takes only
+/// tasks a project-trusted worker may claim.
+#[allow(clippy::too_many_lines)]
+fn build_job(opts: &WorkOptions, job: &Api, task: &Task) -> Result<Outcome> {
+    anyhow::ensure!(
+        task.trust == "project",
+        "community builds run in the Omarchy Packaging image, not here"
+    );
+    let repo = repo_dir(opts)?;
+    let dir = opts.work_dir.join(format!("task-{}", task.id));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("out"))?;
+    let group = if task.group.is_empty() {
+        "community".to_owned()
+    } else {
+        task.group.clone()
+    };
+    let pkgbuild_ref = task.pkgbuild_ref.clone();
+    // Inside the container "localhost" is the container: a local pool (wrangler
+    // dev) is reached through the runtime's host alias.
+    let from_container = |u: &str| {
+        u.replace("://localhost", "://host.containers.internal")
+            .replace("://127.0.0.1", "://host.containers.internal")
+    };
+    let meta = format!(
+        "name={}\ngroup={}\nref={}\narch={}\npool={}\nexport OMARCHY_API={}\n",
+        shell_quote(&task.name),
+        shell_quote(&group),
+        shell_quote(&pkgbuild_ref),
+        shell_quote(&task.arch),
+        shell_quote(&from_container(&opts.pool)),
+        shell_quote(&from_container(&opts.api))
+    );
+    std::fs::write(dir.join("meta.sh"), meta)?;
+    std::fs::copy(
+        repo.join("factory/worker/omarchy-build-worker.sh"),
+        dir.join("worker.sh"),
+    )?;
+    let runtime = ["podman", "docker"]
+        .iter()
+        .find(|r| Command::new(r).arg("--version").output().is_ok())
+        .ok_or_else(|| anyhow!("podman or docker is required"))?;
+    let (image, platform) = if task.arch == "aarch64" {
+        ("docker.io/menci/archlinuxarm:base-devel", "linux/arm64")
+    } else {
+        ("docker.io/library/archlinux:base-devel", "linux/amd64")
+    };
+    let log = std::fs::File::create(dir.join("build.log"))?;
+    let status = Command::new(runtime)
+        .args([
+            "run",
+            "--rm",
+            "--platform",
+            platform,
+            "--name",
+            &format!("omarchy-build-{}", task.id),
+            "-v",
+        ])
+        .arg(format!("{}:/task", dir.display()))
+        .args([image, "bash", "/task/worker.sh", "--inside"])
+        .stdout(log.try_clone()?)
+        .stderr(log)
+        .status()
+        .context("running the build container")?;
+    let log_text = std::fs::read_to_string(dir.join("build.log")).unwrap_or_default();
+    if !status.success() {
+        let tail: String = log_text
+            .lines()
+            .rev()
+            .take(40)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect::<Vec<_>>()
+            .join("\n");
+        return Err(anyhow!("build failed (exit {:?}):\n{tail}", status.code()));
+    }
+    let mut pkgs: Vec<PathBuf> = std::fs::read_dir(dir.join("out"))?
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .filter(|p| p.to_string_lossy().ends_with(".pkg.tar.zst"))
+        .collect();
+    pkgs.sort();
+    anyhow::ensure!(!pkgs.is_empty(), "makepkg produced no package");
+    // Signed here until the pool signs its own objects (SECURITY.md, roadmap 2).
+    if let Some(key) = &opts.sign {
+        for p in &pkgs {
+            crate::sign::detach_sign(p, key)?;
+        }
+    }
+    ops::publish(
+        job,
+        "edge",
+        "factory",
+        &task.arch,
+        Some(&format!(
+            "factory task {}: {} ({})",
+            task.id, task.name, pkgbuild_ref
+        )),
+        &pkgs,
+    )?;
+    let rendered = ops::render(job, "edge", &task.arch, opts.sign.as_deref())?;
+    let main = pkgs
+        .iter()
+        .find(|p| {
+            p.file_name()
+                .is_some_and(|f| f.to_string_lossy().starts_with(&format!("{}-", task.name)))
+        })
+        .unwrap_or(&pkgs[0]);
+    let manifest = pkg_extract::extract_manifest(main)?;
+    let _ = std::fs::remove_dir_all(&dir);
+    Ok(Outcome {
+        summary: format!(
+            "{} {} built for {} and published into edge ({})",
+            manifest.name,
+            manifest.version,
+            task.arch,
+            rendered.join(", ")
+        ),
+        result: serde_json::json!({ "sha256": manifest.sha256, "filename": manifest.filename, "version": manifest.version, "rendered": rendered }),
+    })
+}
+
+fn shell_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
 }
 
 /// The daily promotion, as the pipeline does it: evidence on both

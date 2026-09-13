@@ -33,7 +33,7 @@ please do not file a public issue for it.
 | Contributor token `omc_…` | one person (GitHub identity read once, never stored) | register packages under their name, queue community builds, register and revoke their workers, read their own state | write to the pool, claim jobs, approve | live |
 | Worker token `omw_…` | one machine, registered by a contributor | claim tasks its trust allows (community: its owner's or shared builds; project: pool jobs too); heartbeat | write to the pool or staging directly | live |
 | Job token `omj.…` | the worker running one task, for the lease | the routes that task needs — e.g. `sync`: upload objects, index, create a release in one ring, store that ring's databases; community `build`: upload to that task's staging folder | anything outside its scopes (403, journaled); anything after the lease (30 min, renewed by heartbeat) | live |
-| Maintainer / admin role | a contributor promoted by an admin | promote a worker to project trust; approve staged builds (phase 2); set roles (admin) | operate as a worker | live (roles); approvals in phase 2 |
+| Maintainer / admin role | a contributor promoted by an admin | promote a worker to project trust; approve or reject staged builds of their areas (recorded); set roles (admin) | operate as a worker | live |
 | Publish token | GitHub Actions (pipeline), maintainers on the command line | everything a job can, on any ring | — | live; **retiring** as each job kind moves to pulled jobs |
 | `FACTORY_TOKEN` | project workers on GitHub-hosted runners | claim any task | write without a job token | live; **retiring** in favour of registered project workers |
 | Signing key (OpenPGP) | GitHub secret and project workers, for `render` and factory builds | sign databases and factory-built packages | — | live; **moving into the pool's Worker** (secret, never exported) |
@@ -64,10 +64,10 @@ secret). Everything travels in the `Authorization` header over TLS only.
   through the pool (the key is derived from the task, never given),
   with quotas (2 GB, 10 tasks) and a 30-day lifecycle. Logs and PKGBUILDs
   are public; packages are readable by maintainers.
-- **Approved packages are rebuilt by the project** (phase 2) from the same
-  PKGBUILD before they are signed and enter `edge`; a contributor's build is
-  evidence, not the product. Alternatively two independent workers must
-  reproduce the same sha256.
+- **Approved packages are rebuilt by the project** from the same PKGBUILD
+  (`pkgbuild_ref = staging:<task>`) on a project-trusted worker before they
+  are signed and enter `edge`; a contributor's build is evidence, not the
+  product.
 - **The pool serves immutable objects.** An object under a filename is
   never rewritten; a signature must match the stored object or it is
   refused; superseded versions stay until retention runs.
@@ -98,4 +98,4 @@ check, and the security layer's advisories.
 1. ~~Per-job scoped tokens; project workers registered and trusted by a maintainer; pool jobs pulled by workers~~ — live (v0.0.40).
 2. Signing inside the pool's Worker: the key becomes a Worker secret; `publish` and `render` stop signing on workers; the GitHub secret is deleted.
 3. Retire the publish token and `FACTORY_TOKEN`: maintainers use personal tokens, the pipeline's last workflows become jobs, GitHub keeps only the release.
-4. Phase 2: maintainers by area, approval as a recorded action, rebuild at approval on project workers, promotion gate for the `factory` source.
+4. ~~Phase 2: maintainers by area, approval as a recorded action, rebuild at approval on project workers~~ — live (v0.0.42). A promotion gate for the `factory` source is unnecessary: nothing unapproved enters `edge`.

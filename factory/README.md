@@ -114,8 +114,11 @@ binaries) — and uploads the package, the PKGBUILD, `PKGINFO` and the build
 log to `staging/<you>/<package>/<task>/`. The task is then **staged**: the
 Factory page lists it, the log and the PKGBUILD are public, the package is
 for maintainers. Nothing you build reaches users until a maintainer of the
-group approves it — and the approved bytes are rebuilt on project
-infrastructure (phase 2).
+group approves it on the [Review](../../../../review) page — then a
+project worker rebuilds the same PKGBUILD, signs it and publishes it into
+`edge` as source `factory`; your build was the evidence, the project's build
+is the product. A rejection comes with a note you see on your Contribute
+page.
 
 Limits: 10 tasks queued or building and 2 GB of staging per contributor;
 staging objects expire after 30 days. A worker token is revocable
