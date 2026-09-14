@@ -24,6 +24,7 @@ PKG_REPO="${PKG_REPO:-$ROOT/target/release/pkg-repo}"
 RUNTIME="$(command -v docker || command -v podman)"
 POOL="${OMARCHY_POOL:?}"
 WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
 ms() { python3 -c "import time; print(int(time.time()*1000))"; }
 started=$(ms)
 

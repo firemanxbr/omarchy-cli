@@ -639,6 +639,12 @@ fn script(
     let repo = repo_dir(opts)?;
     let exe = std::env::current_exe()?;
     let bin = exe.parent().map(Path::to_path_buf).unwrap_or_default();
+    // The scripts start containers that mount their scratch directory
+    // (`mktemp -d`): under the work directory, which is the same path on
+    // the host when this worker is itself a container (docs: /docs/workers),
+    // rather than a /tmp the runtime on the host cannot see.
+    let tmp = opts.work_dir.join("tmp");
+    std::fs::create_dir_all(&tmp)?;
     let status = Command::new("bash")
         .arg(repo.join(rel))
         .args(args)
@@ -650,6 +656,7 @@ fn script(
         .env("OMARCHY_WORK_DIR", &opts.work_dir)
         .env("OMARCHY_CLI", bin.join("omarchy-cli"))
         .env("PKG_EXTRACT", bin.join("pkg-extract"))
+        .env("TMPDIR", &tmp)
         .current_dir(&repo)
         .status()
         .with_context(|| format!("running {rel}"))?;
