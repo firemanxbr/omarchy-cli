@@ -358,7 +358,9 @@ export async function handleComplete(id: number, request: Request, env: Env, act
   const who = workerName(actor);
   if (task.kind !== "build") {
     // A pool job: what it did is its result; the journal gets one line.
-    await env.DB.prepare("UPDATE build_tasks SET status = 'done', finished_at = ?, duration_ms = ?, log_tail = ?, result = ?, lease_owner = NULL, lease_expires_at = NULL WHERE id = ?")
+    // The lease ends with the status; who held it stays on the row — the
+    // journal, the seal and the load per worker read it later.
+    await env.DB.prepare("UPDATE build_tasks SET status = 'done', finished_at = ?, duration_ms = ?, log_tail = ?, result = ?, lease_expires_at = NULL WHERE id = ?")
       .bind(now(), b.duration_ms ?? null, (b.log_tail ?? "").slice(-4000), b.result ? JSON.stringify(b.result) : null, id)
       .run();
     await env.DB.prepare("UPDATE build_workers SET last_seen = ?, current_task = NULL, builds_done = builds_done + 1 WHERE id = ?").bind(now(), who).run();
@@ -409,7 +411,7 @@ export async function handleComplete(id: number, request: Request, env: Env, act
   }
   if (!indexed) return json({ error: "publish the package to the pool first (pkg-repo publish --source factory), then complete" }, 409);
   await env.DB.prepare(
-    "UPDATE build_tasks SET status = 'done', finished_at = ?, result_sha256 = ?, result_filename = ?, result_version = ?, duration_ms = ?, log_tail = ?, lease_owner = NULL, lease_expires_at = NULL WHERE id = ?",
+    "UPDATE build_tasks SET status = 'done', finished_at = ?, result_sha256 = ?, result_filename = ?, result_version = ?, duration_ms = ?, log_tail = ?, lease_expires_at = NULL WHERE id = ?",
   )
     .bind(now(), indexed.sha256, b.filename, b.version ?? null, b.duration_ms ?? null, (b.log_tail ?? "").slice(-4000), id)
     .run();
@@ -436,9 +438,9 @@ export async function handleFail(id: number, request: Request, env: Env, actor: 
   // A requeued task goes behind its peers (priority + 10) so one broken
   // PKGBUILD does not hold the queue.
   await env.DB.prepare(
-    `UPDATE build_tasks SET status = ?, finished_at = ?, error = ?, log_tail = ?, duration_ms = ?, lease_owner = NULL, lease_expires_at = NULL, priority = priority + 10 WHERE id = ?`,
+    `UPDATE build_tasks SET status = ?, finished_at = ?, error = ?, log_tail = ?, duration_ms = ?, lease_owner = ?, lease_expires_at = NULL, priority = priority + 10 WHERE id = ?`,
   )
-    .bind(exhausted ? "failed" : "queued", exhausted ? now() : null, (b.error ?? "build failed").slice(0, 2000), (b.log_tail ?? "").slice(-4000), b.duration_ms ?? null, id)
+    .bind(exhausted ? "failed" : "queued", exhausted ? now() : null, (b.error ?? "build failed").slice(0, 2000), (b.log_tail ?? "").slice(-4000), b.duration_ms ?? null, exhausted ? task.lease_owner : null, id)
     .run();
   await env.DB.prepare("UPDATE build_workers SET last_seen = ?, current_task = NULL, builds_failed = builds_failed + 1 WHERE id = ?").bind(now(), who).run();
   if (task.trust === "community" && exhausted) {
@@ -455,8 +457,8 @@ export async function requeueExpiredLeases(env: Env): Promise<number> {
     .all<{ id: number; name: string; arch: string; lease_owner: string; attempts: number; max_attempts: number }>();
   for (const t of expired.results) {
     const exhausted = t.attempts >= t.max_attempts;
-    await env.DB.prepare("UPDATE build_tasks SET status = ?, finished_at = ?, error = ?, lease_owner = NULL, lease_expires_at = NULL, priority = priority + 10 WHERE id = ? AND status = 'leased'")
-      .bind(exhausted ? "failed" : "queued", exhausted ? now() : null, `lease by ${t.lease_owner} expired`, t.id)
+    await env.DB.prepare("UPDATE build_tasks SET status = ?, finished_at = ?, error = ?, lease_owner = ?, lease_expires_at = NULL, priority = priority + 10 WHERE id = ? AND status = 'leased'")
+      .bind(exhausted ? "failed" : "queued", exhausted ? now() : null, `lease by ${t.lease_owner} expired`, exhausted ? t.lease_owner : null, t.id)
       .run();
     await env.DB.prepare("UPDATE build_workers SET current_task = NULL WHERE id = ? AND current_task = ?").bind(t.lease_owner, t.id).run();
     await event(env, "build", exhausted ? "error" : "warn", `${t.name} for ${t.arch}: lease by ${t.lease_owner} expired${exhausted ? " — giving up" : " — back in the queue"}`, { task: t.id, worker: t.lease_owner, attempts: t.attempts });

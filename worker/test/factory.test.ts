@@ -92,6 +92,11 @@ describe("claims and leases", () => {
     expect((await call("POST", `/factory/tasks/${id}/heartbeat`, {}, c2.json.token)).status).toBe(409);
     const built = await call("GET", "/factory/built");
     expect(built.json.built.some((t: any) => t.name === "tool" && t.arch === "aarch64")).toBe(true);
+    // The lease is over, but who held it stays on the row: the load per worker and the seal read it later.
+    const row = await env.DB.prepare("SELECT status, lease_owner, lease_expires_at FROM build_tasks WHERE id = ?").bind(id).first<{ status: string; lease_owner: string | null; lease_expires_at: string | null }>();
+    expect(row).toMatchObject({ status: "done", lease_owner: "w2", lease_expires_at: null });
+    const stats = await call("GET", "/stats");
+    expect(stats.json.series.workers_daily.some((w: any) => w.worker === "w2" && Number(w.ms) === 1200)).toBe(true);
   });
 });
 
