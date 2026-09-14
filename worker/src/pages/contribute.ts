@@ -63,6 +63,8 @@ const BODY = String.raw`
     </div>
   </section>
 
+  <div class="gate" id="gate"><div><div class="lock">private area · contributors</div><h3 style="margin-top:6px">Your workspace</h3><p>Sign in with GitHub to register packages, run a worker, follow your builds and get your public profile.</p><ul><li>your packages and their stage</li><li>your workers, live</li><li>every build with its evidence</li><li>a CLI token</li></ul></div><a class="btn" href="/auth/github?next=/factory">${GITHUB_ICON} Sign in with GitHub</a></div>
+
   <div id="signed" hidden>
     <div class="private-head" id="workspace"><span class="lock">private</span><h2>Your workspace</h2><span class="muted" id="ws-who"></span><span class="right"><a class="more-link" href="/pipeline#throughput">Where your builds sit in the queue →</a><a class="more-link" id="ws-profile" href="/factory">Your public profile →</a></span></div>
     <div class="tiles" id="ws-tiles"></div>
@@ -118,7 +120,7 @@ __CHARTS__
   var role = null, areas = [];
   function showSigned() {
     $("#signin-state").innerHTML = 'Signed in as <a href="/user/' + encodeURIComponent(login) + '"><b>' + esc(login) + '</b></a>' + (role ? ' · ' + esc(role) + (areas.length ? ' of ' + esc(areas.join(", ")) : '') : '') + ' · <a href="#" id="signout">sign out</a>' + (role === "maintainer" ? ' · <a href="/review">Review</a>' : '');
-    $("#oauth-link").hidden = true; $("#token-alt").hidden = true; $("#signed").hidden = false;
+    $("#oauth-link").hidden = true; $("#token-alt").hidden = true; $("#signed").hidden = false; $("#gate").hidden = true;
     $("#ws-who").textContent = login + (role ? " · " + role : ""); $("#ws-profile").href = "/user/" + encodeURIComponent(login);
     $("#signout").onclick = function () { try { localStorage.removeItem("omc_token"); localStorage.removeItem("omc_login"); } catch (e) {} location.href = "/auth/logout"; return false; };
     refresh();

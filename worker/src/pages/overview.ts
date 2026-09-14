@@ -37,7 +37,7 @@ const BODY = String.raw`
   </section>
 
   <section id="rings-section">
-    <div class="h2row"><h2>Pick a ring</h2><a class="more-link" href="/docs/get-started">Which ring is for me? →</a></div>
+    <div class="h2row"><h2>Pick a ring</h2><a class="more-link" href="/docs#get-started/switching">Switching rings, going back →</a></div>
     <p class="sub">Each ring is a complete, signed set of pacman databases over the same packages.</p>
     <div class="rings" id="rings"></div>
   </section>
@@ -54,7 +54,7 @@ const BODY = String.raw`
   </section>
 
   <section id="get-started">
-    <div class="h2row"><h2>Get started</h2><a class="more-link" href="/docs/get-started">The chapter, with the thin client →</a></div>
+    <div class="h2row"><h2>Get started</h2><a class="more-link" href="/docs#get-started/which-ring">Which ring is for me? →</a></div>
     <p class="sub">Three steps, once per machine. The thin client on the right is optional.</p>
     <div class="start-grid"><div class="steps">
       <div class="step">

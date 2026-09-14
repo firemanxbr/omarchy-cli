@@ -212,6 +212,7 @@ const CSS = String.raw`
   @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
   h1, h2, h3 { text-wrap: balance; }
   header .brand { white-space: nowrap; } header .account { flex: none; } header nav { gap: 18px; }
+  header .account .avatar { width: 22px; height: 22px; font-size: 10.5px; margin-right: 8px; vertical-align: middle; }
   header nav a small { color: var(--dim); font-size: 11px; margin-left: 5px; letter-spacing: .06em; text-transform: uppercase; }
   footer .fbadge { display: inline-flex; align-items: center; } footer .fbadge svg { display: block; height: 20px; width: auto; } footer .fbadge:hover svg { filter: brightness(1.1); }
   footer .more { display: inline-flex; gap: 10px 14px; flex-wrap: wrap; } footer .more span { color: var(--dim); }
@@ -497,7 +498,7 @@ const HELPERS = String.raw`
     fetch("/auth/me", { cache: "no-store" }).then(function (r) { return r.ok ? r.json() : null; }).then(function (me) {
       ME = me; var a = $("#account"); if (!a) return;
       if (me) {
-        a.innerHTML = '<b>' + esc(me.login) + '</b> <span class="who">' + esc(me.role) + '</span>'; a.href = "/user/" + encodeURIComponent(me.login); a.title = "signed in with GitHub as " + me.login + (me.areas && me.areas.length ? " (" + me.areas.join(", ") + ")" : "");
+        a.innerHTML = '<span class="avatar' + (me.role === "maintainer" ? " m" : "") + '">' + esc(String(me.login).slice(0, 2)) + '</span><b>' + esc(me.login) + '</b> <span class="who">' + esc(me.role) + '</span>'; a.href = "/user/" + encodeURIComponent(me.login); a.title = "signed in with GitHub as " + me.login + (me.areas && me.areas.length ? " (" + me.areas.join(", ") + ")" : "");
         // Sign out is on every page: the cookie is cleared by /auth/logout,
         // the older local-storage token (a CLI token pasted into the page) with it.
         var out = $("#signout"); if (out) { out.hidden = false; out.onclick = function () { try { localStorage.removeItem("omc_token"); localStorage.removeItem("omc_login"); } catch (e) {} location.href = "/auth/logout"; return false; }; }
