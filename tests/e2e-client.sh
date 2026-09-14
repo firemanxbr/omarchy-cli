@@ -106,6 +106,13 @@ OMARCHY_HOOKS_ROOT="$ROOT/target/rootfs-current" cargo test -q -p pkg-hooks --te
 step "status / check on the current system (expected: safe)"
 "$CLI" "${CLI_ARGS[@]}" --root "$ROOT/target/rootfs-current" status
 "$CLI" "${CLI_ARGS[@]}" --root "$ROOT/target/rootfs-current" check xz
+# The seal: the fixtures were published as source `packages` (the OPR), so
+# info and provenance say so; provenance reads names from stdin like the
+# pacman hook and never fails.
+info_out="$("$CLI" "${CLI_ARGS[@]}" --root "$ROOT/target/rootfs-current" info xz)"
+grep -q "^Provenance   : imported from Omarchy Package Repository" <<<"$info_out" || { echo "info has no seal: $info_out"; exit 1; }
+prov_out="$(printf 'xz\nnot-served\n' | "$CLI" "${CLI_ARGS[@]}" --root "$ROOT/target/rootfs-current" provenance --quiet)"
+grep -q "^xz 5.8.4-1: imported from Omarchy Package Repository" <<<"$prov_out" && ! grep -q "not-served" <<<"$prov_out" || { echo "provenance is off: $prov_out"; exit 1; }
 # The hook preview: a hook of the system that the plan triggers by name, one
 # by a file the package ships (fetched from the ring), one it does not.
 mkdir -p "$ROOT/target/rootfs-current/usr/share/libalpm/hooks" "$ROOT/target/rootfs-current/etc/pacman.d/hooks"

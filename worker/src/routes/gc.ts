@@ -100,7 +100,7 @@ export async function handleGc(url: URL, env: Env): Promise<Response> {
     // other row — served or not — still names it.
     const shared = await env.DB.prepare("SELECT COUNT(*) AS n FROM packages WHERE filename = ? AND repo_arch = ? AND id != ?").bind(p.filename, p.repo_arch, p.id).first<{ n: number }>();
     if (shared?.n) objectsKept++;
-    else await env.PACKAGES.delete([packageKey(p.repo_arch, p.filename), signatureKey(p.repo_arch, p.filename)]);
+    else await env.PACKAGES.delete([packageKey(p.repo_arch, p.filename), signatureKey(p.repo_arch, p.filename), packageKey(p.repo_arch, `${p.filename}.provenance.json`), packageKey(p.repo_arch, `${p.filename}.provenance.json.sig`)]);
     await env.DB.batch([
       env.DB.prepare("DELETE FROM package_provides WHERE package_id = ?").bind(p.id),
       env.DB.prepare("DELETE FROM package_requires WHERE package_id = ?").bind(p.id),

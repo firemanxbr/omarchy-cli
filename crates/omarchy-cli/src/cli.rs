@@ -76,8 +76,19 @@ pub enum Command {
     Security,
     /// Searches the ring's release by name or description.
     Search { query: String },
-    /// Shows a package as published in the ring's release.
+    /// Shows a package as published in the ring's release, with its seal:
+    /// where the object came from and the proof.
     Info { package: String },
+    /// One line per package saying where it came from — a package the pool
+    /// built names the build, the audit, the approval and the attestation; a
+    /// synced one its upstream project. Names as arguments, or on stdin (a
+    /// pacman hook: docs/omarchy-pool.hook). Never fails a transaction.
+    Provenance {
+        targets: Vec<String>,
+        /// Print nothing for packages the ring does not serve.
+        #[arg(long)]
+        quiet: bool,
+    },
     /// Lists installed packages that belong to the ring's release.
     List,
     /// Serves status, check, info, search, list and security to an agent over
@@ -185,6 +196,7 @@ pub fn run(cli: Cli) -> Result<i32> {
         Command::Search { query } => search(&config, &api, &query, json),
         Command::Security => security(&config, &api, json),
         Command::Info { package } => info(&config, &api, &package, json),
+        Command::Provenance { targets, quiet } => provenance(&config, &api, &targets, quiet, json),
         Command::List => list(&config, &api, json),
         Command::Mcp => crate::mcp::serve(&config, &api),
     }
@@ -244,7 +256,80 @@ pub fn info_value(config: &Config, api: &Api, package: &str) -> Result<serde_jso
     v["release"] =
         serde_json::json!({ "ring": config.ring, "id": view.release.id, "seq": view.release.seq });
     v["mirror"] = serde_json::Value::String(config.package_url(&m.filename));
+    // The seal is worth a second request; a pool without it is still a pool.
+    v["seal"] = api.provenance(&m.sha256).unwrap_or(serde_json::Value::Null);
     Ok(v)
+}
+
+/// The seal in one line, as `provenance` prints it and `info` shows it.
+fn seal_line(seal: &serde_json::Value) -> Option<String> {
+    let s = |k: &str| seal.get(k).and_then(serde_json::Value::as_str);
+    let summary = s("summary")?;
+    let attestation = seal
+        .get("attestation")
+        .and_then(|a| a.get("statement"))
+        .and_then(serde_json::Value::as_str)
+        .map(|att| format!(" · attestation {att}"))
+        .unwrap_or_default();
+    Some(format!("{summary}{attestation}"))
+}
+
+/// `omarchy-cli provenance [names…]`: what the ring's release says about
+/// each installed (or named) package. Names on stdin when none are given —
+/// pacman's `NeedsTargets` hooks pass them that way. Exit 0 always: a hook
+/// that fails would fail the transaction, and this one only reports.
+fn provenance(
+    config: &Config,
+    api: &Api,
+    targets: &[String],
+    quiet: bool,
+    json: bool,
+) -> Result<i32> {
+    let mut names: Vec<String> = targets.to_vec();
+    if names.is_empty() {
+        let mut text = String::new();
+        std::io::Read::read_to_string(&mut std::io::stdin(), &mut text)?;
+        names = text
+            .split_whitespace()
+            .map(|t| t.rsplit('/').next().unwrap_or(t).to_owned())
+            .collect();
+    }
+    let Ok(view) = api.release(&config.ring, &config.arch) else {
+        if !quiet {
+            eprintln!("omarchy-pool: the pool is unreachable; no provenance to show");
+        }
+        return Ok(0);
+    };
+    let mut out = Vec::new();
+    for name in &names {
+        let found = view
+            .packages
+            .iter()
+            .filter(|p| same_arch(config, p.repo_arch.as_deref()))
+            .map(|p| &p.manifest)
+            .find(|m| &m.name == name);
+        let Some(m) = found else {
+            if !quiet {
+                println!("{name}: not served by {} — no seal", config.ring);
+            }
+            continue;
+        };
+        let seal = api.provenance(&m.sha256).unwrap_or(serde_json::Value::Null);
+        if json {
+            out.push(serde_json::json!({ "name": name, "version": m.version, "seal": seal }));
+        } else if let Some(line) = seal_line(&seal) {
+            println!("{name} {}: {line}", m.version);
+        } else if !quiet {
+            println!(
+                "{name} {}: served by {}, no seal available",
+                m.version, config.ring
+            );
+        }
+    }
+    if json {
+        println!("{}", serde_json::to_string_pretty(&out)?);
+    }
+    Ok(0)
 }
 
 fn info(config: &Config, api: &Api, package: &str, json: bool) -> Result<i32> {
@@ -286,6 +371,9 @@ fn info(config: &Config, api: &Api, package: &str, json: bool) -> Result<i32> {
         .collect();
     println!("ABI needs    : {}", abi.join("  "));
     println!("Mirror       : {}", config.package_url(&m.filename));
+    if let Some(line) = api.provenance(&m.sha256).ok().as_ref().and_then(seal_line) {
+        println!("Provenance   : {line}");
+    }
     Ok(0)
 }
 

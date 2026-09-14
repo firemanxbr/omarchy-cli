@@ -76,6 +76,16 @@ describe("embedded components", () => {
   });
 });
 
+describe("GET /packages/:sha256/provenance", () => {
+  it("seals a synced object with its upstream project and keyring", async () => {
+    const curl = (await call("GET", `/packages/${shas["curl-x86"]}/provenance`)).json;
+    expect(curl).toMatchObject({ origin: "archlinux", seal: "imported from Arch Linux", source: "extra", upstream: { project: "Arch Linux", keyring: "archlinux", verified: false }, chain: null, attestation: null });
+    const zlib = (await call("GET", `/packages/${shas["zlib-arm"]}/provenance`)).json;
+    expect(zlib).toMatchObject({ origin: "archlinuxarm", upstream: { project: "Arch Linux ARM", keyring: "archlinuxarm" } });
+    expect((await call("GET", `/packages/${"0".repeat(64)}/provenance`)).status).toBe(404);
+  });
+});
+
 describe("POST /packages", () => {
   it("indexes one row per sha256: the same bytes under the other architecture directory are refused, not a database error", async () => {
     const filename = "fonts-1-1-any.pkg.tar.zst";

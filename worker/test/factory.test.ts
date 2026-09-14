@@ -166,4 +166,40 @@ describe("a community build, its audit and the review", () => {
     const m2 = await call("GET", "/users/m2");
     expect(m2.json.record).toEqual([{ group: "community", contributed: { approved: 0, staged: 0, bumps: 0, donated: 0, rejected: 0 }, maintained: { approvals: 1, rejections: 0, rebuilds_failed: 0 }, score: 2 }]);
   });
+
+  it("the project's rebuild completes with the seal: the chain as JSON, and an attestation next to the object", async () => {
+    // The trusted worker claims the rebuild, publishes the package to the pool with the job token, completes.
+    const c = await call("POST", "/factory/claim", { arch: "aarch64", kinds: ["build"] }, "omw_w1");
+    expect(c.status).toBe(200);
+    expect(c.json.task.pkgbuild_ref).toBe(`staging:${task}`);
+    const filename = "mine-1.0-1-aarch64.pkg.tar.zst";
+    const bytes = new TextEncoder().encode("the project's build of mine");
+    await env.PACKAGES.put(packageKey("aarch64", filename), bytes);
+    const s = "c".repeat(64);
+    const indexed = await call("POST", "/packages?source=factory&arch=aarch64", { schema_version: 1, name: "mine", version: "1.0-1", arch: "aarch64", sha256: s, filename, size_download: bytes.length, size_installed: 1, description: "mine", provides: ["mine"], requires: [], files: [] }, c.json.token);
+    expect(indexed.status, JSON.stringify(indexed.json)).toBe(201);
+    const done = await call("POST", `/factory/tasks/${c.json.task.id}/complete`, { sha256: s, filename, version: "1.0-1", duration_ms: 60000 }, c.json.token);
+    expect(done.json).toMatchObject({ status: "done", attested: true });
+    // The seal: the whole chain, from the contributor's build to the approval.
+    const seal = (await call("GET", `/packages/${s}/provenance`)).json;
+    expect(seal).toMatchObject({ origin: "factory", seal: "built by the Omarchy Pool", name: "mine", version: "1.0-1" });
+    expect(seal.chain).toMatchObject({
+      builder: { worker: "w1", trust: "project" },
+      build: { task: c.json.task.id, arch: "aarch64" },
+      recipe: { ref: `staging:${task}`, from: "draft:https://github.com/alice/mine@latest" },
+      source_build: { task, worker: "w3" },
+      audit: { verdict: "warn", agent: "test", findings: 1 },
+      approval: { by: "m2", note: "looks right" },
+    });
+    expect(seal.summary).toBe("built by the project on w1, audited (warn), approved by m2, signed by the pool");
+    // The attestation: an in-toto Statement about exactly this object, in the pool beside it.
+    expect(seal.attestation.statement).toBe(`${env.POOL_URL}/aarch64/${filename}.provenance.json`);
+    const obj = await env.PACKAGES.get(packageKey("aarch64", `${filename}.provenance.json`));
+    const statement = JSON.parse(await obj!.text());
+    expect(statement._type).toBe("https://in-toto.io/Statement/v1");
+    expect(statement.subject).toEqual([{ name: filename, digest: { sha256: s } }]);
+    expect(statement.predicate.approval.by).toBe("m2");
+    // A synced object has a seal too: where it came from and that its upstream signature was checked.
+    expect(seal.upstream).toBeUndefined();
+  });
 });

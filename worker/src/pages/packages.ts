@@ -61,6 +61,12 @@ const PACKAGE_BODY = String.raw`
   <div class="meta" id="meta"></div>
   <p class="sub" id="maint" style="margin-top:6px"></p>
 
+  <section id="seal-section">
+    <h2>Provenance <span id="seal-pill"></span></h2>
+    <p class="sub">Where this exact object came from, and the proof. A synced package names its upstream project and the keyring its signature was checked against when it entered the pool; a package the factory built carries the whole chain — the contributor's build that was the evidence, the second agent's audit, the maintainer's approval, the project's rebuild — and an <b>attestation</b> next to the object in the pool, signed by the pool's key, that anyone can verify without this page.</p>
+    <ul class="plain" id="seal"></ul>
+  </section>
+
   <section id="sec-section">
     <h2>Security <span id="sec-badge"></span></h2>
     <p class="sub">Advisories on this version, and open advisories on what it depends on or loads (direct exposure). Confidence: <b>exact</b> = the tracker knows this distribution's version; <b>name-version</b> = Debian fixed it in a newer version than ours; <b>name-only</b> = still open upstream, possibly affected.</p>
@@ -173,6 +179,7 @@ const PACKAGE_SCRIPT = String.raw`
     } else if (mt.packager) {
       $("#maint").innerHTML = 'Packaged upstream by ' + esc(mt.packager.replace(/<.*>/, "").trim()) + ' (' + esc(p.source) + '); the pool serves the file as built and signed there.';
     }
+    renderSeal(d.seal, p);
     // An OPR package: where its recipe comes from — Omarchy's own, or synced from the AUR.
     var pv = d.provenance;
     if (pv) {
@@ -193,6 +200,32 @@ const PACKAGE_SCRIPT = String.raw`
     $("#rb").innerHTML = d.required_by.length ? '<ul class="plain cols">' + d.required_by.map(function (x) { return '<li>' + link(x.name) + ' <span class="muted" title="' + esc(x.sonames.join(", ")) + '">' + (x.declared ? "declared" : "") + (x.declared && x.sonames.length ? " + " : "") + (x.sonames.length ? "loads " + x.sonames.length + " lib" + (x.sonames.length > 1 ? "s" : "") : "") + '</span></li>'; }).join("") + '</ul>' : '<div class="empty">nothing in ' + ring + ' depends on it</div>';
     var prov = (m.provides || []).filter(function (x) { return x.split(/[<>=]/)[0] !== d.name; });
     $("#provides").innerHTML = prov.length ? '<ul class="plain cols">' + prov.map(function (x) { return '<li class="mono">' + esc(x) + '</li>'; }).join("") + '</ul>' : '<div class="empty">only itself</div>';
+  }
+
+  // The seal: one pill, then the facts — each a link to the evidence it names.
+  function renderSeal(seal, p) {
+    if (!seal) { $("#seal-pill").innerHTML = ""; $("#seal").innerHTML = '<li class="muted">no seal for this object</li>'; return; }
+    var person = function (l) { return '<a href="/user/' + encodeURIComponent(l) + '">' + esc(l) + '</a>'; };
+    var items = [];
+    if (seal.origin === "factory") {
+      $("#seal-pill").innerHTML = '<span class="pill rec">built by the Omarchy Pool</span>';
+      var c = seal.chain || {};
+      if (c.build) items.push('Rebuilt by the project on <span class="mono">' + esc((c.builder && c.builder.worker) || "a trusted worker") + '</span>' + (c.build.finished_at ? ' ' + ago(c.build.finished_at) : '') + (c.build.duration_ms ? ' in ' + Math.round(c.build.duration_ms / 60000) + ' min' : '') + ' — task #' + c.build.task + (c.build.attempts > 1 ? ' (attempt ' + c.build.attempts + ')' : ''));
+      if (c.recipe) items.push('Recipe: ' + (c.recipe.commit ? '<a class="mono" href="' + esc(c.recipe.pkgbuild) + '">' + esc(c.recipe.path) + '</a> at <span class="mono">' + esc(c.recipe.commit.slice(0, 7)) + '</span>' : '<a href="' + esc(c.recipe.pkgbuild || '#') + '">the PKGBUILD</a> the contributor\'s build staged' + (c.recipe.from ? ' (<span class="mono">' + esc(c.recipe.from) + '</span>)' : '')));
+      if (c.source_build) items.push('Evidence: build #' + c.source_build.task + (c.source_build.owner ? ' by ' + person(c.source_build.owner) : '') + ' on <span class="mono">' + esc(c.source_build.worker || '?') + '</span>' + (c.source_build.agent ? ' with <span class="mono">' + esc(c.source_build.agent) + '</span>' : '') + ' — <a href="' + esc(c.source_build.evidence.log) + '">log</a>, <a href="' + esc(c.source_build.evidence.pkginfo) + '">.PKGINFO</a>');
+      if (c.audit) items.push('Audit: ' + (c.audit.verdict ? '<span class="pill ' + (c.audit.verdict === "pass" ? "ok" : c.audit.verdict === "fail" ? "error" : "warn") + '">' + esc(c.audit.verdict) + '</span> ' + esc(c.audit.summary || '') + (c.audit.agent ? ' <span class="muted">(' + esc(c.audit.agent) + ')</span>' : '') + (c.audit.report ? ' — <a href="' + esc(c.audit.report) + '">report</a>' : '') : '<span class="muted">' + esc(c.audit.status || c.audit.error || 'none') + '</span>'));
+      if (c.approval) items.push('Approved by ' + person(c.approval.by) + ' ' + ago(c.approval.at) + (c.approval.note ? ' — “' + esc(c.approval.note) + '”' : ''));
+      if (seal.signature) items.push('Signed by the pool, key <span class="mono">' + esc(seal.signature.fingerprint.slice(-16)) + '</span> — <a href="' + esc(seal.signature.object) + '">signature</a>');
+      if (seal.attestation) items.push('<b>Attestation</b>: <a href="' + esc(seal.attestation.statement) + '">provenance.json</a>' + (seal.attestation.signature ? ' + <a href="' + esc(seal.attestation.signature) + '">.sig</a> — an in-toto statement about this exact object (sha256 ' + esc(seal.sha256.slice(0, 12)) + '…), the pool\'s detached signature beside it' : ''));
+      else items.push('<span class="muted">No attestation yet: written when the project\'s build completes (builds before the seal existed have none).</span>');
+    } else {
+      $("#seal-pill").innerHTML = '<span class="pill ok">' + esc(seal.seal) + '</span>';
+      var u = seal.upstream || {};
+      items.push('Imported from <b>' + esc(u.project || seal.origin) + '</b> (repository <span class="mono">' + esc(seal.source) + '</span>) ' + ago(seal.indexed_at) + ', served as built and signed there — the pool never rebuilds upstream packages.');
+      items.push(u.verified ? 'Upstream signature verified against the <span class="mono">' + esc(u.keyring) + '</span> keyring when it entered the pool, and served beside the object — <a href="' + esc(u.signature) + '">signature</a>' : '<span class="muted">No upstream signature stored for this object.</span>');
+    }
+    items.push('Object: <a class="mono" href="' + esc(seal.object) + '">' + esc(seal.filename) + '</a> · sha256 <span class="mono">' + esc(seal.sha256) + '</span> · <a href="/api/v1/packages/' + esc(seal.sha256) + '/provenance">this seal as JSON</a>');
+    $("#seal").innerHTML = items.map(function (x) { return '<li>' + x + '</li>'; }).join('');
   }
 
   function sevPill(s) { var c = { critical: "var(--red)", high: "var(--red)", medium: "var(--amber)", low: "var(--blue)", unknown: "var(--dim)" }[s] || "var(--dim)"; return '<span class="pill" style="color:' + c + ';border-color:' + c + '">' + s + '</span>'; }

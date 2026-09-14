@@ -1,0 +1,19 @@
+# A pacman hook: after every install or upgrade, one line per package saying
+# where it came from — the pool's seal (omarchy-cli provenance). A package the
+# factory built names the build, the audit, the approval and the signed
+# attestation next to the object; a synced one names its upstream project and
+# the keyring its signature was checked against. Packages the ring does not
+# serve print nothing (--quiet), and the hook never fails a transaction.
+#
+#   install -Dm644 docs/omarchy-pool.hook /etc/pacman.d/hooks/90-omarchy-pool.hook
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Package
+Target = *
+
+[Action]
+Description = Omarchy Pool: where what was installed came from
+When = PostTransaction
+Exec = /usr/bin/omarchy-cli provenance --quiet
+NeedsTargets
