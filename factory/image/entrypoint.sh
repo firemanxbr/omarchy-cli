@@ -45,9 +45,6 @@ self="$(curl -sS --fail-with-body --max-time 30 "$OMARCHY_API/api/v1/factory/wor
   || { echo "omarchy-worker: the pool did not accept this token: $self" >&2; exit 2; }
 id="$(jq -r .id <<<"$self")"; trust="$(jq -r .trust <<<"$self")"; arch="$(jq -r .arch <<<"$self")"; owner="$(jq -r '.owner // ""' <<<"$self")"
 host_arch="$(uname -m)"; [[ "$host_arch" == arm64 ]] && host_arch=aarch64
-if [[ "$arch" != "$host_arch" && "${OMARCHY_WORKER_MODE:-}" != project ]]; then
-  echo "omarchy-worker: $id is registered for $arch but this machine is $host_arch" >&2; exit 2
-fi
 mode="${OMARCHY_WORKER_MODE:-$([[ "$trust" == project ]] && echo project || echo community)}"
 # A role is a promise about what this container does; the registration's
 # trust must allow it, or the container says so and stops rather than
@@ -56,6 +53,13 @@ case "$role" in
   pool|review) [[ "$trust" == project ]] || { echo "omarchy-worker: $id is a $trust registration; the $role role needs a project-trusted one (a maintainer trusts it on Review)" >&2; exit 2; }; mode=project ;;
   community) [[ "$trust" == community ]] || { echo "omarchy-worker: $id is project-trusted; the community role wants a community registration (never mix the project's work with contributors' builds)" >&2; exit 2; }; mode=community; export WORKER_SHARED=1 ;;
 esac
+# A community worker builds inside this container, so it must be the
+# registered architecture; a project worker starts a container per task
+# with the task's platform, so its registration is a label (an x86_64 pool
+# or review worker runs natively on an aarch64 host).
+if [[ "$arch" != "$host_arch" && "$mode" != project ]]; then
+  echo "omarchy-worker: $id is registered for $arch but this machine is $host_arch" >&2; exit 2
+fi
 agent=""; for k in ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY XAI_API_KEY; do [[ -n "${!k:-}" ]] && agent=1; done
 labels="$(jq -cn --argjson l "${WORKER_LABELS:-"{}"}" --arg r "$role" 'if $r == "" then $l else $l + {role: $r} end')"
 export WORKER_LABELS="$labels"
