@@ -248,18 +248,24 @@ export async function handleGetRelease(ring: string, url: URL, env: Env): Promis
     : await ringHead(env, ring);
   if (!release) return json({ error: pinned ? `release ${pinned} is not a ${ring} release` : `ring ${ring} has no release yet` }, 404);
 
-  const total = await env.DB.prepare(
-    `SELECT COUNT(*) AS n FROM ${await releaseMembers(env, release.id)} rp JOIN packages p ON p.id = rp.package_id
-      WHERE (?1 IS NULL OR p.repo_arch = ?1)`,
-  )
-    .bind(arch)
-    .first<{ n: number }>();
+  // How many the release holds, for this architecture: the release row
+  // knows (its count and its per-source slices are computed once, when it
+  // is created); the join only runs for a row from before that.
+  const total = await releaseCount(env, release, arch);
   const limitParam = url.searchParams.get("limit");
   const limit = limitParam ? Math.min(Math.max(1, Number(limitParam)), MAX_PAGE) : 0;
   const offset = Math.max(0, Number(url.searchParams.get("offset") ?? 0));
-  if (!limit && detail !== "summary" && (total?.n ?? 0) > MAX_UNPAGED) {
+  // `after=<name>/<repo_arch>`: the page after that row (keyset), instead of an offset.
+  const afterParam = url.searchParams.get("after");
+  let after: { name: string; repoArch: string } | null = null;
+  if (afterParam) {
+    const i = afterParam.lastIndexOf("/");
+    if (i <= 0 || !isRepoArch(afterParam.slice(i + 1))) return json({ error: "after must be <name>/<repo_arch>, as page.next gives it" }, 400);
+    after = { name: afterParam.slice(0, i), repoArch: afterParam.slice(i + 1) };
+  }
+  if (!limit && detail !== "summary" && total > MAX_UNPAGED) {
     return json(
-      { error: `release has ${total?.n} manifests; page with ?limit=<=${MAX_PAGE}&offset=&release_id=${release.id}`, total: total?.n },
+      { error: `release has ${total} manifests; page with ?limit=<=${MAX_PAGE}&after=<page.next>&release_id=${release.id}`, total },
       413,
     );
   }
@@ -268,14 +274,35 @@ export async function handleGetRelease(ring: string, url: URL, env: Env): Promis
   )
     .bind(release.id)
     .all();
-  const packages = await releaseManifests(env, release.id, detail, { arch, offset, limit });
+  const packages = await releaseManifests(env, release.id, detail, { arch, offset, limit, after });
+  const last = packages.length && limit && packages.length === limit ? (packages[packages.length - 1] as { name: string; repo_arch: string }) : null;
   return json({
     release,
     ...(await releaseSummary(env, release.id)),
     artifacts: artifacts.results,
-    page: { arch, offset, limit: limit || null, returned: packages.length, total: total?.n ?? 0 },
+    page: { arch, offset: after ? null : offset, after: afterParam ?? null, limit: limit || null, returned: packages.length, total, next: last ? `${last.name}/${last.repo_arch}` : null },
     packages,
   });
+}
+
+/** The release's package count, for one architecture or all — from its row when the row carries it. */
+async function releaseCount(env: Env, release: ReleaseRow, arch: string | null): Promise<number> {
+  if (arch === null && release.package_count !== null && release.package_count !== undefined) return release.package_count;
+  if (arch !== null && release.sources) {
+    try {
+      const slices = JSON.parse(release.sources) as { arch: string; packages: number }[];
+      if (Array.isArray(slices) && slices.length) return slices.filter((s) => s.arch === arch).reduce((n, s) => n + s.packages, 0);
+    } catch {
+      // an unreadable column: count
+    }
+  }
+  const row = await env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM ${await releaseMembers(env, release.id)} rp JOIN packages p ON p.id = rp.package_id
+      WHERE (?1 IS NULL OR p.repo_arch = ?1)`,
+  )
+    .bind(arch)
+    .first<{ n: number }>();
+  return row?.n ?? 0;
 }
 
 export async function handleReleaseHistory(ring: string, env: Env): Promise<Response> {

@@ -254,7 +254,7 @@ describe("GET /releases/:ring", () => {
   it("pages the manifests in (name, arch) order and pins a release while paging", async () => {
     const all = await call("GET", "/releases/stable");
     expect(all.status).toBe(200);
-    expect(all.json.page).toEqual({ arch: null, offset: 0, limit: null, returned: 5, total: 5 });
+    expect(all.json.page).toEqual({ arch: null, offset: 0, after: null, limit: null, returned: 5, total: 5, next: null });
     const names = all.json.packages.map((p: any) => `${p.name}/${p.arch}`);
     expect(names).toEqual([...names].sort());
     const page1 = await call("GET", "/releases/stable?limit=2&offset=0");
@@ -265,6 +265,17 @@ describe("GET /releases/:ring", () => {
     expect(page3.json.page.returned).toBe(1);
     expect([...page1.json.packages, ...page2.json.packages, ...page3.json.packages].map((p: any) => `${p.name}/${p.arch}`)).toEqual(names);
     expect(page1.json.packages[0].manifest ?? page1.json.packages[0]).toBeTruthy();
+    // Keyset paging: page.next names the last row, `after=` continues from it, the last page has no next.
+    expect(page1.json.page.next).toBe(`${page1.json.packages[1].name}/${page1.json.packages[1].repo_arch}`);
+    const k2 = await call("GET", `/releases/stable?limit=2&after=${encodeURIComponent(page1.json.page.next)}&release_id=${all.json.release.id}`);
+    expect(k2.json.page).toMatchObject({ after: page1.json.page.next, offset: null, returned: 2 });
+    const k3 = await call("GET", `/releases/stable?limit=2&after=${encodeURIComponent(k2.json.page.next)}&release_id=${all.json.release.id}`);
+    expect(k3.json.page.returned).toBe(1);
+    expect(k3.json.page.next).toBeNull();
+    expect([...page1.json.packages, ...k2.json.packages, ...k3.json.packages].map((p: any) => `${p.name}/${p.arch}`)).toEqual(names);
+    expect((await call("GET", "/releases/stable?limit=2&after=nonsense")).status).toBe(400);
+    // The total comes from the release row, per architecture too.
+    expect((await call("GET", "/releases/stable?arch=aarch64&fields=summary")).json.page.total).toBe(2);
     // include=files carries the file lists (gzipped, as the client reads them); the default view does not.
     const files = await call("GET", "/releases/stable?include=files&arch=x86_64&limit=1");
     expect(files.json.packages[0].files_gz).toEqual(expect.any(String));

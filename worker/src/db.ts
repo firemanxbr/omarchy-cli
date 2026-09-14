@@ -14,6 +14,8 @@ export interface ReleaseRow {
   /** Stored once the release is complete (migration 0015); null on rows older than that. */
   package_count?: number | null;
   bytes?: number | null;
+  /** Per (source, arch) slices, JSON, computed once at creation (releaseSources). */
+  sources?: string | null;
 }
 
 /** Checkpoint every this many releases of a ring (migration 0017): a reconstruction walks at most this many deltas. */
@@ -109,6 +111,8 @@ export interface ManifestWindow {
   arch?: string | null;
   offset?: number;
   limit?: number;
+  /** Keyset paging: the (name, repo_arch) of the last row of the previous page — the rows after it, in order. */
+  after?: { name: string; repoArch: string } | null;
 }
 
 /**
@@ -123,26 +127,30 @@ export async function releaseManifests(
   window: ManifestWindow = {},
 ): Promise<unknown[]> {
   const arch = window.arch ?? null;
-  const page = window.limit ? ` LIMIT ${Math.floor(window.limit)} OFFSET ${Math.floor(window.offset ?? 0)}` : "";
+  // A page: after a (name, repo_arch) key — the rows in order from there, a
+  // walk of the (name, repo_arch) index that reads what it returns — or, for
+  // an older client, an OFFSET, which sorts the whole selection every page.
+  const after = window.after ?? null;
+  const page = window.limit ? ` LIMIT ${Math.floor(window.limit)}${after ? "" : ` OFFSET ${Math.floor(window.offset ?? 0)}`}` : "";
+  const where = `WHERE (?1 IS NULL OR p.repo_arch = ?1)${after ? " AND (p.name, p.repo_arch) > (?2, ?3)" : ""} ORDER BY p.name, p.repo_arch`;
+  const binds = after ? [arch, after.name, after.repoArch] : [arch];
   const members = await releaseMembers(env, releaseId);
   if (detail === "summary") {
     // Enough for status / list / search: ~100 bytes per package instead of ~800.
     const rows = await env.DB.prepare(
       `SELECT p.name, p.version, p.arch, p.repo_arch, p.filename, p.sha256, p.size_download, p.size_installed, p.source,
               json_extract(p.manifest_json, '$.description') AS description
-         FROM ${members} rp JOIN packages p ON p.id = rp.package_id
-        WHERE (?1 IS NULL OR p.repo_arch = ?1) ORDER BY p.name, p.arch${page}`,
+         FROM ${members} rp JOIN packages p ON p.id = rp.package_id ${where}${page}`,
     )
-      .bind(arch)
+      .bind(...binds)
       .all();
     return rows.results;
   }
   const rows = await env.DB.prepare(
     `SELECT p.id, p.manifest_json, p.source, p.repo_arch FROM ${members} rp
-       JOIN packages p ON p.id = rp.package_id
-      WHERE (?1 IS NULL OR p.repo_arch = ?1) ORDER BY p.name, p.arch${page}`,
+       JOIN packages p ON p.id = rp.package_id ${where}${page}`,
   )
-    .bind(arch)
+    .bind(...binds)
     .all<{ id: number; manifest_json: string; source: string; repo_arch: string }>();
   const out = rows.results.map((r) => {
     const m = JSON.parse(r.manifest_json) as { files?: unknown; source?: string; repo_arch?: string };

@@ -35,6 +35,15 @@ pub struct IndexedManifest {
 pub struct ReleaseView {
     pub release: Release,
     pub packages: Vec<IndexedManifest>,
+    /// The page this view came from: `next` names the last row when there
+    /// is more (`after=`, keyset paging), null on the last page.
+    #[serde(default)]
+    pub page: Option<Page>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct Page {
+    pub next: Option<String>,
 }
 
 /// One row of `?fields=summary`: what status / list / search need.
@@ -99,23 +108,29 @@ impl Api {
     /// to the release the first page returned.
     pub fn release(&self, ring: &str, arch: &str) -> Result<ReleaseView> {
         let mut view: Option<ReleaseView> = None;
-        let mut offset = 0usize;
+        // Keyset paging: each page names the row the next one starts after
+        // (page.next) — a walk of the index, not a sort-and-skip per page.
+        let mut after: Option<String> = None;
         loop {
             let pin = view
                 .as_ref()
                 .map(|v| format!("&release_id={}", v.release.id))
                 .unwrap_or_default();
+            let cursor = after
+                .as_ref()
+                .map(|a| format!("&after={}", urlencode(a)))
+                .unwrap_or_default();
             let page: ReleaseView = self.get(&format!(
-                "/releases/{ring}?arch={arch}&limit=500&offset={offset}{pin}"
+                "/releases/{ring}?arch={arch}&limit=500{cursor}{pin}"
             ))?;
-            let got = page.packages.len();
+            let next = page.page.as_ref().and_then(|p| p.next.clone());
             match &mut view {
                 None => view = Some(page),
                 Some(v) => v.packages.extend(page.packages),
             }
-            offset += got;
-            if got < 500 {
-                break;
+            match next {
+                Some(n) => after = Some(n),
+                None => break,
             }
         }
         view.ok_or_else(|| anyhow::anyhow!("no page returned for {ring}"))
@@ -196,4 +211,21 @@ pub struct SecurityView {
     #[serde(default)]
     pub updated_at: Option<String>,
     pub vulnerable: Vec<VulnerablePackage>,
+}
+
+/// Percent-encodes what a package name or a cursor may carry (`+`, `@`, `/`…).
+fn urlencode(s: &str) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char);
+            }
+            _ => {
+                let _ = write!(out, "%{b:02X}");
+            }
+        }
+    }
+    out
 }
