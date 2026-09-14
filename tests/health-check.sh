@@ -88,8 +88,14 @@ for repo in $(grep -oE '^\[[a-z0-9-]+\]' /repo/pacman.conf | tr -d '[]' | grep -
   k=3; [[ "$repo" == *-packages-* ]] && k=8
   sample=$( { pacman --config /repo/pacman.conf -Sl "$repo" | awk '{print $2}' | head -1; pacman --config /repo/pacman.conf -Sl "$repo" | awk '{print $2}' | tail -1; pacman --config /repo/pacman.conf -Sl "$repo" | awk '{print $2}' | shuf -n "$k"; } | sort -u)
   [[ -n "$sample" ]] || { echo "$repo serves no package"; exit 1; }
+  # --nodeps twice: the question is whether the sampled object downloads
+  # and verifies, not whether its dependencies resolve — a package whose
+  # dependency the upstream repository itself lacks (python2-wiringx-git in
+  # Arch Linux ARM's alarm, an OPR build against a newer aquamarine than
+  # ALARM ships) is upstream's inconsistency, and the sync's report, not a
+  # broken pool.
   for name in $sample; do
-    pacman --config /repo/pacman.conf -Sw --noconfirm "$repo/$name" >/dev/null || { echo "download or signature check of $repo/$name FAILED"; exit 1; }
+    pacman --config /repo/pacman.conf -Sw --noconfirm --nodeps --nodeps "$repo/$name" >/dev/null || { echo "download or signature check of $repo/$name FAILED"; exit 1; }
   done
   echo "downloaded+verified $(wc -w <<<"$sample" | tr -d ' ') of $repo: $(tr '\n' ' ' <<<"$sample")"
 done

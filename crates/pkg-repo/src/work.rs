@@ -386,15 +386,20 @@ fn fresh_within(stamp: &Path, max: Duration) -> bool {
 /// package cache with the build containers (a path on the host: the
 /// runtime mounts it, so it must be the same on both sides).
 fn pkg_cache_dir(arch: &str) -> Result<Option<PathBuf>> {
-    let Some(root) = std::env::var_os("OMARCHY_PKG_CACHE") else {
+    cache_dir("OMARCHY_PKG_CACHE", arch)
+}
+
+/// `$<var>/<arch>`, created, when the variable names a directory on the
+/// host to share with the build containers.
+fn cache_dir(var: &str, arch: &str) -> Result<Option<PathBuf>> {
+    let Some(root) = std::env::var_os(var) else {
         return Ok(None);
     };
     if root.is_empty() {
         return Ok(None);
     }
     let dir = PathBuf::from(root).join(arch);
-    std::fs::create_dir_all(&dir)
-        .with_context(|| format!("creating the package cache {}", dir.display()))?;
+    std::fs::create_dir_all(&dir).with_context(|| format!("creating {var} {}", dir.display()))?;
     Ok(Some(dir))
 }
 
@@ -828,6 +833,13 @@ fn build_job(opts: &WorkOptions, job: &Api, task: &Task) -> Result<Outcome> {
     if let Some(cache) = pkg_cache_dir(&task.arch)? {
         run.arg("-v")
             .arg(format!("{}:/var/cache/pacman/pkg", cache.display()));
+    }
+    // Build caches that outlive the container (OMARCHY_BUILD_CACHE, one
+    // directory per architecture): cargo's registry, Go's module and build
+    // caches, ccache — a Rust or Go package rebuilds in minutes, not tens.
+    if let Some(cache) = cache_dir("OMARCHY_BUILD_CACHE", &task.arch)? {
+        run.arg("-v")
+            .arg(format!("{}:/build/cache", cache.display()));
     }
     let status = run
         .args([image, "bash", "/task/worker.sh", "--inside"])
