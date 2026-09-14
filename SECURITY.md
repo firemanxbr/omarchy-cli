@@ -43,7 +43,7 @@ please do not file a public issue for it.
 | Signing key (OpenPGP) | the pool's Worker only (`SIGNING_KEY` secret, `worker/src/signing.ts`) | sign the databases it stores and the packages the factory builds (`POST /pool/:sha256/sign`) | — | live; no worker, runner or repository holds it |
 | `CLOUDFLARE_API_TOKEN` | the release workflow on GitHub | deploy the Worker, apply migrations, record the deploy | — | live; with the two hosted-worker tokens, all GitHub holds |
 | `POOL_WORKER_TOKEN_{X86_64,AARCH64}` | `pool-worker.yml`, the hosted fallback | what a registered project worker can: claim pool jobs | build a package | live |
-| `CLOUDFLARE_ANALYTICS_TOKEN` on the Worker | the daily cost estimate | read the account's analytics and the D1 file size | write anything | live |
+| `CLOUDFLARE_ANALYTICS_TOKEN` on the Worker | the daily cost estimate and the daily audience count | read the account's analytics, the zone's request analytics and the D1 file size | write anything | live |
 | GitHub PAT on the Worker | the scheduler | dispatch `factory-update.yml` and `pool-worker.yml`; a higher rate limit for the update check | write to the repository | live; removed once neither is dispatched |
 
 Tokens are 192-bit random values shown once and stored as SHA-256 hashes;

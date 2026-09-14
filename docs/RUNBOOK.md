@@ -471,6 +471,18 @@ US$ 15, which is one more e-mail. Cloudflare's own budget notifications
 e-mail at actual charges of US$ 10, 20 and 28 (*Notifications → Billing →
 Usage based billing*; the API token cannot create them).
 
+**Who uses it.** Once a day (00:30 UTC) the brain counts yesterday's
+audience from the same analytics: the distinct client addresses that
+fetched a ring database (`/<arch>/omarchy-*-<ring>.db`) on the pool's host,
+per ring and per architecture, as one `audience` journal line
+(`src/audience.ts`); the Pool page's community card and the Pipeline's
+counters show it, `/api/v1/stats` carries the last 30 days. Nothing is kept
+per request — one number per day. An address is a machine most of the
+time (a NAT hides several, a laptop on the move counts twice), so the
+dashboard says *about*. It needs `CLOUDFLARE_ZONE_ID` (wrangler.toml) and
+the analytics token to also carry *Zone · Analytics · Read* on the zone;
+without it the day is skipped and the scheduler log says so once a day.
+
 **The guard.** At a projected or actual US$ 25 the brain sets
 `settings.cost_guard` and the scheduler stops creating the jobs that write
 (sync, promote, render, security, enqueue) until the next daily estimate is

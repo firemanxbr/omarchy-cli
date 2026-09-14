@@ -140,6 +140,8 @@ export async function handleStats(env: Env): Promise<Response> {
   ).all();
   const latestMetrics = await env.DB.prepare("SELECT payload, created_at FROM events WHERE kind = 'metrics' ORDER BY id DESC LIMIT 1").first<{ payload: string; created_at: string }>();
   const securityData = await env.DB.prepare("SELECT MAX(updated_at) AS updated_at, COUNT(*) AS advisories FROM advisories").first<{ updated_at: string | null; advisories: number }>();
+  // The audience: one row per day, the last 30 (audience.ts). Nothing per request is ever kept.
+  const audience = await env.DB.prepare("SELECT payload FROM events WHERE kind = 'audience' ORDER BY id DESC LIMIT 30").all<{ payload: string }>();
 
   return json(
     {
@@ -160,6 +162,7 @@ export async function handleStats(env: Env): Promise<Response> {
       },
       metrics: latestMetrics ? { recorded_at: latestMetrics.created_at, ...JSON.parse(latestMetrics.payload) } : null,
       security: { updated_at: securityData?.updated_at ?? null, advisories: securityData?.advisories ?? 0 },
+      audience: audience.results.map((r) => JSON.parse(r.payload)).reverse(),
       releases: releases.results,
       events: events.results.map(parse),
       latest: lastByKind.results.map(parse),

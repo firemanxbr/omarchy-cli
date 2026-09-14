@@ -6,6 +6,7 @@ import { syncRequests } from "./requests";
 import { checkUpdates } from "./updates";
 import { syncProvenance } from "./provenance";
 import { costGuard, dailyCost } from "./cost";
+import { dailyAudience } from "./audience";
 
 /**
  * The pool's own scheduler. GitHub's cron is best-effort — on 2026-09-12 it
@@ -247,6 +248,16 @@ export async function runScheduler(env: Env, now = new Date()): Promise<string[]
       if (c !== "cost: estimated today") log.push(c);
     } catch (e) {
       log.push(`cost: ${String(e)}`);
+    }
+  }
+  // Who used the pool yesterday: counted once a day after 00:30 UTC from the
+  // zone's analytics (audience.ts); one event, no per-request data.
+  if (now.getUTCHours() * 60 + now.getUTCMinutes() >= 30 && env.CLOUDFLARE_ANALYTICS_TOKEN && env.CLOUDFLARE_ZONE_ID) {
+    try {
+      const a = await dailyAudience(env, now);
+      if (a !== "audience: measured today") log.push(a);
+    } catch (e) {
+      log.push(`audience: ${String(e)}`);
     }
   }
   const guard = await costGuard(env);
