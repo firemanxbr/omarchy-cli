@@ -65,9 +65,11 @@ prepare_container() {
     grep -q "^$opt" /etc/pacman.conf || sed -i "0,/^\[options\]/s//[options]\n$opt/" /etc/pacman.conf
   done
   pacman-key --init >/dev/null 2>&1 || true
-  pacman -Syu --noconfirm --needed base-devel git sudo namcap jq python pacman-contrib >/dev/null
+  pacman -Syu --noconfirm --needed base-devel git namcap jq python pacman-contrib >/dev/null
+  # makepkg refuses root; `builder` builds, root installs the dependencies
+  # (install_deps) — no sudo anywhere: a setuid sudo does not start under
+  # user-mode emulation (an x86_64 build on an aarch64 host).
   id builder >/dev/null 2>&1 || useradd -m -s /bin/bash builder
-  echo 'builder ALL=(ALL) NOPASSWD: /usr/bin/pacman' > /etc/sudoers.d/builder
   # The pool's tooling and key, at main.
   rm -rf /build/pool && git clone -q --depth 1 "$REPO_URL" /build/pool
 }
@@ -111,7 +113,7 @@ fetch_pkgbuild() { # name group ref → /build/pkg holds the PKGBUILD directory
     mkdir -p /build/pkg
     curl -sSf "${OMARCHY_API:-https://pkgs.firemanxbr.org}/api/v1/factory/tasks/$from/artifacts/PKGBUILD" -o /build/pkg/PKGBUILD
     sed -i -e "s/^pkgver=.*/pkgver=${ver//\//\\/}/" -e "s/^pkgrel=.*/pkgrel=1/" /build/pkg/PKGBUILD
-    chown -R builder:builder /build/pkg && (cd /build/pkg && sudo -u builder updpkgsums) || echo "updpkgsums failed; the build will tell"
+    chown -R builder:builder /build/pkg && (cd /build/pkg && as_builder updpkgsums) || echo "updpkgsums failed; the build will tell"
   elif [[ "$ref" == draft:* ]]; then
     local spec url
     spec="${ref#draft:}"; url="${spec%@*}"
@@ -140,20 +142,35 @@ fetch_pkgbuild() { # name group ref → /build/pkg holds the PKGBUILD directory
   [[ -f /build/pkg/PKGBUILD ]] || { echo "no PKGBUILD found for $ref"; exit 3; }
 }
 
+as_builder() { runuser -u builder -- "$@"; }
+
+# What `makepkg --syncdeps` would install, installed by root instead: the
+# PKGBUILD's depends, makedepends and checkdepends (this architecture's
+# too), from .SRCINFO. Nothing to escalate from the build user.
+install_deps() {
+  local deps
+  deps="$(cd /build/pkg && as_builder makepkg --printsrcinfo 2>/dev/null \
+    | awk -F' = ' '/^[[:space:]]*(make|check)?depends(_[a-z0-9_]+)? = /{print $2}' | sort -u)"
+  [[ -n "$deps" ]] || return 0
+  # shellcheck disable=SC2086
+  pacman -S --needed --noconfirm --asdeps -- $deps
+}
+
 run_makepkg() { # → /build/out/*.pkg.tar.zst
   rm -rf /build/out; mkdir -p /build/out && chown -R builder:builder /build/pkg /build/out
   # A drafted PKGBUILD carries SKIP checksums; fill them in.
-  if grep -q "^sha256sums=('SKIP')" /build/pkg/PKGBUILD; then (cd /build/pkg && sudo -u builder updpkgsums); fi
+  if grep -q "^sha256sums=('SKIP')" /build/pkg/PKGBUILD; then (cd /build/pkg && as_builder updpkgsums); fi
   # Source signatures verify against keys shipped beside the PKGBUILD
   # (keys/pgp/<fingerprint>.asc, the AUR convention), never a keyserver.
   if compgen -G "/build/pkg/keys/pgp/*.asc" >/dev/null; then
-    sudo -u builder gpg --batch --import /build/pkg/keys/pgp/*.asc 2>&1 | grep -E "imported|unchanged" || true
+    as_builder gpg --batch --import /build/pkg/keys/pgp/*.asc 2>&1 | grep -E "imported|unchanged" || true
   fi
   # namcap flags the obvious (missing deps, bad permissions) before the build.
-  sudo -u builder namcap /build/pkg/PKGBUILD || true
+  as_builder namcap /build/pkg/PKGBUILD || true
+  install_deps
   # zst whatever the image's makepkg.conf says (Arch Linux ARM defaults to xz).
-  (cd /build/pkg && sudo -u builder env PKGDEST=/build/out PKGEXT=.pkg.tar.zst PACKAGER="omarchy-pool factory <https://github.com/firemanxbr/omarchy-pool>" \
-    makepkg --syncdeps --noconfirm --clean --cleanbuild --nosign)
+  (cd /build/pkg && as_builder env PKGDEST=/build/out PKGEXT=.pkg.tar.zst PACKAGER="omarchy-pool factory <https://github.com/firemanxbr/omarchy-pool>" \
+    makepkg --noconfirm --clean --cleanbuild --nosign)
 }
 
 # Build with the drafter correcting itself from the log — the contributor's
