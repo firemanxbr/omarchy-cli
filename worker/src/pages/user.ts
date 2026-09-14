@@ -12,6 +12,10 @@ const BODY = String.raw`
     <span id="share-btn"></span>
   </div>
   <div class="tiles" id="tiles"></div>
+  <div class="two" style="margin-bottom:44px">
+    <div class="panel"><h3>Activity <span class="dim" style="font-size:12px;font-weight:400">16 weeks · builds, decisions, packages</span></h3><div class="activity" id="activity"></div><p class="sub" id="activity-note" style="margin:8px 0 0;font-size:12.5px"></p></div>
+    <div class="panel"><h3>Track record <a href="/docs/governance">the formula →</a></h3><div class="score"><b id="score">…</b><div class="f" id="score-f"></div></div></div>
+  </div>
   <section id="share" hidden>
     <div class="h2row"><h2>Share it</h2><span class="hint">this page is public — everything on it is on the record anyway</span></div>
     <div class="share"><p><b style="color:var(--text)">You are part of open source.</b> Copy the link and post it wherever you like — your GitHub profile, LinkedIn, a blog. What it shows is what the pool recorded: packages, builds, decisions.</p><pre><span class="copy" id="copy-link">copy</span><span id="share-url"></span></pre><div class="row"><a class="btn ghost" href="/factory#workspace">Your workspace →</a><a class="btn ghost" href="/auth/logout">Sign out</a></div></div>
@@ -73,6 +77,17 @@ const SCRIPT = String.raw`
       ["Workers", num(d.workers.filter(function (w) { return !w.revoked_at; }).length), num(d.workers.filter(function (w) { return w.alive; }).length) + " alive now"]
     ];
     $("#tiles").innerHTML = tiles.map(function (t) { return '<div class="tile"><div class="k">' + t[0] + '</div><div class="v num">' + t[1] + '</div><div class="s">' + t[2] + '</div></div>'; }).join("");
+    // Sixteen weeks of what the record holds under this name: builds, decisions, packages touched.
+    var weeks = []; for (var i = 15; i >= 0; i--) weeks.push(Date.now() - i * 7 * 86400000);
+    var counts = weeks.map(function () { return 0; }), total = 0;
+    var mark = function (iso) { var t = Date.parse(iso); if (!t) return; for (var i = weeks.length - 1; i >= 0; i--) { if (t >= weeks[i]) { counts[i]++; total++; break; } } };
+    d.builds.forEach(function (b) { mark(b.created_at); }); d.approvals.forEach(function (a) { mark(a.created_at); }); d.packages.forEach(function (p) { mark(p.updated_at); });
+    var mx = Math.max.apply(null, counts) || 1;
+    $("#activity").innerHTML = counts.map(function (v, i) { return '<i style="height:' + Math.max(4, 100 * v / mx) + '%" data-tip="' + new Date(weeks[i]).toISOString().slice(0, 10) + ' · ' + v + (v === 1 ? " contribution" : " contributions") + '"></i>'; }).join("");
+    $("#activity-note").textContent = total ? num(total) + " in the last 16 weeks — every one is a row below" : "nothing on the record in the last 16 weeks yet";
+    var score = (d.record || []).reduce(function (n, r) { return n + Number(r.score || 0); }, 0);
+    $("#score").textContent = num(score);
+    $("#score-f").innerHTML = ((d.record || []).length ? (d.record || []).map(function (r) { return esc(r.group) + " " + num(r.score); }).join(" · ") + "<br>" : "no group yet<br>") + "from what the pool recorded: what you brought that a maintainer let in, what you built, what you decided — it says where the work was done, not who someone is";
     if ((d.record || []).length) {
       $("#record-section").hidden = false;
       pager("#record", d.record, function (r) {

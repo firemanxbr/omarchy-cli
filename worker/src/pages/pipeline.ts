@@ -61,6 +61,10 @@ const BODY = String.raw`
     <div class="h2row"><h2>Workers by role</h2><a class="more-link" href="/docs/workers">The three roles →</a></div>
     <p class="sub">One image, four kinds of worker. Alive means seen in the last ten minutes; building means holding a lease right now. <label style="margin-left:8px"><input type="checkbox" id="all-workers"> show workers not seen recently</label></p>
     <div class="roles-grid" id="roles"></div>
+    <div class="charts" style="margin-top:16px">
+      <div class="chart"><h3>Builds done per worker <span>all time</span></h3><div class="sub">what each worker reported done, and failed</div><div id="c-perworker"></div></div>
+      <div class="chart"><h3>Worker minutes <span>per day</span></h3><div class="sub">time the project's workers spent on pool jobs</div><div id="c-minutes"></div></div>
+    </div>
     <div class="two" style="margin-top:16px">
       <div class="panel"><h3>Omarchy workers <span class="dim" style="font-size:12px;font-weight:400">the project's host</span></h3><div class="table-wrap" style="border:0"><table id="workers"><thead><tr><th>Worker</th><th>Role</th><th>Arch</th><th>Where</th><th>Trust</th><th>Agent</th><th>Building</th><th>Done / failed</th><th>Last seen</th></tr></thead><tbody></tbody></table></div></div>
       <div class="panel"><h3>Community workers <span class="dim" style="font-size:12px;font-weight:400">contributors' own</span></h3><div class="table-wrap" style="border:0"><table id="cworkers"><thead><tr><th>Worker</th><th>Role</th><th>Owner</th><th>Arch</th><th>Mode</th><th>Agent</th><th>Building</th><th>Done / failed</th><th>Last seen</th></tr></thead><tbody></tbody></table></div></div>
@@ -71,7 +75,7 @@ const BODY = String.raw`
     <div class="h2row"><h2>The last two weeks</h2><a class="more-link" href="/status">Every chart on the Status page →</a></div>
     <div class="charts">
       <div class="chart"><h3>Pool jobs <span>7 days</span></h3><div class="sub">sync, promote, health, security, gc: done, failed, waiting</div><div id="c-jobs"></div></div>
-      <div class="chart"><h3>Worker minutes <span>per day</span></h3><div class="sub">time the project's workers spent on pool jobs</div><div id="c-minutes"></div></div>
+      <div class="chart"><h3>Promotions <span>14 days</span></h3><div class="sub">edge → rc and rc → stable: promoted, blocked by a check, rolled back</div><div id="c-promos"></div></div>
       <div class="chart"><h3>Health <span>14 days</span></h3><div class="sub">worst result per day, per ring and architecture</div><div id="c-health"></div></div>
       <div class="chart"><h3>Imports per day <span>14 days</span></h3><div class="sub">packages brought into the pool by the sync runs</div><div id="c-imports"></div></div>
       <div class="chart"><h3>Sync throughput <span>last runs</span></h3><div class="sub">MB/s per sync run, one worker each</div><div id="c-sync"></div></div>
@@ -305,6 +309,8 @@ __CHARTS__
         '<dl class="kv"><dt>alive</dt><dd>' + num(al.length) + ' of ' + num(ws.length) + '</dd><dt>done · failed</dt><dd>' + num(sum(ws, "builds_done")) + ' · ' + num(sum(ws, "builds_failed")) + '</dd><dt>x86_64 · aarch64</dt><dd>' + num(al.filter(function (w) { return w.arch === "x86_64"; }).length) + ' · ' + num(al.filter(function (w) { return w.arch === "aarch64"; }).length) + '</dd><dt>with an agent</dt><dd>' + num(ws.filter(function (w) { return w.agent; }).length) + '</dd></dl></div>';
     };
     $("#roles").innerHTML = card("pool", "Pool", roles.pool, "The pool's own jobs: sync, promote, health, security, gc. Trusted, on the host the community keeps.") + card("review", "Review", roles.review, "Rebuilds what maintainers approve and writes the audit. Holds the agent key.") + card("shared", "Community · shared", roles.shared, "Contributors' machines donated to everyone's community builds.") + card("own", "Community · own", roles.own, "A contributor's machine building only their packages. Their own queue, no waiting.");
+    var ranked = d.workers.slice().sort(function (a, b) { return (b.builds_done + b.builds_failed) - (a.builds_done + a.builds_failed); }).slice(0, 8), maxW = ranked.length ? (ranked[0].builds_done + ranked[0].builds_failed) || 1 : 1;
+    $("#c-perworker").innerHTML = ranked.length ? '<div class="hrows">' + ranked.map(function (w) { var role = roleOf(w) === "review" ? "review" : w.side === "omarchy" ? "pool" : (w.mode === "shared" ? "shared" : "own"), col = { pool: "var(--green)", review: "var(--blue)", shared: "var(--lilac)", own: "var(--dim)" }[role]; return '<div class="hrow" style="grid-template-columns:150px 1fr 70px"><div class="l">' + esc(w.id) + ' <small>' + role + ' · ' + esc(w.arch) + '</small></div><div class="bar" data-tip="' + esc(w.id + ": " + num(w.builds_done) + " done, " + num(w.builds_failed) + " failed") + '"><i style="width:' + (100 * (w.builds_done + w.builds_failed) / maxW) + '%;background:' + col + '"></i></div><div class="p num">' + num(w.builds_done) + ' / ' + num(w.builds_failed) + '</div></div>'; }).join("") + '</div><div class="legend"><span><i style="background:var(--green)"></i>pool</span><span><i style="background:var(--blue)"></i>review</span><span><i style="background:var(--lilac)"></i>community · shared</span><span><i style="background:var(--dim)"></i>community · own</span></div>' : '<div class="empty">no worker yet</div>';
     $("#ops-who").textContent = can() ? ME_LOGIN + " · you can approve, trust and roll back" : "read-only — approving, trusting and rolling back need the maintainer role";
   }
 
@@ -351,6 +357,17 @@ __CHARTS__
     $("#c-builds").innerHTML = stacked(days14, [{ name: "staged", color: C.blue, values: days14.map(function (x) { return (bb[x] || {}).staged || 0; }) }, { name: "published", color: C.green, values: days14.map(function (x) { return (bb[x] || {}).published || 0; }) }, { name: "failed", color: C.red, values: days14.map(function (x) { return (bb[x] || {}).failed || 0; }) }], { label: "Factory builds per day over fourteen days", empty: "no build yet" });
   }
 
+  // ---- promotions per day: what the promote, rollback and fast-track jobs recorded
+  function renderPromos() {
+    Promise.all(["promote", "rollback", "fast-track"].map(function (k) { return fetch("/api/v1/events?kind=" + k + "&limit=200").then(function (r) { return r.json(); }).then(function (d) { return d.events || []; }).catch(function () { return []; }); })).then(function (lists) {
+      var days = lastDays(14), by = {}; days.forEach(function (d) { by[d] = { promoted: 0, blocked: 0, rolled: 0 }; });
+      lists[0].forEach(function (e) { var d = e.created_at.slice(0, 10); if (!by[d]) return; if (e.status === "ok") by[d].promoted++; else by[d].blocked++; });
+      lists[2].forEach(function (e) { var d = e.created_at.slice(0, 10); if (by[d] && e.status === "ok") by[d].promoted++; });
+      lists[1].forEach(function (e) { var d = e.created_at.slice(0, 10); if (by[d]) by[d].rolled++; });
+      $("#c-promos").innerHTML = stacked(days, [{ name: "promoted", color: C.green, values: days.map(function (d) { return by[d].promoted; }) }, { name: "blocked", color: C.amber, values: days.map(function (d) { return by[d].blocked; }) }, { name: "rolled back", color: C.red, values: days.map(function (d) { return by[d].rolled; }) }], { label: "Promotions per day over fourteen days: promoted, blocked, rolled back", empty: "no promotion yet" });
+    });
+  }
+
   // ---- the bill, estimated once a day from Cloudflare's analytics (cost.ts)
   function renderCost() {
     fetch("/api/v1/cost").then(function (r) { return r.ok ? r.json() : null; }).then(function (c) {
@@ -377,7 +394,7 @@ __CHARTS__
   whoami(function (me) { if (me) { ME_ROLE = me.role; ME_LOGIN = me.login; } loadAll(); });
   setInterval(loadAll, 30000);
   loadFeed(); setInterval(loadFeed, 20000);
-  renderCost();
+  renderCost(); renderPromos(); setInterval(renderPromos, 300000);
   liveStats(function (d) { STATS = d; renderState(d); renderLive(d); renderRings(d); renderCharts(d); if (FACTORY) renderOps(FACTORY); }, 60000);
   $("#all-workers").onchange = function () { if (FACTORY) renderTables(FACTORY); };
 `;

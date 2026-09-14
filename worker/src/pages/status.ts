@@ -17,7 +17,7 @@ const BODY = String.raw`
   <section>
     <h2>Service</h2>
     <p class="sub">Measured right now by the API: can it reach the index and the pool. This is what <em>online</em> in the header means.</p>
-    <div class="tiles" id="service"></div>
+    <div class="svc" id="service"></div>
   </section>
 
   <section>
@@ -207,14 +207,15 @@ __CHARTS__
   }
   function renderService() {
     fetch("/api/v1/status", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (s) {
-      var tiles = [
-        ["API", "up", "answering · " + esc(s.checked_at.replace("T", " ").slice(0, 19)) + " UTC"],
-        ["Index", s.index.ok ? "up" : "down", s.index.ok ? "D1 answered in " + s.index.ms + " ms" : esc(s.index.error || "failed")],
-        ["Pool", s.pool.ok ? "serving" : "down", s.pool.ok ? "R2 answered in " + s.pool.ms + " ms" : esc(s.pool.error || "failed")]
+      var items = [
+        ["ok", "API", "answering · " + esc(s.checked_at.replace("T", " ").slice(0, 19)) + " UTC"],
+        [s.index.ok ? "ok" : "error", "index · D1", s.index.ok ? s.index.ms + " ms" : esc(s.index.error || "failed")],
+        [s.pool.ok ? "ok" : "error", "pool · R2", s.pool.ok ? s.pool.ms + " ms" : esc(s.pool.error || "failed")],
+        [s.signing ? "ok" : "warn", "signing", s.signing ? "the pool's key is loaded" : "no signing key"]
       ];
-      tiles.forEach(function (t, i) { var el = $("#service"), cell = el.children[i]; if (!cell) { cell = document.createElement("div"); cell.className = "tile"; el.appendChild(cell); } setTile(cell, '<div class="k">' + t[0] + '</div><div class="v num" style="color:' + (t[1] === "down" ? "var(--red)" : "var(--green)") + '">' + t[1] + '</div><div class="s">' + t[2] + '</div>'); });
+      $("#service").innerHTML = items.map(function (t) { return '<div><i class="led ' + t[0] + '"></i><b>' + t[1] + '</b><span>' + t[2] + '</span></div>'; }).join("");
     }).catch(function (e) {
-      $("#service").innerHTML = '<div class="tile"><div class="k">API</div><div class="v" style="color:var(--red)">down</div><div class="s">' + esc(String(e)) + '</div></div>';
+      $("#service").innerHTML = '<div><i class="led error"></i><b>API</b><span>down · ' + esc(String(e)) + '</span></div>';
     });
   }
   renderService(); setInterval(renderService, 60000);

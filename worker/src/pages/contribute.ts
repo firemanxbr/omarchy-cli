@@ -59,12 +59,13 @@ const BODY = String.raw`
   <section>
     <div class="charts">
       <div class="chart"><h3>Factory builds <span>14 days</span></h3><div class="sub">per day: contributors' builds staged, the project's published, failed</div><div id="c-builds"></div></div>
-      <div class="chart"><h3>Decisions <span>per week</span></h3><div class="sub">what maintainers approved and what they sent back</div><div id="c-decisions"></div></div>
+      <div class="chart"><h3>From registration to the rings <span>median</span></h3><div class="sub">time spent at each stage, from the record — the soaks are the schedule</div><div id="c-funnel"></div></div>
     </div>
   </section>
 
   <div id="signed" hidden>
     <div class="private-head" id="workspace"><span class="lock">private</span><h2>Your workspace</h2><span class="muted" id="ws-who"></span><span class="right"><a class="more-link" href="/pipeline#throughput">Where your builds sit in the queue →</a><a class="more-link" id="ws-profile" href="/factory">Your public profile →</a></span></div>
+    <div class="tiles" id="ws-tiles"></div>
     <div class="two">
       <div class="panel"><h3>Your packages <button type="button" id="reg-toggle">+ register one</button></h3>
         <form id="pkg-form" class="form" onsubmit="return false" hidden>
@@ -152,7 +153,13 @@ __CHARTS__
         var ev = t.status === "staged" ? '<a class="run" href="' + API + '/tasks/' + t.id + '/artifacts/build.log">log</a> <a class="run" href="' + API + '/tasks/' + t.id + '/artifacts/PKGBUILD">PKGBUILD</a>' : (t.status === "failed" ? '<a class="run" href="' + API + '/tasks/' + t.id + '/artifacts/build.log">log</a>' : '');
         return '<tr><td>' + t.id + '</td><td><b>' + esc(t.name) + '</b>' + (t.version ? ' <span class="mono muted">' + esc(t.version) + '</span>' : '') + '</td><td>' + esc(t.arch) + '</td><td>' + statusPill(t.status) + (t.attempts > 1 ? ' <span class="muted">attempt ' + t.attempts + '</span>' : '') + '</td><td class="mono">' + esc(t.lease_owner || "") + '</td><td>' + took(t.duration_ms) + '</td><td>' + ev + '</td><td class="muted">' + esc((t.error || "").slice(0, 100)) + '</td></tr>';
       }, { empty: 'nothing built yet' });
-      var st = d.staging || {};
+      var st = d.staging || {}, ws = d.workers || [], tk = d.tasks || [], pk = d.packages || [];
+      setTiles("#ws-tiles", [
+        ["Your packages", num(pk.length), num(pk.filter(function (p) { return p.status === "approved"; }).length) + " in the rings · " + num(pk.filter(function (p) { return p.status === "waiting" || p.status === "registered"; }).length) + " waiting or building"],
+        ["Your builds", num(tk.length), num(tk.filter(function (t) { return t.status === "staged" || t.status === "done"; }).length) + " succeeded · " + num(tk.filter(function (t) { return t.status === "failed"; }).length) + " failed"],
+        ["Your workers", num(ws.filter(function (w) { return !w.revoked_at; }).length), num(ws.filter(function (w) { return w.last_seen && Date.now() - Date.parse(w.last_seen) < 600000; }).length) + " online · shared workers build for you otherwise", ws.some(function (w) { return w.last_seen && Date.now() - Date.parse(w.last_seen) < 600000; }) ? "ok" : ""],
+        ["Staging used", (st.bytes / 1048576).toFixed(1) + " MB", "of " + (st.quota_bytes / 1073741824).toFixed(0) + " GB · evidence expires after 30 days"]
+      ]);
       $("#quota").textContent = "Staging: " + (st.bytes / 1048576).toFixed(1) + " MB of " + (st.quota_bytes / 1073741824).toFixed(0) + " GB used · objects expire after 30 days · a task waits until a worker of its architecture (yours, or a shared one) picks it up.";
       endSkeleton();
     }).catch(function (e) { $("#signin-state").textContent = "could not load your data: " + e; endSkeleton(); });
@@ -239,11 +246,16 @@ __CHARTS__
         var owner = owners[a.name];
         return '<div class="land">' + (owner ? avatar(owner, "contributor") : '<span class="avatar">?</span>') + '<div class="n"><span>' + esc(a.name) + ' <span class="v">' + esc(a.version || "") + '</span></span><span class="pill ' + (a.rebuild_status === "done" ? "ok" : "blue") + '">' + (a.rebuild_status === "done" ? "in the rings" : "rebuilding") + '</span></div><div class="b">by ' + (owner ? '<a href="/user/' + encodeURIComponent(owner) + '">' + esc(owner) + '</a>' : "—") + ' · approved by <a href="/user/' + encodeURIComponent(a.by) + '">' + esc(a.by) + '</a> · ' + ago(a.created_at) + ' · ' + esc(a.arch) + '</div></div>';
       }).join("") || '<div class="muted">nothing approved yet — <a href="/auth/github?next=/factory">be the first</a></div>';
-      // Decisions per week, from the approvals list.
-      var weeks = [], now = Date.now(); for (var i = 7; i >= 0; i--) weeks.push(new Date(now - i * 7 * 86400000).toISOString().slice(0, 10));
-      var ap = weeks.map(function () { return 0; }), rj = weeks.map(function () { return 0; });
-      apps.forEach(function (a) { var t = Date.parse(a.created_at); for (var i = weeks.length - 1; i >= 0; i--) { if (t >= Date.parse(weeks[i])) { if (a.decision === "approved") ap[i]++; else rj[i]++; break; } } });
-      $("#c-decisions").innerHTML = stacked(weeks.map(function (w) { return w.slice(5); }), [{ name: "approved", color: C.green, values: ap }, { name: "sent back", color: C.amber, values: rj }], { label: "Decisions per week over eight weeks", full: true, empty: "no decision yet" });
+      // The funnel: medians from what the record holds (a package's registration, its first staged build, the decision), then the soaks the schedule imposes.
+      var median = function (xs) { if (!xs.length) return null; xs = xs.slice().sort(function (a, b) { return a - b; }); return xs[Math.floor(xs.length / 2)]; };
+      var firstStaged = {}; f.tasks.forEach(function (t) { if (t.kind === "build" && t.trust === "community" && (t.status === "staged" || t.status === "done") && t.finished_at) { var k = t.name; if (!firstStaged[k] || t.finished_at < firstStaged[k]) firstStaged[k] = t.finished_at; } });
+      var byTask = {}; f.tasks.forEach(function (t) { byTask[t.id] = t; });
+      var regToStaged = pkgs.filter(function (p) { return firstStaged[p.name] && p.created_at; }).map(function (p) { return (Date.parse(firstStaged[p.name]) - Date.parse(p.created_at)) / 3600e3; }).filter(function (h) { return h >= 0; });
+      var stagedToDecided = apps.filter(function (a) { return byTask[a.task_id] && byTask[a.task_id].finished_at; }).map(function (a) { return (Date.parse(a.created_at) - Date.parse(byTask[a.task_id].finished_at)) / 3600e3; }).filter(function (h) { return h >= 0; });
+      var fmtH = function (h) { return h == null ? "—" : h < 1 ? Math.round(h * 60) + " min" : h < 48 ? (Math.round(h * 10) / 10) + " h" : Math.round(h / 24) + " d"; };
+      var stagesF = [["registered → staged", median(regToStaged), "the build, on a worker"], ["staged → decided", median(stagedToDecided), "a maintainer reads the evidence"], ["approved → edge", null, "the rebuild on the review worker"], ["edge → rc", 24, "promoted daily, after the checks"], ["rc → stable", 24, "the soak"]];
+      var maxH = Math.max(24, median(regToStaged) || 0, median(stagedToDecided) || 0);
+      $("#c-funnel").innerHTML = '<div class="hrows">' + stagesF.map(function (st) { var human = st[0] === "staged → decided"; return '<div class="hrow" style="grid-template-columns:170px 1fr 56px"><div class="l" title="' + esc(st[2]) + '">' + esc(st[0]) + '</div><div class="bar" data-tip="' + esc(st[0] + ": " + (st[1] == null ? "no measurement yet" : "median " + fmtH(st[1])) + " — " + st[2]) + '"><i style="width:' + (st[1] == null ? 0 : Math.min(100, 100 * st[1] / maxH)) + '%;background:' + (human ? "var(--amber)" : "var(--green)") + '"></i></div><div class="p num">' + fmtH(st[1]) + '</div></div>'; }).join("") + '</div><div class="legend"><span><i style="background:var(--green)"></i>the machines</span><span><i style="background:var(--amber)"></i>a human decides</span></div>';
       endSkeleton();
     }).catch(function () { endSkeleton(); });
   }

@@ -204,7 +204,7 @@ __CHARTS__
       ["Packages in stable", num(stable.package_count), num(byArch(stable, "x86_64")) + " x86_64 · " + num(byArch(stable, "aarch64")) + " aarch64"],
       ["Stable release", stable.release ? "#" + stable.release.seq : "—", stable.release ? ago(stable.release.created_at) + " · health " + (sh ? sh.status : "n/a") + " / " + (sha ? sha.status : "n/a") : "no release yet"],
       ["Sources mirrored", synced + " / " + expected, "Arch · Arch Linux ARM · Omarchy (OPR)"],
-      ["In the pool", num(d.pool.objects), bytes(d.pool.bytes) + ", each package stored once"],
+      ["Open advisories in stable", '<span id="t-sec">…</span>', '<span id="t-sec-s">matching the five feeds…</span>'],
       ["Last sync", lastSync ? ago(lastSync.created_at) : "never", lastSync ? esc(lastSync.summary) : "waiting for the first run"]
     ]);
     drawStart();
@@ -237,6 +237,9 @@ __CHARTS__
     busy(fetch("/api/v1/security?ring=stable&arch=x86_64")).then(function (r) { return r.json(); }).then(function (s) {
       var t = s.totals || {};
       $("#sec-when").textContent = s.updated_at ? ago(s.updated_at) : "no scan yet";
+      var ts = $("#t-sec"), tss = $("#t-sec-s");
+      if (ts) { ts.textContent = num(t.packages || 0); ts.parentElement.classList.toggle("ok", !(t.kev || 0) && !(t.critical || 0) && !(t.high || 0)); ts.parentElement.classList.toggle("warn", !!((t.kev || 0) + (t.critical || 0) + (t.high || 0))); }
+      if (tss) tss.textContent = num(t.kev || 0) + " exploited in the wild · " + num((t.critical || 0) + (t.high || 0)) + " high · " + num(t.medium || 0) + " medium" + (s.updated_at ? " · " + ago(s.updated_at) : "");
       var rows = [["exploited in the wild (KEV)", t.kev || 0, "var(--red)"], ["critical + high", (t.critical || 0) + (t.high || 0), "var(--red)"], ["medium", t.medium || 0, "var(--amber)"], ["low / unknown", (t.low || 0) + (t.unknown || 0), "var(--dim)"]];
       var max = Math.max.apply(null, rows.map(function (r) { return r[1]; })) || 1;
       $("#c-sec").innerHTML = hrows(rows.map(function (r) { return [r[0], "", Math.round(100 * r[1] / max), r[2], num(r[1])]; }), 190) +
