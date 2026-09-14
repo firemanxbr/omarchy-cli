@@ -49,6 +49,37 @@ if [[ -f "/proc/sys/fs/binfmt_misc/qemu-$other" ]]; then echo "    $other contai
 echo "==> $root/compose.yml"
 install -m 644 -o "$user" -g "$user" "$here/compose.yml" "$root/compose.yml"
 install -m 755 -o "$user" -g "$user" "$here/register.sh" "$root/register.sh"
+install -m 755 -o "$user" -g "$user" "$here/rollout.sh" "$root/rollout.sh"
+
+echo "==> rolling upgrades: omarchy-pool-rollout.timer (every 15 minutes, as $user)"
+# A user unit, so the docker group and the compose project are the user's;
+# linger keeps user units running without a login session.
+home="$(getent passwd "$user" | cut -d: -f6)"
+install -d -o "$user" -g "$user" "$home/.config/systemd/user"
+cat > "$home/.config/systemd/user/omarchy-pool-rollout.service" <<UNIT
+[Unit]
+Description=Omarchy Pool: rolling upgrade of the workers to the latest image
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=$root
+ExecStart=$root/rollout.sh
+UNIT
+cat > "$home/.config/systemd/user/omarchy-pool-rollout.timer" <<UNIT
+[Unit]
+Description=Omarchy Pool: check for a new worker image every 15 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=15min
+RandomizedDelaySec=2min
+
+[Install]
+WantedBy=timers.target
+UNIT
+chown "$user:$user" "$home/.config/systemd/user/omarchy-pool-rollout."{service,timer}
+loginctl enable-linger "$user" >/dev/null 2>&1 || true
 [[ -f "$root/.env" ]] || printf 'POOL_ROOT=%s\nWHERE=%s\n' "$root" "$(hostname -s)" > "$root/.env"
 chown "$user:$user" "$root/.env"
 for svc in pool-x86_64 pool-aarch64 review-x86_64 review-aarch64 community-x86_64 community-aarch64; do
@@ -85,5 +116,6 @@ Done. Next, as $user (log in again so the docker group applies):
   2. register the six workers and trust the project's four:
        OMARCHY_CONTRIBUTOR_TOKEN=omc_… $root/register.sh        (a maintainer's token; from the profile page, shown once)
   3. cd $root && docker compose pull && docker compose up -d
-  4. the Factory page lists them within a minute
+  4. systemctl --user enable --now omarchy-pool-rollout.timer     (rolling upgrades from then on)
+  5. the Factory page lists them within a minute
 NEXT

@@ -1,8 +1,9 @@
 # The project's own host — two workers of each role, one per architecture
 # (docs/RUNBOOK.md, *The Studio host*; the roles: /docs/workers#roles).
 #
-#   docker compose up -d            start (or restart on a new image)
-#   docker compose pull && docker compose up -d      upgrade after a pool release
+#   docker compose up -d            start
+#   ./rollout.sh                    a rolling upgrade to the latest image, one worker at a time
+#                                   (a systemd user timer runs it every 15 minutes: setup.sh)
 #   docker compose logs -f review-aarch64            one worker's log
 #
 # Everything lives under POOL_ROOT (.env, written by setup.sh): the work
@@ -17,9 +18,13 @@
 # pool job is only a label; an x86_64 rebuild starts an emulated sibling
 # container), the x86_64 community worker is itself an emulated container.
 
+# A stop is a drain: the worker finishes the task it holds, claims no new
+# one and exits (SIGTERM); the grace period is what the longest build may
+# take — rollout.sh replaces the six one at a time inside it.
 x-project: &project
   image: ghcr.io/firemanxbr/omarchy-worker:latest
   restart: unless-stopped
+  stop_grace_period: 3h
   volumes:
     - /var/run/docker.sock:/var/run/docker.sock
     - ${POOL_ROOT:-/srv/omarchy-pool}:${POOL_ROOT:-/srv/omarchy-pool}
@@ -47,6 +52,7 @@ services:
 
   review-x86_64:
     <<: *project
+    profiles: [emulated]
     env_file: [etc/agent.env, etc/review-x86_64.env]
     environment:
       OMARCHY_WORKER_ROLE: review
@@ -67,10 +73,19 @@ services:
   # A community worker builds inside its own container, one task per
   # container (the restart policy starts the next one); no socket, no work
   # directory — only the package cache of its architecture.
+  #
+  # The `emulated` profile: x86_64 *builds* on an aarch64 host run under
+  # user-mode emulation, and on a 16K-page kernel (Asahi) that cannot load
+  # every x86_64 library — rustc, sudo and anything linking libedit or
+  # libldap fail to map a segment. Off by default here: x86_64 build tasks
+  # wait for an x86_64 worker (any x86_64 machine with docker and these two
+  # services' env files). COMPOSE_PROFILES=emulated in .env turns them on.
   community-x86_64:
+    profiles: [emulated]
     image: ghcr.io/firemanxbr/omarchy-worker:x86_64
     platform: linux/amd64
     restart: unless-stopped
+    stop_grace_period: 3h
     env_file: [etc/agent.env, etc/community-x86_64.env]
     environment:
       OMARCHY_WORKER_ROLE: community
@@ -82,6 +97,7 @@ services:
   community-aarch64:
     image: ghcr.io/firemanxbr/omarchy-worker:aarch64
     restart: unless-stopped
+    stop_grace_period: 3h
     env_file: [etc/agent.env, etc/community-aarch64.env]
     environment:
       OMARCHY_WORKER_ROLE: community
