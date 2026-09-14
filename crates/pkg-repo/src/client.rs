@@ -170,6 +170,15 @@ pub struct ReleaseView {
     pub release: Release,
     pub package_count: u64,
     pub packages: Vec<IndexedManifest>,
+    /// `page.next` names the row the next page starts after (keyset
+    /// paging); null on the last page.
+    #[serde(default)]
+    pub page: Option<Page>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Page {
+    pub next: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -523,15 +532,19 @@ impl Api {
     /// mid-render cannot mix two selections.
     pub fn release(&self, ring: &str, arch: &str) -> Result<ReleaseView, RepoError> {
         let mut view: Option<ReleaseView> = None;
-        let mut offset = 0u64;
+        // Keyset paging (page.next → after=): each page is a walk of the
+        // index from the previous page's last row, not a sort and a skip.
+        let mut after: Option<String> = None;
         // The first page always exists (an empty ring is a 404 from the API).
         loop {
             let mut query = vec![
                 ("include", "files".to_owned()),
                 ("arch", arch.to_owned()),
                 ("limit", RELEASE_PAGE.to_string()),
-                ("offset", offset.to_string()),
             ];
+            if let Some(a) = &after {
+                query.push(("after", a.clone()));
+            }
             if let Some(v) = &view {
                 query.push(("release_id", v.release.id.to_string()));
             }
@@ -543,7 +556,7 @@ impl Api {
                     .send()?;
                 Ok(Self::check(resp)?.json()?)
             })?;
-            let got = page.packages.len() as u64;
+            let next = page.page.as_ref().and_then(|p| p.next.clone());
             let mut page = page;
             for p in &mut page.packages {
                 p.inflate_files()?;
@@ -552,9 +565,9 @@ impl Api {
                 None => view = Some(page),
                 Some(v) => v.packages.extend(page.packages),
             }
-            offset += got;
-            if got < RELEASE_PAGE {
-                break;
+            match next {
+                Some(n) => after = Some(n),
+                None => break,
             }
         }
         view.ok_or_else(|| RepoError::Api {
