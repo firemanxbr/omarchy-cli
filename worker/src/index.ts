@@ -110,6 +110,8 @@ export interface Env {
   CLOUDFLARE_ANALYTICS_TOKEN?: string;
   CLOUDFLARE_ACCOUNT_ID?: string;
   CLOUDFLARE_D1_ID?: string;
+  /** The zone the pool's host lives in: the daily audience count reads its request analytics (audience.ts). */
+  CLOUDFLARE_ZONE_ID?: string;
   /** The pool's OpenPGP signing key (armored private key) and its passphrase, if any — signing.ts. */
   SIGNING_KEY?: string;
   SIGNING_KEY_PASSPHRASE?: string;

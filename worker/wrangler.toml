@@ -56,6 +56,10 @@ JOB_KINDS = "gc,health,sync,promote,security,metrics,enqueue,verify"
 # the CLOUDFLARE_ANALYTICS_TOKEN secret.
 CLOUDFLARE_ACCOUNT_ID = "34f1918ac9ca522150a1830ea9b61a40"
 CLOUDFLARE_D1_ID = "e2f04e65-465c-4170-8750-69061f846b9b"
+# The daily audience count (src/audience.ts): distinct addresses that fetched a
+# ring database on the pool's host, from the zone's request analytics — the same
+# token, which must also carry Zone · Analytics · Read on this zone.
+CLOUDFLARE_ZONE_ID = "7f728d9c91b0172b925e2690a3672ffd"
 # "Sign in with GitHub": the OAuth App "omarchy-pool" (registered under the
 # account that runs the staging deployment; the secret is a Worker secret,
 # GITHUB_OAUTH_CLIENT_SECRET). Empty = the token form only.

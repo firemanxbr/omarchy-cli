@@ -85,7 +85,15 @@ const BODY = String.raw`
         <pre><span class="copy" data-copy="cli">copy</span><span id="cli-cmd"></span></pre>
       </aside>
       <aside class="community-card" id="community-card">
-        <h3><span class="live"><i></i>the people</span><span class="dim" style="font-size:12px;font-weight:400">on the record</span></h3>
+        <div id="cc-machines" hidden>
+          <h3><span class="live"><i></i>machines on the pool</span><span class="dim" style="font-size:12px;font-weight:400" id="cc-day">yesterday</span></h3>
+          <div class="big" id="cc-machines-n">…</div>
+          <p id="cc-machines-line">about — distinct addresses that fetched a ring database over the day: no accounts, no cookies, nothing kept per request</p>
+          <div id="cc-spark"></div>
+          <div id="cc-split" style="margin-top:8px"></div>
+          <div class="mini" id="cc-arch" style="grid-template-columns:repeat(2,1fr)"></div>
+        </div>
+        <h3 style="margin-top:6px"><span class="live"><i></i>the people</span><span class="dim" style="font-size:12px;font-weight:400">on the record</span></h3>
         <div class="big" id="cc-count">…</div>
         <p id="cc-line">contributors and maintainers, counted from what the pool recorded</p>
         <div class="people" id="cc-people"></div>
@@ -247,6 +255,18 @@ __CHARTS__
         '<p class="sub" style="margin:10px 0 0;font-size:12px">Arch and Debian trackers, OSV, CISA KEV, EPSS — every three hours. <a href="/pipeline">Watch it happen →</a> · <a href="/security">Every advisory →</a></p>';
     }).catch(function () { $("#c-sec").innerHTML = '<div class="empty">no security data yet</div>'; });
 
+    // The audience: yesterday's machines, fourteen days of them, by ring and by architecture (audience.ts).
+    var aud = d.audience || [];
+    if (aud.length) {
+      var y = aud[aud.length - 1], m14 = aud.slice(-14);
+      $("#cc-machines").hidden = false; $("#cc-day").textContent = y.day;
+      $("#cc-machines-n").textContent = "≈ " + num(y.machines) + (y.machines >= 10000 ? "+" : "");
+      $("#cc-machines-line").textContent = "distinct addresses that fetched a ring database on " + y.day + " · " + num(y.requests) + " fetches, " + bytes(y.bytes) + (y.sampled ? " · sampled by Cloudflare, so an estimate" : "") + " — no accounts, no cookies, nothing kept per request";
+      $("#cc-spark").innerHTML = m14.length >= 2 ? area(m14.map(function (a) { return { t: Date.parse(a.day + "T12:00:00Z"), v: a.machines }; }), function (v) { return num(Math.round(v)); }) : "";
+      var tot = Math.max(1, y.machines);
+      $("#cc-split").innerHTML = hrows(["stable", "rc", "edge"].map(function (r) { var v = (y.by_ring || {})[r] || 0; return [r, "", Math.round(100 * v / tot), "var(--" + r + ")", num(v)]; }), 60);
+      $("#cc-arch").innerHTML = ["x86_64", "aarch64"].map(function (a) { var v = (y.by_arch || {})[a] || 0; return '<div><b>' + num(v) + '</b>' + a + '</div>'; }).join("");
+    }
     $("#open-journal").innerHTML = (d.events || []).slice(0, 5).map(function (e) { return '<div><span class="dot ' + e.status + '"></span><span class="kind">' + esc(e.kind) + '</span> <span class="muted">' + esc(e.summary) + '</span> <span class="when">· ' + ago(e.created_at) + '</span></div>'; }).join("") || '<div class="muted">nothing yet</div>';
   }
 

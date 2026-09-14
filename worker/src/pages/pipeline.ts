@@ -218,9 +218,10 @@ __CHARTS__
     live("pool-size", num(d.pool.objects) + " objects · " + bytes(d.pool.bytes));
     ["edge", "rc", "stable"].forEach(function (n) { var r = d.rings.filter(function (x) { return x.ring === n; })[0]; if (r && r.release) live(n + "-head", "release #" + r.release.seq + " · " + ago(r.release.created_at)); });
     live("heads", ["edge", "rc", "stable"].map(function (n) { var r = d.rings.filter(function (x) { return x.ring === n; })[0]; return n + (r && r.release ? " #" + r.release.seq : " —"); }).join(" · "));
+    var aud = d.audience || [], y = aud[aud.length - 1];
     var cells = [
       ["packages verified today", num(imp), "ok"], ["advisories known", num((d.security || {}).advisories || 0), ""], ["exploited in stable", "<span data-live=\"kev\">…</span>", "ok"],
-      ["promotions today", num(promos.length), ""], ["fast-tracks, recent journal", num(fast.length), ""], ["rollbacks, recent journal", num(rb.length), rb.length ? "warn" : "ok"]
+      y ? ["machines on the pool, " + y.day, "≈ " + num(y.machines), "ok"] : ["promotions today", num(promos.length), ""], ["fast-tracks, recent journal", num(fast.length), ""], ["rollbacks, recent journal", num(rb.length), rb.length ? "warn" : "ok"]
     ];
     $("#counters").innerHTML = cells.map(function (c) { return '<div><b class="' + c[2] + '">' + c[1] + '</b><span>' + c[0] + '</span></div>'; }).join("");
     fetch("/api/v1/security?ring=stable&arch=x86_64").then(function (r) { return r.json(); }).then(function (s) { var t = s.totals || {}; live("open-stable", "open in stable: " + num(t.packages || 0) + " · exploited: " + num(t.kev || 0)); live("kev", num(t.kev || 0)); }).catch(function () { live("open-stable", "open in stable: no scan yet"); live("kev", "—"); });
