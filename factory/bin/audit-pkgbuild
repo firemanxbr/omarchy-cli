@@ -27,7 +27,7 @@ def ask(pkgbuild, log, pkginfo):
     if pkginfo:
         user += "\n--- .PKGINFO ---\n" + pkginfo[:4000] + "\n"
     user += "\nReturn the JSON report only."
-    text, model = agent.complete(open(RULES).read(), user, max_tokens=3000)
+    text, model = agent.complete(open(RULES).read(), user, max_tokens=12000)
     text = re.sub(r"^```\w*\n|\n```\s*$", "", text.strip())
     try:
         report = json.loads(text)

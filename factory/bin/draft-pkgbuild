@@ -238,7 +238,7 @@ def draft(a, previous, log, hint):
     if hint:
         user += "\n--- maintainer hint ---\n" + hint + "\n"
     user += "\nReturn the PKGBUILD only."
-    text, _model = agent.complete(rules, user, max_tokens=4000)
+    text, _model = agent.complete(rules, user, max_tokens=12000)
     text = re.sub(r"^```\w*\n|\n```\s*$", "", text.strip())
     if "pkgname=" not in text or "package()" not in text:
         sys.exit("the model did not return a PKGBUILD:\n" + text[:500])

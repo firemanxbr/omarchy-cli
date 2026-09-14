@@ -13,6 +13,14 @@ environment; the pool and GitHub hold none (SECURITY.md).
 FACTORY_PROVIDER picks one explicitly; otherwise the first key found, in
 that order. Gemini and xAI speak the OpenAI chat-completions format, so
 there are two code paths for four providers.
+
+A reasoning model spends the completion budget on thinking first, and an
+answer cut short by the budget comes back empty or truncated (Gemini 3.6
+Flash did, for an audit, two runs out of three): the OpenAI-format path
+retries once with four times the budget when the finish reason says
+"length". FACTORY_REASONING (low, medium, high) is passed as
+reasoning_effort when set — the operator's choice, since not every model
+accepts it.
 """
 import json
 import os
@@ -46,7 +54,7 @@ def available():
     return provider() is not None
 
 
-def complete(system, user, max_tokens=4000, timeout=180):
+def complete(system, user, max_tokens=4000, timeout=300):
     """One completion: (text, model) — the model as the provider reports it."""
     found = provider()
     if not found:
@@ -62,12 +70,21 @@ def complete(system, user, max_tokens=4000, timeout=180):
         with urllib.request.urlopen(req, timeout=timeout) as r:
             out = json.load(r)
         return "".join(c.get("text", "") for c in out.get("content", [])), out.get("model", model)
-    body = {"model": model, "max_completion_tokens": max_tokens,
-            "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
-    req = urllib.request.Request(base + "/chat/completions", data=json.dumps(body).encode(), method="POST",
-                                 headers={"authorization": "Bearer " + key, "content-type": "application/json"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        out = json.load(r)
-    choices = out.get("choices") or []
-    text = (choices[0].get("message") or {}).get("content") if choices else None
-    return (text or ""), out.get("model", model)
+    messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+    effort = os.environ.get("FACTORY_REASONING")
+    budget = max_tokens
+    for attempt in (1, 2):
+        body = {"model": model, "max_completion_tokens": budget, "messages": messages}
+        if effort:
+            body["reasoning_effort"] = effort
+        req = urllib.request.Request(base + "/chat/completions", data=json.dumps(body).encode(), method="POST",
+                                     headers={"authorization": "Bearer " + key, "content-type": "application/json"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            out = json.load(r)
+        choices = out.get("choices") or []
+        text = (choices[0].get("message") or {}).get("content") if choices else None
+        finish = choices[0].get("finish_reason") if choices else None
+        if finish != "length" or attempt == 2:
+            return (text or ""), out.get("model", model)
+        budget = max_tokens * 4
+    return "", model
