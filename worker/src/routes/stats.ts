@@ -131,6 +131,17 @@ export async function handleStats(env: Env): Promise<Response> {
        FROM build_tasks WHERE kind = 'build' AND created_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-14 days')
       GROUP BY day, trust, status ORDER BY day`,
   ).all();
+  // The load per worker over the last day: the time each one held a lease —
+  // finished tasks by their duration, a task still running by its start.
+  const day = new Date(Date.now() - 86400000).toISOString();
+  const workersDaily = await env.DB.prepare(
+    `SELECT lease_owner AS worker,
+            SUM(CASE WHEN status = 'leased' THEN 0 ELSE 1 END) AS done,
+            COALESCE(SUM(CASE WHEN status = 'leased' THEN 0 ELSE duration_ms END), 0) AS ms,
+            COALESCE(SUM(CASE WHEN status = 'leased' AND started_at IS NOT NULL THEN (julianday('now') - julianday(started_at)) * 86400000 ELSE 0 END), 0) AS running_ms
+       FROM build_tasks WHERE lease_owner IS NOT NULL AND (finished_at >= ?1 OR (status = 'leased' AND started_at >= ?1))
+      GROUP BY lease_owner`,
+  ).bind(day).all();
   const metricsSeries = await env.DB.prepare(
     `SELECT created_at, json_extract(payload, '$.pool.objects') AS objects, json_extract(payload, '$.pool.bytes') AS bytes,
             COALESCE(json_extract(payload, '$.jobs.running'), json_extract(payload, '$.actions.running')) AS running,
@@ -159,6 +170,7 @@ export async function handleStats(env: Env): Promise<Response> {
         metrics: metricsSeries.results,
         jobs_daily: jobsDaily.results,
         builds_daily: buildsDaily.results,
+        workers_daily: workersDaily.results,
       },
       metrics: latestMetrics ? { recorded_at: latestMetrics.created_at, ...JSON.parse(latestMetrics.payload) } : null,
       security: { updated_at: securityData?.updated_at ?? null, advisories: securityData?.advisories ?? 0 },
