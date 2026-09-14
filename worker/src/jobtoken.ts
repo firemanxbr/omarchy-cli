@@ -87,9 +87,23 @@ export function scopesFor(kind: string, id: number, trust: string, params: Recor
       if (trust === "community") s.push(`staging:${id}`);
       else s.push("pool:write", `release:${ring}`, `artifacts:*:${ring}`);
       break;
-    case "sync":
-      s.push("pool:write", `release:${ring}`, `artifacts:*:${ring}`);
+    case "sync": {
+      // One task syncs every source of an architecture, each into its own
+      // ring (the OPR's edge/rc/stable channels): a scope per ring named.
+      s.push("pool:write");
+      const rings = new Set<string>([ring]);
+      let sources: unknown = params.sources;
+      if (typeof sources === "string") {
+        try {
+          sources = JSON.parse(sources);
+        } catch {
+          sources = [];
+        }
+      }
+      if (Array.isArray(sources)) for (const src of sources) if (src && typeof src === "object" && typeof (src as { ring?: unknown }).ring === "string") rings.add((src as { ring: string }).ring);
+      for (const r of rings) s.push(`release:${r}`, `artifacts:*:${r}`);
       break;
+    }
     case "promote":
       s.push(`release:${String(params.to ?? "rc")}`, `artifacts:*:${String(params.to ?? "rc")}`);
       break;
