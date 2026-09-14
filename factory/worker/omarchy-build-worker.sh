@@ -144,6 +144,16 @@ fetch_pkgbuild() { # name group ref → /build/pkg holds the PKGBUILD directory
 
 as_builder() { runuser -u builder -- "$@"; }
 
+# Extends the task's lease while the build runs (every five minutes; the
+# lease is thirty): a build longer than the lease is not handed to another
+# worker. Killed when the task ends.
+heartbeat_loop() { # task-id
+  while :; do
+    sleep 300
+    api POST "/factory/tasks/$1/heartbeat" '{}' >/dev/null 2>&1 || true
+  done
+}
+
 # What `makepkg --syncdeps` would install, installed by root instead: the
 # PKGBUILD's depends, makedepends and checkdepends (this architecture's
 # too), from .SRCINFO. Nothing to escalate from the build user.

@@ -12,7 +12,7 @@ agent key it falls back to a template for Rust, Go, CMake, Meson and
 prebuilt release binaries. Writes DIR/PKGBUILD and prints a JSON summary.
 Checksums are left as SKIP for updpkgsums.
 """
-import argparse, json, os, re, sys, urllib.request, urllib.error, base64
+import argparse, json, os, re, sys, time, urllib.request, urllib.error, base64
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import agent  # noqa: E402
@@ -32,6 +32,16 @@ def gh(path, raw=False):
     except urllib.error.HTTPError as e:
         if e.code == 404:
             return None
+        if e.code in (403, 429) and e.headers.get("x-ratelimit-remaining") == "0":
+            # Sixty requests an hour without a token, shared by everything on
+            # this address; a token makes it five thousand. A short wait is
+            # worth taking here, a long one is the operator's to fix.
+            reset = int(e.headers.get("x-ratelimit-reset") or 0) - int(time.time())
+            if 0 < reset <= 600:
+                sys.stderr.write(f"GitHub rate limit reached; waiting {reset}s for the window to reset\n")
+                time.sleep(reset + 2)
+                return gh(path, raw)
+            sys.exit("GitHub API rate limit reached for this address (60/h without a token): set GITHUB_TOKEN on the worker — a fine-grained token with no permissions is enough (5000/h)")
         raise
 
 

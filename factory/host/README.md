@@ -37,7 +37,7 @@ Operate:
 ```bash
 docker compose ps                                 # the six, and whether they are up
 docker compose logs -f --tail 50 review-aarch64   # one worker
-docker compose pull && docker compose up -d       # after a pool release (the image is tagged with it)
+docker compose pull && docker compose up -d       # after a pool release (the image is tagged with it) — recreates the six; a task in flight goes back to the queue when its lease expires (30 min), so do it with the workers idle when you can
 docker compose restart pool-x86_64                # a worker that looks stuck (a task it holds goes back to the queue when its lease expires)
 ```
 
