@@ -7,7 +7,7 @@ environment; the pool and GitHub hold none (SECURITY.md).
     provider   key                model (FACTORY_MODEL overrides)   endpoint (…_BASE_URL overrides)
     anthropic  ANTHROPIC_API_KEY  claude-sonnet-5                   https://api.anthropic.com  (Messages API)
     openai     OPENAI_API_KEY     gpt-5                             https://api.openai.com/v1  (chat completions)
-    gemini     GEMINI_API_KEY     gemini-2.5-pro                    https://generativelanguage.googleapis.com/v1beta/openai  (OpenAI-compatible)
+    gemini     GEMINI_API_KEY     gemini-3.6-flash                  https://generativelanguage.googleapis.com/v1beta/openai  (OpenAI-compatible)
     xai        XAI_API_KEY        grok-4                            https://api.x.ai/v1  (OpenAI-compatible)
 
 FACTORY_PROVIDER picks one explicitly; otherwise the first key found, in
@@ -21,7 +21,7 @@ import urllib.request
 PROVIDERS = {
     "anthropic": {"key": "ANTHROPIC_API_KEY", "model": "claude-sonnet-5", "base": "https://api.anthropic.com", "base_env": "ANTHROPIC_BASE_URL", "api": "anthropic"},
     "openai": {"key": "OPENAI_API_KEY", "model": "gpt-5", "base": "https://api.openai.com/v1", "base_env": "OPENAI_BASE_URL", "api": "openai"},
-    "gemini": {"key": "GEMINI_API_KEY", "model": "gemini-2.5-pro", "base": "https://generativelanguage.googleapis.com/v1beta/openai", "base_env": "GEMINI_BASE_URL", "api": "openai"},
+    "gemini": {"key": "GEMINI_API_KEY", "model": "gemini-3.6-flash", "base": "https://generativelanguage.googleapis.com/v1beta/openai", "base_env": "GEMINI_BASE_URL", "api": "openai"},
     "xai": {"key": "XAI_API_KEY", "model": "grok-4", "base": "https://api.x.ai/v1", "base_env": "XAI_BASE_URL", "api": "openai"},
 }
 KEYS = [p["key"] for p in PROVIDERS.values()]

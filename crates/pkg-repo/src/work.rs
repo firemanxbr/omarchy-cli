@@ -34,7 +34,7 @@ const POLL: Duration = Duration::from_secs(30);
 const AGENTS: [(&str, &str, &str); 4] = [
     ("anthropic", "ANTHROPIC_API_KEY", "claude-sonnet-5"),
     ("openai", "OPENAI_API_KEY", "gpt-5"),
-    ("gemini", "GEMINI_API_KEY", "gemini-2.5-pro"),
+    ("gemini", "GEMINI_API_KEY", "gemini-3.6-flash"),
     ("xai", "XAI_API_KEY", "grok-4"),
 ];
 
