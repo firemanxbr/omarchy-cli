@@ -377,7 +377,13 @@ What keeps the bill near US$ 10:
   full membership is written out only for a checkpoint — the first release
   of a ring, then every 24th, and any older release read by id. A sync that
   moves a hundred packages writes a hundred rows, not thirty thousand; GC
-  drops the checkpoints and deltas nothing inside retention starts from;
+  drops the checkpoints and deltas nothing inside retention starts from.
+  The delta is computed in SQL with the request's lists materialised once
+  (CTEs): evaluated per row over a 32k-row ring, the first version took
+  D1 past its CPU limit and every sync failed for three hours on
+  2026-09-13 (the release row and its delta are one transaction since, so
+  a failed attempt leaves nothing behind); a release on a 32k-row ring
+  takes about 50 ms of D1 time now;
 - the sync runs **every three hours, one task per architecture, one release
   per ring** — not one release per source per hour. With releases this
   cheap the interval could go back to hourly (`scheduler.ts` RULES); what
