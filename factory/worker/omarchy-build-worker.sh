@@ -39,7 +39,7 @@ log() { printf '[%s] %s\n' "$(date -u +%H:%M:%S)" "$*" >&2; }
 # so the Factory page can show it; the key itself never leaves this machine.
 agent_label() {
   local p k m
-  for p in anthropic:ANTHROPIC_API_KEY:claude-sonnet-5 openai:OPENAI_API_KEY:gpt-5 gemini:GEMINI_API_KEY:gemini-2.5-pro xai:XAI_API_KEY:grok-4; do
+  for p in anthropic:ANTHROPIC_API_KEY:claude-sonnet-5 openai:OPENAI_API_KEY:gpt-5 gemini:GEMINI_API_KEY:gemini-3.6-flash xai:XAI_API_KEY:grok-4; do
     k="${p#*:}"; k="${k%%:*}"; m="${p##*:}"
     [[ -n "${FACTORY_PROVIDER:-}" && "${FACTORY_PROVIDER}" != "${p%%:*}" ]] && continue
     [[ -n "${!k:-}" ]] && { echo "${p%%:*}/${FACTORY_MODEL:-$m}"; return; }

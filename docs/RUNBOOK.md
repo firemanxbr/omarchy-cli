@@ -372,7 +372,7 @@ tasks from the pool ([factory/README.md](../factory/README.md)). Day to day:
   `OPENAI_API_KEY`, `GEMINI_API_KEY` or `XAI_API_KEY` (`pkg-repo work` adds
   the `audit` kind by itself then; `FACTORY_PROVIDER` picks among several
   keys, `FACTORY_MODEL` the model — defaults `claude-sonnet-5`, `gpt-5`,
-  `gemini-2.5-pro`, `grok-4`). The Factory page's *Agent* column shows what
+  `gemini-3.6-flash`, `grok-4`). The Factory page's *Agent* column shows what
   each worker reported. The report lands next to the evidence
   (`/api/v1/factory/tasks/<id>/artifacts/audit.md`) and the Review page
   shows the verdict; *waiting* in that column means no such worker is
