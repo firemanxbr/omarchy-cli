@@ -64,6 +64,9 @@ if [[ ! -f "$f" ]]; then
 GEMINI_API_KEY=
 FACTORY_PROVIDER=gemini
 FACTORY_MODEL=
+# Reasoning models think first and the budget goes there: low keeps a Flash
+# model's answers complete (and cheap). Unset for a model that rejects it.
+FACTORY_REASONING=low
 #ANTHROPIC_API_KEY=
 #OPENAI_API_KEY=
 #XAI_API_KEY=
