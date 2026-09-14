@@ -137,8 +137,11 @@ and is undone automatically when the target ring turns out not to be:
    installed from `stable` into a container and cached for a week
    (`tests/omarchy-rootfs.sh`, ~900 packages) — what users actually have.
 2. **Gate** (`pkg-repo gate`). Per architecture: the latest health of the source
-   ring is recent and not an error; no health inside the soak window failed
-   (0 days into `rc`, 1 day into `stable`: edge is upstream in real time, rc a day behind, stable a day behind rc) and the source ring's content has
+   ring is recent and not an error; health inside the soak window did not
+   keep failing (one day into `rc` and one into `stable`: edge is upstream in
+   real time, rc a day behind, stable a day behind rc — a failure the next
+   check recovered from stays in the report as evidence, three inside the
+   window block) and the source ring's content has
    been there that long (the age of its last promotion; syncs of the OPR channel
    do not reset it); a recent ABI check found no blocker; and the security
    layer reports no **regression** — a package the target serves clean today

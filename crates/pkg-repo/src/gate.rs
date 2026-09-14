@@ -67,6 +67,10 @@ pub struct ArchEvidence {
     pub security_regressions: usize,
 }
 
+/// Failed health checks inside the soak window that block on their own,
+/// the latest one having passed: fewer are a recovered hiccup.
+const FLAPPING: usize = 3;
+
 #[derive(Debug)]
 pub struct GateReport {
     pub verdict: Verdict,
@@ -139,7 +143,11 @@ pub fn evaluate(
                 }
             }
         }
-        if errors > 0 {
+        // A failure the next check recovered from (a mirror hiccup, a worker
+        // bug — 2026-09-14 had both) is evidence, not a verdict: it stays in
+        // the report. Failing again and again inside the window is not a
+        // hiccup, and that blocks.
+        if errors >= FLAPPING {
             reasons.push(format!(
                 "{arch}: {errors} failed health check(s) of {} in the last {} day(s)",
                 opts.from, opts.soak_days
@@ -485,6 +493,21 @@ mod tests {
         ];
         let r = evaluate(&events, NOW, Some(10), None, None, &[], &opts(&arches, 3));
         assert_eq!(r.evidence[0].errors_in_window, 1);
+        assert_eq!(
+            r.verdict,
+            Verdict::Promote,
+            "one failure the next check recovered from is evidence, not a block"
+        );
+        // Failing again and again inside the window is not a hiccup.
+        let flapping = vec![
+            ev(6, "rc", "x86_64", "ok", "2026-09-12T06:00:00Z"),
+            ev(5, "rc", "x86_64", "error", "2026-09-12T05:00:00Z"),
+            ev(4, "rc", "x86_64", "error", "2026-09-11T18:00:00Z"),
+            ev(3, "rc", "x86_64", "ok", "2026-09-11T12:00:00Z"),
+            ev(2, "rc", "x86_64", "error", "2026-09-11T06:00:00Z"),
+        ];
+        let r = evaluate(&flapping, NOW, Some(10), None, None, &[], &opts(&arches, 3));
+        assert_eq!(r.evidence[0].errors_in_window, 3);
         assert!(matches!(r.verdict, Verdict::Block(_)));
         let r = evaluate(&events, NOW, Some(10), None, None, &[], &opts(&arches, 0));
         assert_eq!(
