@@ -275,7 +275,7 @@ pub fn releases(api: &Api, rings: &[String], json: bool) -> Result<()> {
                 "{:<6} {:<5} {:<9} {:<8} {:<7} {:<26} {}",
                 r.id,
                 r.seq,
-                r.package_count,
+                r.package_count.map_or("?".to_owned(), |n| n.to_string()),
                 r.source_id.map_or("-".to_owned(), |s| s.to_string()),
                 if r.is_head == 1 { "*" } else { "" },
                 r.created_at,

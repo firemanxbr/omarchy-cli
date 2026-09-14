@@ -566,7 +566,7 @@ mod tests {
                 source_id: source,
                 note: None,
                 created_at: String::new(),
-                package_count: 0,
+                package_count: Some(0),
                 is_head: head,
             }
         };

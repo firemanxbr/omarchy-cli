@@ -75,7 +75,11 @@ pub struct HistoryEntry {
     pub source_id: Option<u64>,
     pub note: Option<String>,
     pub created_at: String,
-    pub package_count: u64,
+    /// Null for a release whose creation failed before its rows were written
+    /// (the CPU-limit failures of 2026-09-13 left 22 such rows in edge): a
+    /// history must still decode, the gate must still run.
+    #[serde(default)]
+    pub package_count: Option<u64>,
     pub is_head: u8,
 }
 
