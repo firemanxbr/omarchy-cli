@@ -4,6 +4,7 @@
  * ring depends on it.
  */
 import { page } from "./layout";
+import { CHARTS } from "./charts";
 import type { RunningVersion } from "../meta";
 
 const BODY = String.raw`
@@ -20,6 +21,10 @@ const BODY = String.raw`
   <p class="sub" id="updated"></p>
 
   <div class="tiles" id="tiles"></div>
+  <div class="charts" style="margin-bottom:32px">
+    <div class="chart"><h3>Open advisories per ring <span id="sc-arch"></span></h3><div class="sub">by severity — edge catches fixes first, stable last</div><div id="sc-chart"><div class="empty loading">Loading</div></div></div>
+    <div class="chart"><h3>The feeds <span id="sc-feeds-when"></span></h3><div class="sub">what each one contributes to this ring's report</div><div class="feeds" id="sc-feeds"></div></div>
+  </div>
 
   <section>
     <h2>Packages with open advisories</h2>
@@ -29,6 +34,7 @@ const BODY = String.raw`
 `;
 
 const SCRIPT = String.raw`
+__CHARTS__
   var RINGS = ["stable", "rc", "edge"], ARCHES = ["x86_64", "aarch64"], CONF = ["all", "exact + name-version", "exact"];
   var q = new URLSearchParams(location.search);
   var ring = RINGS.indexOf(q.get("ring")) >= 0 ? q.get("ring") : "stable";
@@ -46,6 +52,21 @@ const SCRIPT = String.raw`
     pick("pick-conf", CONF, conf, function (v) { conf = v; sync(); load(); });
   }
   function sync() { history.replaceState(null, "", "?ring=" + ring + "&arch=" + arch + "&conf=" + encodeURIComponent(conf)); }
+  // The feeds: what each tracker contributed to this ring's report — matches, exploited, and the last refresh.
+  var FEEDS = [["arch", "Arch Security Tracker", "exact matches on Arch's own versions"], ["debian", "Debian Security Tracker", "the same upstream, Debian's fixed version compared to ours"], ["osv", "OSV", "Go modules and crates inside static binaries"], ["kev", "CISA KEV", "exploited in the wild — always fast-tracked"], ["epss", "EPSS", "likelihood of exploitation, orders the list"]];
+  function renderFeeds(d) {
+    var v = d.vulnerable || [], count = {}, kev = 0, epss = 0;
+    v.forEach(function (x) { (x.advisories || []).forEach(function (a) { count[a.tracker] = (count[a.tracker] || 0) + 1; if (a.kev) kev++; if (a.epss != null) epss++; }); });
+    $("#sc-feeds-when").textContent = d.updated_at ? "refreshed " + ago(d.updated_at) : "no run yet";
+    $("#sc-feeds").innerHTML = FEEDS.map(function (f) { var n = f[0] === "kev" ? kev : f[0] === "epss" ? epss : (count[f[0]] || 0); return '<div class="feed"><b>' + f[1] + '</b><span>' + f[2] + '</span><span class="dim"><b class="num">' + num(n) + '</b> ' + (f[0] === "kev" ? "exploited" : f[0] === "epss" ? "scored" : "matched") + ' in ' + ring + '</span></div>'; }).join("");
+  }
+  // Open advisories per ring, by severity: one report per ring, the one on screen reused.
+  function renderPerRing() {
+    $("#sc-arch").textContent = arch;
+    Promise.all(RINGS.map(function (r) { return fetch("/api/v1/security?ring=" + r + "&arch=" + arch).then(function (x) { return x.json(); }).then(function (x) { return x.totals || {}; }).catch(function () { return {}; }); })).then(function (tot) {
+      $("#sc-chart").innerHTML = stacked(["edge", "rc", "stable"], [{ name: "exploited", color: C.red, values: [2, 1, 0].map(function (i) { return tot[i].kev || 0; }) }, { name: "critical + high", color: C.amber, values: [2, 1, 0].map(function (i) { return (tot[i].critical || 0) + (tot[i].high || 0); }) }, { name: "medium", color: C.blue, values: [2, 1, 0].map(function (i) { return tot[i].medium || 0; }) }, { name: "low / unknown", color: C.dim, values: [2, 1, 0].map(function (i) { return (tot[i].low || 0) + (tot[i].unknown || 0); }) }], { label: "Open advisories per ring by severity", full: true, empty: "no open advisory in any ring" });
+    });
+  }
   function load() {
     draw();
     $("#updated").textContent = "Loading " + ring + " · " + arch + " — the report covers every package the ring serves, this takes a few seconds…";
@@ -67,6 +88,7 @@ const SCRIPT = String.raw`
       ];
       tiles.forEach(function (t, i) { var el = $("#tiles"), cell = el.children[i]; if (!cell) { cell = document.createElement("div"); cell.className = "tile"; el.appendChild(cell); } setTile(cell, '<div class="k">' + t[0] + '</div><div class="v num">' + t[1] + '</div><div class="s">' + t[2] + '</div>'); });
       $("#updated").textContent = (d.updated_at ? "Advisories refreshed " + ago(d.updated_at) + " · " : "No security run recorded yet · ") + num(d.advisories_total) + " advisories in the index";
+      renderFeeds(d); renderPerRing();
       pager("#vuln", rows, function (r) {
         var v = r.v;
         return '<tr><td>' + sev(r.worst) + (r.kev ? ' <span class="pill error" title="in CISA KEV">exploited</span>' : '') + (r.epss >= 0.1 ? ' <span class="pill warn" title="EPSS ' + (r.epss * 100).toFixed(0) + '%">epss ' + (r.epss * 100).toFixed(0) + '%</span>' : '') + '</td>' +
@@ -89,7 +111,7 @@ export function securityHtml(poolUrl: string, version: RunningVersion): string {
     description: "Open advisories on what each ring serves, with confidence levels, exploitation data and what they expose through dependencies.",
     active: "none",
     body: BODY,
-    script: SCRIPT,
+    script: SCRIPT.replace("__CHARTS__", CHARTS),
     poolUrl,
     version,
   });

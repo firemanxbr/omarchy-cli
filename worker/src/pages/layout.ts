@@ -256,7 +256,7 @@ const CSS = String.raw`
   .d-queue { fill: var(--bg-deep); stroke: var(--line); } .d-chip { fill: var(--panel-2); stroke: var(--line); }
 
   .rings .ring { border-top: 3px solid var(--line); gap: 10px; } .ring.stable { border-top-color: var(--stable); } .ring.rc { border-top-color: var(--rc); } .ring.edge { border-top-color: var(--edge); }
-  .ring .health { display: flex; gap: 8px; flex-wrap: wrap; } .ring .lag { font-size: 12px; color: var(--dim); } .ring .desc b { color: var(--text); }
+  .ring .health { display: flex; gap: 8px; flex-wrap: wrap; } .ring .lag { font-size: 12px; color: var(--dim); } .ring .desc b { color: var(--text); } .ring .head .rel { white-space: nowrap; font-size: 12px; } .ring .cta a { white-space: nowrap; }
   .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 16px; }
   .feature { border: 1px solid var(--line); background: var(--panel); padding: 18px 20px; display: grid; gap: 8px; align-content: start; }
   .feature .ic { width: 28px; height: 28px; color: var(--green); } .feature .ic svg { width: 28px; height: 28px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
@@ -272,7 +272,7 @@ const CSS = String.raw`
   .cli-card, .community-card { border: 1px solid var(--line); background: var(--panel); padding: 18px 20px; display: grid; gap: 10px; align-content: start; }
   .community-card { border-color: var(--green); }
   .cli-card h3, .community-card h3 { display: flex; justify-content: space-between; align-items: baseline; } .cli-card p, .community-card p { margin: 0; font-size: 13px; color: var(--muted); }
-  .cli-card pre, .share pre, .doc-sec pre { position: relative; white-space: pre-wrap; word-break: break-all; } .cli-card pre, .share pre { padding-right: 76px; }
+  .cli-card pre, .share pre, .doc-sec pre { position: relative; white-space: pre-wrap; word-break: normal; overflow-wrap: anywhere; } .cli-card pre, .share pre { padding-right: 76px; }
   .community-card .big { font-family: Geist, sans-serif; font-size: 40px; font-weight: 600; line-height: 1.05; color: var(--green); }
   .community-card .people { margin-top: 4px; }
   .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 12px; }

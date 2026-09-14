@@ -4,6 +4,7 @@
  * on it, drawn as a graph — with the file list on demand.
  */
 import { page } from "./layout";
+import { CHARTS } from "./charts";
 import type { RunningVersion } from "../meta";
 
 const SEARCH_BODY = String.raw`
@@ -18,10 +19,19 @@ const SEARCH_BODY = String.raw`
     <div class="choice" id="pick-arch"></div>
   </form>
   <p class="sub" id="hint">Type at least two characters.</p>
-  <div class="table-wrap"><table id="results"><thead><tr><th>Package</th><th>Version</th><th>Source</th><th>By</th><th>Description</th><th class="num">Size</th></tr></thead><tbody></tbody></table></div>
+  <div class="tiles" id="pk-tiles"></div>
+  <div class="two pk-grid">
+    <div class="table-wrap"><table id="results"><thead><tr><th>Package</th><th>Version</th><th>Source</th><th>By</th><th>Description</th><th class="num">Size</th></tr></thead><tbody></tbody></table></div>
+    <div class="panel" id="pk-detail"><h3>Pick a package</h3><p class="sub" style="margin:0">Click a row for its versions per ring, what it depends on, what depends on it, who made it and whether an advisory is open — or open the full page.</p></div>
+  </div>
+  <section style="margin-top:32px"><div class="charts">
+    <div class="chart"><h3>Packages per source <span id="pk-src-ring">stable</span></h3><div class="sub">what each upstream contributes to the ring, per architecture</div><div id="pk-sources"></div></div>
+    <div class="chart"><h3>What the last stable changed <span id="pk-diff-when"></span></h3><div class="sub">against its parent — the diff every release carries</div><div id="pk-diff"></div></div>
+  </div></section>
 `;
 
 const SEARCH_SCRIPT = String.raw`
+__CHARTS__
   var RINGS = ["stable", "rc", "edge"], ARCHES = ["x86_64", "aarch64"];
   var q = new URLSearchParams(location.search);
   var ring = RINGS.indexOf(q.get("ring")) >= 0 ? q.get("ring") : "stable";
@@ -54,20 +64,66 @@ const SEARCH_SCRIPT = String.raw`
       var rows = d.packages || [];
       $("#hint").textContent = rows.length ? rows.length + (rows.length === 100 ? "+" : "") + " package(s) in " + ring + " · " + arch : "Nothing in " + ring + " · " + arch + " matches “" + term + "”.";
       pager("#results", rows, function (p) {
-        return '<tr><td><a class="pkname" href="/package/' + encodeURIComponent(p.name) + '?ring=' + ring + '&arch=' + arch + '" title="open the package page">' + esc(p.name) + ' <span class="go">→</span></a></td><td class="mono">' + esc(p.version) + '</td><td><span class="src">' + esc(p.source) + '</span></td><td>' + byCell(p) + '</td><td class="muted">' + esc(p.description || "") + '</td><td class="num">' + bytes(p.size_download) + '</td></tr>';
+        return '<tr data-name="' + esc(p.name) + '" style="cursor:pointer"><td><a class="pkname" href="/package/' + encodeURIComponent(p.name) + '?ring=' + ring + '&arch=' + arch + '" title="open the package page">' + esc(p.name) + ' <span class="go">→</span></a></td><td class="mono">' + esc(p.version) + '</td><td><span class="src">' + esc(p.source) + '</span></td><td>' + byCell(p) + '</td><td class="muted">' + esc(p.description || "") + '</td><td class="num">' + bytes(p.size_download) + '</td></tr>';
       }, { empty: "nothing matches", n: 25, text: function (p) { return p.name + " " + (p.description || "") + " " + p.source; } });
     }).catch(function (e) { $("#hint").textContent = "search failed: " + e; endSkeleton(); });
   }
   $("#q").value = q.get("q") || "";
   $("#q").addEventListener("input", function () { clearTimeout(timer); timer = setTimeout(function () { sync(); run(); }, 250); });
   sync(); run();
-  liveStats(function () {}, 120000);
+  // A row opens the panel: the package's page data, summarised.
+  document.addEventListener("click", function (ev) {
+    var tr = ev.target.closest ? ev.target.closest("#results tbody tr") : null; if (!tr || !tr.getAttribute("data-name") || (ev.target.closest && ev.target.closest("a"))) return;
+    document.querySelectorAll("#results tr.sel").forEach(function (x) { x.classList.remove("sel"); }); tr.classList.add("sel");
+    detail(tr.getAttribute("data-name"));
+  });
+  function detail(name) {
+    var el = $("#pk-detail"); el.innerHTML = '<h3>' + esc(name) + '</h3><div class="empty loading">Loading</div>';
+    busy(fetch("/api/v1/package/" + encodeURIComponent(name) + "?ring=" + ring + "&arch=" + arch)).then(function (r) { return r.json(); }).then(function (d) {
+      if (d.error) { el.innerHTML = '<h3>' + esc(name) + '</h3><p class="sub" style="margin:0">' + esc(d.error) + '</p>'; return; }
+      var p = d.package, m = d.manifest || {}, pi = m.pkginfo || {}, mt = d.maintenance || {}, f = mt.factory, own = (d.security && d.security.advisories || []).filter(function (a) { return a.status === "vulnerable"; }), exp = (d.security && d.security.exposed) || [];
+      var who = f ? '<div class="whorow">' + (f.owner ? avatar(f.owner, "contributor") + '<span>brought by <a class="run" href="/user/' + encodeURIComponent(f.owner) + '">' + esc(f.owner) + '</a></span>' : '') + (f.approved_by ? avatar(f.approved_by, "maintainer") + '<span>approved by <a class="run" href="/user/' + encodeURIComponent(f.approved_by) + '">' + esc(f.approved_by) + '</a></span>' : '<span class="dim">waiting for a maintainer</span>') + '</div>' : '<div class="whorow dim">packaged upstream' + (mt.packager ? ' by ' + esc(mt.packager.replace(/<.*>/, "").trim()) : '') + ' · mirrored, signature kept</div>';
+      var rows = ["edge", "rc", "stable"].map(function (r) { var x = (d.rings || []).filter(function (y) { return y.ring === r; })[0]; return '<dt>' + r + '</dt><dd>' + (x ? esc(x.version) : '<span class="dim">not served</span>') + '</dd>'; }).join("");
+      el.innerHTML = '<h3>' + esc(name) + ' <span class="dim" style="font-size:12px;font-weight:400">' + esc(p.source) + '</span></h3>' + who + '<p class="sub" style="margin:0 0 12px">' + esc(pi.desc || m.description || "") + '</p>' +
+        '<dl class="kv">' + rows + '<dt>size</dt><dd>' + bytes(p.size_download) + ' · ' + bytes(p.size_installed) + ' installed</dd><dt>depends on</dt><dd>' + num((d.depends || []).length) + ' declared · loads ' + num((d.links || []).length) + ' libraries</dd><dt>required by</dt><dd>' + num((d.required_by || []).length) + ' in ' + esc(d.shown_ring) + (d.required_by && d.required_by.length > 100 ? ' <span class="pill warn">exposes many</span>' : '') + '</dd><dt>security</dt><dd>' + (own.length ? '<span class="pill warn">' + num(own.length) + ' open</span> ' + esc(own[0].cves.join(", ")) : '<span class="pill ok">no open advisory</span>') + (exp.length ? ' · exposed through ' + num(exp.length) : '') + '</dd></dl>' +
+        '<pre style="margin-top:12px"><span class="c"># from the ring you configured</span>\nsudo pacman -S ' + esc(name) + '</pre><div class="cta-row" style="margin-top:14px"><a class="btn" href="/package/' + encodeURIComponent(name) + '?ring=' + esc(d.shown_ring) + '&arch=' + arch + '">Open ' + esc(name) + ' →</a><span class="hint">who made it · provenance · graph · files</span></div>';
+    }).catch(function (e) { el.innerHTML = '<h3>' + esc(name) + '</h3><p class="sub" style="margin:0">could not load: ' + esc(String(e)) + '</p>'; });
+  }
+  // The tiles and the two charts: what the rings serve, per source, and what the last stable changed.
+  skeletonTiles("#pk-tiles", 5);
+  liveStats(function (d) {
+    var stable = d.rings.filter(function (r) { return r.ring === "stable"; })[0] || { sources: [] }, srcs = stable.sources || [];
+    var by = function (pred) { return srcs.filter(pred).reduce(function (n, x) { return n + x.packages; }, 0); };
+    var arches = function (pred) { return num(by(function (x) { return pred(x) && x.arch === "x86_64"; })) + " x86_64 · " + num(by(function (x) { return pred(x) && x.arch === "aarch64"; })); };
+    setTiles("#pk-tiles", [
+      ["Packages in stable", num(stable.package_count || 0), arches(function () { return true; }) + " aarch64"],
+      ["From Arch", num(by(function (x) { return x.source === "core" || x.source === "extra" || x.source === "multilib"; })), "core · extra · multilib"],
+      ["From Arch Linux ARM", num(by(function (x) { return x.source === "alarm"; })), "alarm — aarch64 only"],
+      ["From Omarchy", num(by(function (x) { return x.source === "packages"; })), "OPR"],
+      ["Built here", num(by(function (x) { return x.source === "factory"; })), "the factory, from contributors' recipes", "ok"]
+    ]);
+    var ring0 = ["stable", "rc", "edge"].indexOf(ring) >= 0 ? ring : "stable", r0 = d.rings.filter(function (r) { return r.ring === ring0; })[0] || { sources: [] };
+    $("#pk-src-ring").textContent = ring0 + " · " + arch;
+    var rows = (r0.sources || []).filter(function (x) { return x.arch === arch; }).sort(function (a, b) { return b.packages - a.packages; }), tot = rows.reduce(function (n, x) { return n + x.packages; }, 0) || 1;
+    $("#pk-sources").innerHTML = hrows(rows.map(function (x) { return [x.source, "", Math.round(1000 * x.packages / tot) / 10, x.source === "factory" ? "var(--lilac)" : x.source === "packages" ? "var(--blue)" : "var(--green)", num(x.packages)]; }), 120);
+    var head = (d.releases || []).filter(function (r) { return r.ring === "stable" && r.is_head; })[0];
+    if (head && head.parent_id) {
+      $("#pk-diff-when").textContent = "#" + head.seq + " · " + ago(head.created_at);
+      fetch("/api/v1/releases/stable/diff?from=" + head.parent_id + "&to=" + head.id).then(function (r) { return r.json(); }).then(function (df) {
+        var name = function (x) { return '<a class="run" href="/package/' + encodeURIComponent(x.name) + '?ring=stable">' + esc(x.name) + '</a>'; };
+        var up = df.upgraded || [], ad = df.added || [], rm = df.removed || [];
+        $("#pk-diff").innerHTML = '<div class="flow" style="margin-top:6px"><div class="st"><span class="k">upgraded</span><b>' + num(up.length) + '</b><span class="s">' + up.slice(0, 3).map(name).join(", ") + (up.length > 3 ? "…" : "") + '</span></div><div class="ar">·</div><div class="st"><span class="k">added</span><b>' + num(ad.length) + '</b><span class="s">' + ad.slice(0, 3).map(name).join(", ") + (ad.length > 3 ? "…" : "") + '</span></div><div class="ar">·</div><div class="st"><span class="k">removed</span><b>' + num(rm.length) + '</b><span class="s">' + (rm.length ? rm.slice(0, 3).map(name).join(", ") : "nothing left the ring") + '</span></div></div><p class="sub" style="margin:12px 0 0;font-size:12.5px"><a href="/diff?ring=stable&from=' + head.parent_id + '&to=' + head.id + '">The whole diff →</a> · <a href="/journal">Ring history →</a></p>';
+      }).catch(function () { $("#pk-diff").innerHTML = '<div class="empty">no diff available</div>'; });
+    } else $("#pk-diff").innerHTML = '<div class="empty">' + (head ? "the first stable release has no parent" : "no stable release yet") + '</div>';
+    endSkeleton();
+  }, 120000);
 `;
 
 const PACKAGE_BODY = String.raw`
   <p class="crumbs"><a href="/packages">Packages</a> / <span id="crumb"></span></p>
-  <h1 id="title">…</h1>
+  <div class="h2row" style="align-items:center"><h1 id="title" style="max-width:none">…</h1><div class="choice" id="pg-ring" style="margin:0"></div><div class="choice" id="pg-arch" style="margin:0"></div></div>
   <p class="lede" id="desc"></p>
+  <div class="tiles" id="pg-tiles"></div>
   <div class="meta" id="meta"></div>
   <p class="sub" id="maint" style="margin-top:6px" hidden></p>
 
@@ -170,6 +226,16 @@ const PACKAGE_SCRIPT = String.raw`
     document.querySelectorAll(".ring-name").forEach(function (e) { e.textContent = ring; });
     var m = d.manifest || {}, p = d.package;
     $("#desc").className = "lede"; $("#desc").textContent = m.description || "";
+    var own0 = ((d.security && d.security.advisories) || []).filter(function (a) { return a.status === "vulnerable"; });
+    setTiles("#pg-tiles", [
+      ["In " + esc(d.shown_ring), esc(p.version), "release #" + esc(String((d.rings.filter(function (r) { return r.ring === d.shown_ring; })[0] || {}).release_seq || "—")) + " · " + esc(arch)],
+      ["Size", bytes(p.size_download), bytes(p.size_installed) + " installed"],
+      ["Depends on", num((d.depends || []).length), "declared · loads " + num((d.links || []).length) + " libraries"],
+      ["Required by", num((d.required_by || []).length), (d.required_by || []).length > 100 ? "an advisory here exposes many" : "in " + esc(d.shown_ring)],
+      ["Security", own0.length ? num(own0.length) + " open" : "clean", own0.length ? esc(own0.map(function (a) { return a.severity; }).join(", ")) : "no open advisory on this version", own0.length ? "warn" : "ok"]
+    ]);
+    $("#pg-ring").innerHTML = ["stable", "rc", "edge"].map(function (r) { return '<a class="' + (r === d.shown_ring ? "on" : "") + '" href="/package/' + encodeURIComponent(d.name) + '?ring=' + r + '&arch=' + arch + '" style="display:inline-block;background:' + (r === d.shown_ring ? "var(--green)" : "var(--panel-2)") + ';color:' + (r === d.shown_ring ? "var(--green-ink)" : "var(--muted)") + ';border:1px solid ' + (r === d.shown_ring ? "var(--green)" : "var(--line)") + ';padding:5px 12px;font-size:13px;text-decoration:none">' + r + '</a>'; }).join("");
+    $("#pg-arch").innerHTML = ["x86_64", "aarch64"].map(function (a) { return '<a href="/package/' + encodeURIComponent(d.name) + '?ring=' + d.shown_ring + '&arch=' + a + '" style="display:inline-block;background:' + (a === arch ? "var(--green)" : "var(--panel-2)") + ';color:' + (a === arch ? "var(--green-ink)" : "var(--muted)") + ';border:1px solid ' + (a === arch ? "var(--green)" : "var(--line)") + ';padding:5px 12px;font-size:13px;text-decoration:none">' + a + '</a>'; }).join("");
     $("#meta").innerHTML = [
       m.url ? '<a href="' + esc(m.url) + '">' + esc(m.url.replace(/^https?:\/\//, "")) + '</a>' : "",
       (m.licenses || []).length ? "license " + esc((m.licenses || []).join(", ")) : "",
@@ -300,12 +366,12 @@ const PACKAGE_SCRIPT = String.raw`
 
   // The index can be busy during a bulk import; a transient 5xx gets retried.
   function loadPackage(attempt) {
-    if (attempt === 1) { skeletonRows("#rings", 6, 3); skeletonText("#desc"); ["#graph", "#sec-own", "#sec-exposed"].forEach(function (id) { var el = $(id); if (el && !el.innerHTML.trim()) el.innerHTML = '<div class="empty loading skel">Resolving dependencies and advisories</div>'; }); }
+    if (attempt === 1) { skeletonRows("#rings", 6, 3); skeletonTiles("#pg-tiles", 5); skeletonText("#desc"); ["#graph", "#sec-own", "#sec-exposed"].forEach(function (id) { var el = $(id); if (el && !el.innerHTML.trim()) el.innerHTML = '<div class="empty loading skel">Resolving dependencies and advisories</div>'; }); }
     busy(fetch("/api/v1/package/" + encodeURIComponent(name) + "?ring=" + ring + "&arch=" + arch)).then(function (r) {
       if (r.status >= 500) throw new Error("index busy (HTTP " + r.status + ")");
       return r.json();
     }).then(function (d) {
-      if (d.error) { endSkeleton(); $("#desc").textContent = d.error; $("#graph").innerHTML = ""; $("#who-section").hidden = true; return; }
+      if (d.error) { endSkeleton(); $("#desc").textContent = d.error; $("#graph").innerHTML = ""; $("#who-section").hidden = true; $("#pg-tiles").innerHTML = ""; return; }
       render(d); endSkeleton();
     }).catch(function (e) {
       if (attempt < 4) { $("#desc").textContent = "The index is busy (" + e.message + "); retrying…"; setTimeout(function () { loadPackage(attempt + 1); }, 4000 * attempt); }
@@ -322,7 +388,7 @@ export function packagesHtml(poolUrl: string, version: RunningVersion): string {
     description: "Search the packages a ring serves; versions per ring, dependencies, what loads them, files.",
     active: "none",
     body: SEARCH_BODY,
-    script: SEARCH_SCRIPT,
+    script: SEARCH_SCRIPT.replace("__CHARTS__", CHARTS),
     poolUrl,
     version,
   });
