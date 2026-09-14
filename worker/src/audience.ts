@@ -70,7 +70,8 @@ export async function measureAudience(env: Env, day: string, fetcher: typeof fet
     by_arch: { x86_64: n(z.x86_64), aarch64: n(z.aarch64) },
     requests: t?.count ?? 0,
     bytes: t?.sum?.edgeResponseBytes ?? 0,
-    sampled: (t?.avg?.sampleInterval ?? 1) > 1,
+    // Adaptive sampling reports the interval it used; a day within a few percent of 1 was counted whole.
+    sampled: (t?.avg?.sampleInterval ?? 1) > 1.1,
   };
 }
 
