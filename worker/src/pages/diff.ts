@@ -55,7 +55,7 @@ export function diffHtml(poolUrl: string, version: RunningVersion): string {
   return page({
     title: "Release diff · omarchy-pool",
     description: "What changed between two releases of a ring: added, removed, upgraded packages.",
-    active: "overview",
+    active: "none",
     body: BODY,
     script: SCRIPT,
     poolUrl,

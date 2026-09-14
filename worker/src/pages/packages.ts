@@ -7,15 +7,18 @@ import { page } from "./layout";
 import type { RunningVersion } from "../meta";
 
 const SEARCH_BODY = String.raw`
-  <h1>Packages</h1>
-  <p class="lede">Search what a ring serves by name or description. Every result links to the package's page: versions per ring, dependencies, what loads it, files.</p>
+  <div class="hero compact">
+    <p class="eyebrow">Packages</p>
+    <h1>Every package the pool serves, in every ring</h1>
+    <p class="lede">Search by name or by words from the description. Open a package for its versions per ring, who made it, the dependency graph, the files and the seal.</p>
+  </div>
   <form id="search" class="searchbar" onsubmit="return false">
     <input id="q" type="search" placeholder="package name or words from its description" autofocus autocomplete="off">
     <div class="choice" id="pick-ring"></div>
     <div class="choice" id="pick-arch"></div>
   </form>
   <p class="sub" id="hint">Type at least two characters.</p>
-  <div class="table-wrap"><table id="results"><thead><tr><th>Package</th><th>Version</th><th>Source</th><th>Description</th><th class="num">Size</th></tr></thead><tbody></tbody></table></div>
+  <div class="table-wrap"><table id="results"><thead><tr><th>Package</th><th>Version</th><th>Source</th><th>By</th><th>Description</th><th class="num">Size</th></tr></thead><tbody></tbody></table></div>
 `;
 
 const SEARCH_SCRIPT = String.raw`
@@ -23,7 +26,14 @@ const SEARCH_SCRIPT = String.raw`
   var q = new URLSearchParams(location.search);
   var ring = RINGS.indexOf(q.get("ring")) >= 0 ? q.get("ring") : "stable";
   var arch = ARCHES.indexOf(q.get("arch")) >= 0 ? q.get("arch") : "x86_64";
-  var timer = null, seq = 0;
+  var timer = null, seq = 0, OWNERS = {}, APPROVERS = {};
+  // Who made the factory's packages: the contributor who registered it, the maintainer who approved it.
+  fetch("/api/v1/factory/packages").then(function (r) { return r.json(); }).then(function (d) { (d.packages || []).forEach(function (p) { OWNERS[p.name] = p.owner; }); }).catch(function () {});
+  fetch("/api/v1/factory/approvals").then(function (r) { return r.json(); }).then(function (d) { (d.approvals || []).forEach(function (a) { if (a.decision === "approved" && !APPROVERS[a.name]) APPROVERS[a.name] = a.by; }); }).catch(function () {});
+  function byCell(p) {
+    if (p.source === "factory") { var o = OWNERS[p.name], a = APPROVERS[p.name]; return '<span class="by">' + (o ? avatar(o, "contributor") : "") + (a ? avatar(a, "maintainer") : "") + '</span>' + (!o && !a ? '<span class="dim">the pool</span>' : ""); }
+    return '<span class="dim" style="font-size:12px">' + (p.source === "alarm" ? "Arch Linux ARM" : p.source === "packages" ? "Omarchy" : p.source === "chaotic" ? "Chaotic-AUR" : "Arch Linux") + '</span>';
+  }
   function pick(id, values, current, onpick) {
     $("#" + id).innerHTML = values.map(function (v) { return '<button type="button" class="' + (v === current ? "on" : "") + '" data-v="' + v + '">' + v + '</button>'; }).join("");
     $("#" + id).querySelectorAll("button").forEach(function (b) { b.onclick = function () { onpick(b.getAttribute("data-v")); }; });
@@ -44,7 +54,7 @@ const SEARCH_SCRIPT = String.raw`
       var rows = d.packages || [];
       $("#hint").textContent = rows.length ? rows.length + (rows.length === 100 ? "+" : "") + " package(s) in " + ring + " · " + arch : "Nothing in " + ring + " · " + arch + " matches “" + term + "”.";
       pager("#results", rows, function (p) {
-        return '<tr><td><a href="/package/' + encodeURIComponent(p.name) + '?ring=' + ring + '&arch=' + arch + '"><b>' + esc(p.name) + '</b></a></td><td class="mono">' + esc(p.version) + '</td><td><span class="src">' + esc(p.source) + '</span></td><td class="muted">' + esc(p.description || "") + '</td><td class="num">' + bytes(p.size_download) + '</td></tr>';
+        return '<tr><td><a class="pkname" href="/package/' + encodeURIComponent(p.name) + '?ring=' + ring + '&arch=' + arch + '" title="open the package page">' + esc(p.name) + ' <span class="go">→</span></a></td><td class="mono">' + esc(p.version) + '</td><td><span class="src">' + esc(p.source) + '</span></td><td>' + byCell(p) + '</td><td class="muted">' + esc(p.description || "") + '</td><td class="num">' + bytes(p.size_download) + '</td></tr>';
       }, { empty: "nothing matches", n: 25, text: function (p) { return p.name + " " + (p.description || "") + " " + p.source; } });
     }).catch(function (e) { $("#hint").textContent = "search failed: " + e; endSkeleton(); });
   }
@@ -59,7 +69,12 @@ const PACKAGE_BODY = String.raw`
   <h1 id="title">…</h1>
   <p class="lede" id="desc"></p>
   <div class="meta" id="meta"></div>
-  <p class="sub" id="maint" style="margin-top:6px"></p>
+  <p class="sub" id="maint" style="margin-top:6px" hidden></p>
+
+  <section id="who-section">
+    <div class="h2row"><h2>Who made it</h2><span class="hint">the work on the record</span></div>
+    <div class="who" id="who"><div class="muted">…</div></div>
+  </section>
 
   <section id="seal-section">
     <h2>Provenance <span id="seal-pill"></span></h2>
@@ -179,6 +194,7 @@ const PACKAGE_SCRIPT = String.raw`
     } else if (mt.packager) {
       $("#maint").innerHTML = 'Packaged upstream by ' + esc(mt.packager.replace(/<.*>/, "").trim()) + ' (' + esc(p.source) + '); the pool serves the file as built and signed there.';
     }
+    renderWho(d, p);
     renderSeal(d.seal, p);
     // An OPR package: where its recipe comes from — Omarchy's own, or synced from the AUR.
     var pv = d.provenance;
@@ -202,6 +218,27 @@ const PACKAGE_SCRIPT = String.raw`
     $("#provides").innerHTML = prov.length ? '<ul class="plain cols">' + prov.map(function (x) { return '<li class="mono">' + esc(x) + '</li>'; }).join("") + '</ul>' : '<div class="empty">only itself</div>';
   }
 
+  // Who made it — the people, always: the contributor who brought the recipe, the
+  // maintainer who rebuilt and approved it, the agents that drafted and audited;
+  // for an upstream package, who packaged it there and that the pool mirrors it as is.
+  function renderWho(d, p) {
+    var mt = d.maintenance || {}, f = mt.factory, c = (d.seal && d.seal.chain) || {}, cards = [];
+    var card = function (av, k, b, s, href) { return (href ? '<a class="whoc" href="' + href + '">' : '<div class="whoc">') + av + '<div><div class="k">' + k + '</div><b>' + b + '</b><span>' + s + '</span></div>' + (href ? '</a>' : '</div>'); };
+    if (f) {
+      var sb = c.source_build || {};
+      cards.push(f.owner ? card(avatar(f.owner, "contributor", "lg"), "contributor", esc(f.owner), "brought the recipe" + (sb.worker ? " · built it on " + esc(sb.worker) : ""), "/user/" + encodeURIComponent(f.owner)) : card('<span class="avatar lg">?</span>', "contributor", "unknown", "registered before the record kept owners"));
+      cards.push(f.approved_by ? card(avatar(f.approved_by, "maintainer", "lg"), "maintainer", esc(f.approved_by), "rebuilt it from the recipe on a trusted worker, approved it " + ago(f.approved_at), "/user/" + encodeURIComponent(f.approved_by)) : '<div class="whoc wait"><span class="avatar lg" style="border-color:var(--amber);color:var(--amber)">?</span><div><div class="k">maintainer</div><b>waiting for review</b><span>a maintainer of ' + esc(f.group || "the group") + ' decides' + (f.maintainers && f.maintainers.length ? ": " + f.maintainers.map(esc).join(", ") : "") + '</span></div></div>');
+      var au = c.audit;
+      cards.push(card('<span class="avatar lg" style="border-color:var(--lilac);color:var(--lilac)">ai</span>', "agents", (sb.agent ? "drafted" : "no draft") + " · " + (au && au.verdict ? "audit " + esc(au.verdict) : au && au.status ? "audit " + esc(au.status) : "no audit"), (sb.agent ? "PKGBUILD drafted on the contributor\'s worker with " + esc(sb.agent) + "; " : "") + (au && au.agent ? "audit written on the review worker with " + esc(au.agent) + " — " : "") + "evidence, never a decision"));
+    } else {
+      var origin = p.source === "alarm" ? "Arch Linux ARM" : p.source === "packages" ? "Omarchy" : p.source === "chaotic" ? "Chaotic-AUR" : "Arch Linux";
+      var who = mt.packager ? esc(mt.packager.replace(/<.*>/, "").trim()) : origin;
+      cards.push(card('<span class="avatar lg">' + esc(origin.slice(0, 2)) + '</span>', "packaged by", who, "at " + origin + " — the packager field of .PKGINFO; upstream\'s own signature kept"));
+      cards.push(card('<span class="avatar lg" style="border-color:var(--green)">▣</span>', "mirrored by", "the pool", "verified against " + origin + "\'s key, stored once, promoted on evidence — never rebuilt"));
+      cards.push(card('<span class="avatar lg" style="border-color:var(--lilac);color:var(--lilac)">ai</span>', "agents", "none", "upstream packages are mirrored as they are; agents only touch the factory"));
+    }
+    $("#who").innerHTML = cards.join("");
+  }
   // The seal: one pill, then the facts — each a link to the evidence it names.
   function renderSeal(seal, p) {
     if (!seal) { $("#seal-pill").innerHTML = ""; $("#seal").innerHTML = '<li class="muted">no seal for this object</li>'; return; }
@@ -268,7 +305,7 @@ const PACKAGE_SCRIPT = String.raw`
       if (r.status >= 500) throw new Error("index busy (HTTP " + r.status + ")");
       return r.json();
     }).then(function (d) {
-      if (d.error) { endSkeleton(); $("#desc").textContent = d.error; $("#graph").innerHTML = ""; return; }
+      if (d.error) { endSkeleton(); $("#desc").textContent = d.error; $("#graph").innerHTML = ""; $("#who-section").hidden = true; return; }
       render(d); endSkeleton();
     }).catch(function (e) {
       if (attempt < 4) { $("#desc").textContent = "The index is busy (" + e.message + "); retrying…"; setTimeout(function () { loadPackage(attempt + 1); }, 4000 * attempt); }
@@ -283,7 +320,7 @@ export function packagesHtml(poolUrl: string, version: RunningVersion): string {
   return page({
     title: "Packages · omarchy-pool",
     description: "Search the packages a ring serves; versions per ring, dependencies, what loads them, files.",
-    active: "packages",
+    active: "none",
     body: SEARCH_BODY,
     script: SEARCH_SCRIPT,
     poolUrl,
@@ -295,7 +332,7 @@ export function packageHtml(name: string, poolUrl: string, version: RunningVersi
   return page({
     title: `${name} · omarchy-pool`,
     description: `${name}: versions per ring, dependencies, what loads it, files.`,
-    active: "packages",
+    active: "none",
     body: PACKAGE_BODY,
     script: PACKAGE_SCRIPT,
     poolUrl,

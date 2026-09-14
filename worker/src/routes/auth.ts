@@ -29,8 +29,8 @@ export function cookieOf(request: Request, name: string): string | null {
 }
 
 function safeNext(url: URL): string {
-  const next = url.searchParams.get("next") ?? "/contribute";
-  return next.startsWith("/") && !next.startsWith("//") ? next : "/contribute";
+  const next = url.searchParams.get("next") ?? "/factory";
+  return next.startsWith("/") && !next.startsWith("//") ? next : "/factory";
 }
 
 export async function handleAuthStart(url: URL, env: Env): Promise<Response> {
@@ -52,7 +52,7 @@ export async function handleAuthCallback(url: URL, request: Request, env: Env): 
   const state = url.searchParams.get("state");
   const saved = cookieOf(request, "omc_state");
   if (!code || !state || !saved || !saved.startsWith(`${state}:`)) return json({ error: "sign-in state mismatch; start again" }, 400);
-  const next = decodeURIComponent(saved.slice(state.length + 1)) || "/contribute";
+  const next = decodeURIComponent(saved.slice(state.length + 1)) || "/factory";
   if (!env.GITHUB_OAUTH_CLIENT_ID || !env.GITHUB_OAUTH_CLIENT_SECRET) return json({ error: "sign-in with GitHub is not configured" }, 501);
   const tok = await fetch("https://github.com/login/oauth/access_token", {
     method: "POST",

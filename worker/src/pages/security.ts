@@ -7,8 +7,11 @@ import { page } from "./layout";
 import type { RunningVersion } from "../meta";
 
 const BODY = String.raw`
-  <h1>Security</h1>
-  <p class="lede">Public advisories matched against what each ring serves — the <a href="https://security.archlinux.org">Arch Security Tracker</a> for exact matches on Arch's own versions, the <a href="https://security-tracker.debian.org">Debian Security Tracker</a> for the same upstream projects where Arch has no advisory yet, <a href="https://osv.dev">OSV</a> for the Go modules and crates.io crates a statically linked binary embeds (no soname reveals those; the package page lists them), <a href="https://www.cisa.gov/known-exploited-vulnerabilities-catalog">CISA KEV</a> for what is exploited in the wild and <a href="https://www.first.org/epss/">EPSS</a> for how likely exploitation is. A package with an open advisory also <em>exposes</em> what depends on it — declared, or by loading one of its libraries. Fixes do not wait for the soak: when <code>edge</code> serves a clean newer version of a package with a confident advisory (medium or worse, or exploited in the wild), the fast-track pulls it into <code>rc</code> and <code>stable</code> with the usual health check and rollback; <code>omarchy-cli security</code> shows what applies to a machine.</p>
+  <div class="hero compact">
+    <p class="eyebrow">Security</p>
+    <h1>What a ring serves that has an open advisory — and how sure we are</h1>
+    <p class="lede">Five feeds — the Arch and Debian security trackers, OSV, CISA KEV, EPSS — matched every three hours against what each ring serves. A package with an open advisory also <em>exposes</em> what depends on it; a confident fix already in <code>edge</code> is fast-tracked. <a href="/docs#security">The feeds and the confidences, explained →</a></p>
+  </div>
   <form class="searchbar" onsubmit="return false">
     <div class="choice" id="pick-ring"></div>
     <div class="choice" id="pick-arch"></div>
@@ -84,7 +87,7 @@ export function securityHtml(poolUrl: string, version: RunningVersion): string {
   return page({
     title: "Security · omarchy-pool",
     description: "Open advisories on what each ring serves, with confidence levels, exploitation data and what they expose through dependencies.",
-    active: "security",
+    active: "none",
     body: BODY,
     script: SCRIPT,
     poolUrl,

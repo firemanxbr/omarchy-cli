@@ -80,7 +80,7 @@ Migrations live in `worker/migrations/`.
 | `GET /api/v1/pool/unreferenced` · `POST /api/v1/pool/gc` | retention: what the last N releases do not reference |
 | `GET /api/v1/factory` · `POST /factory/{requests,enqueue,claim,jobs}` · `/factory/tasks/:id/{heartbeat,complete,fail,cancel,approve,reject}` · `/factory/tasks/:id/artifacts/<file>` · `/factory/{register,packages,workers,workers/self,groups,review,approvals,trust,me}` · `GET /api/v1/users/:login` · `GET /api/v1/cost` | the factory's brain: package requests, build tasks with leases, the workers pulling them, contributors and their packages, maintainers' approvals, jobs queued by hand, the daily cost estimate ([factory/README.md](../factory/README.md), [GOVERNANCE.md](GOVERNANCE.md)) |
 | `POST /api/v1/events` · `GET /api/v1/events` · `GET /api/v1/stats` | activity log and the dashboard's data |
-| `GET /` | the dashboard |
+| `GET /` | the dashboard — three doors, one per audience: `/` the Pool (Omarchy users: rings, the three steps of pacman, coverage; no account), `/factory` the Factory (contributors: how a package gets in, registering, workers, builds), `/pipeline` the Pipeline (everyone: the journal as it happens, review throughput, and the operations maintainers act on). `/docs` is one interactive hub over the chapters; `/packages`, `/package/:name`, `/security`, `/status`, `/journal`, `/review`, `/user/:login` are the detail pages, one link away. Every page is a string with a `<script>` that reads the API; the diagrams are inline SVG drawn in `worker/src/pages/diagrams.ts`, the charts in `charts.ts` |
 
 pacman never talks to the worker. The worker never resolves dependencies; it
 serves data. Decisions are made by the publisher (`pkg-repo`) and the client.

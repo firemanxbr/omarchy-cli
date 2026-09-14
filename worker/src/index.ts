@@ -36,7 +36,8 @@
  *   GET  /api/v1/status                            service check now: index (D1) and pool (R2)
  *   GET  /api/v1/pool/unreferenced?keep=3          retention: what GC would delete
  *   POST /api/v1/pool/gc?keep=3&limit=200          delete it (objects, then rows)
- *   GET  /                                         the dashboard
+ *   GET  /                                         the dashboard: the Pool (users), /factory (contributors), /pipeline (everyone, live),
+ *                                                  /docs, and the detail pages /packages /package/:name /security /status /journal /review /user/:login
  *   GET  /pool/<arch>/<file>                       fallback static origin (dev)
  */
 
@@ -79,12 +80,13 @@ import { overviewHtml } from "./pages/overview";
 import { getStartedHtml } from "./pages/get-started";
 import { howItWorksHtml } from "./pages/how-it-works";
 import { statusHtml } from "./pages/status";
+import { journalHtml } from "./pages/journal";
 import { apiDocsHtml } from "./pages/api-docs";
 import { diffHtml } from "./pages/diff";
 import { packageHtml, packagesHtml } from "./pages/packages";
 import { securityHtml } from "./pages/security";
-import { factoryHtml } from "./pages/factory";
-import { contributeHtml } from "./pages/contribute";
+import { pipelineHtml } from "./pages/pipeline";
+import { factoryHtml as factoryPageHtml } from "./pages/contribute";
 import { DASHBOARD_HOST, LEGACY_DASHBOARD_HOST, version } from "./meta";
 import { handleStatic } from "./routes/static";
 import { runScheduler } from "./scheduler";
@@ -171,12 +173,14 @@ export default {
         return Response.redirect(url.toString(), 301);
       }
       if (path === "/status") return html(statusHtml(env.POOL_URL, version(env)));
+      if (path === "/journal") return html(journalHtml(env.POOL_URL, version(env)));
       if (path === "/diff") return html(diffHtml(env.POOL_URL, version(env)));
       if (path === "/api" || path === "/api/") return html(apiDocsHtml(env.POOL_URL, version(env)));
       if (path === "/packages") return html(packagesHtml(env.POOL_URL, version(env)));
       if (path === "/security") return html(securityHtml(env.POOL_URL, version(env)));
-      if (path === "/factory") return html(factoryHtml(env.POOL_URL, version(env)));
-      if (path === "/contribute") return html(contributeHtml(env.POOL_URL, version(env)));
+      if (path === "/factory") return html(factoryPageHtml(env.POOL_URL, version(env)));
+      if (path === "/pipeline") return html(pipelineHtml(env.POOL_URL, version(env)));
+      if (path === "/contribute") return html(factoryPageHtml(env.POOL_URL, version(env)));
       if (path === "/review") return html(reviewHtml(env.POOL_URL, version(env)));
       const user = path.match(/^\/user\/([A-Za-z0-9-]{1,39})$/);
       if (user) return html(userHtml(user[1], env.POOL_URL, version(env)));
