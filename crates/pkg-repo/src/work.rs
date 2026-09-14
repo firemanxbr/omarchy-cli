@@ -149,9 +149,22 @@ pub fn run(opts: &WorkOptions) -> Result<()> {
     if let Err(e) = keyrings(opts) {
         eprintln!("warning: keyrings not fetched yet ({e:#}); the first sync will retry");
     }
+    // SIGTERM (what `docker stop` and a rolling upgrade send) drains: the
+    // task in hand runs to its end and is reported, no new one is claimed,
+    // then the process exits 0. Killing a worker mid-task only hands the
+    // task to another worker thirty minutes later, when its lease expires.
+    let draining = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    for sig in [signal_hook::consts::SIGTERM, signal_hook::consts::SIGINT] {
+        signal_hook::flag::register(sig, draining.clone()).context("signal handler")?;
+    }
+    let is_draining = || draining.load(std::sync::atomic::Ordering::Relaxed);
     let mut idle = 0u64;
     let mut done = 0u32;
     loop {
+        if is_draining() {
+            eprintln!("draining: {done} task(s) done, none claimed since the stop signal; exiting");
+            return Ok(());
+        }
         let body = serde_json::json!({
             "arch": opts.arch, "hostname": hostname, "version": version, "labels": opts.labels, "kinds": opts.kinds, "shared": opts.shared,
             "agent": agent.clone().unwrap_or_default(),
@@ -164,12 +177,12 @@ pub fn run(opts: &WorkOptions) -> Result<()> {
                     eprintln!("no work for {idle}s; exiting");
                     return Ok(());
                 }
-                std::thread::sleep(POLL);
+                sleep_unless(POLL, &is_draining);
                 continue;
             }
             Err(e) => {
                 eprintln!("claim failed: {e}; retrying in 60 s");
-                std::thread::sleep(Duration::from_secs(60));
+                sleep_unless(Duration::from_secs(60), &is_draining);
                 continue;
             }
         };
@@ -189,45 +202,49 @@ pub fn run(opts: &WorkOptions) -> Result<()> {
         let _ = beat.join();
         let took = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
         let job = Api::new(&opts.api, &token.lock().unwrap().clone())?;
-        match outcome {
-            Ok(o) => {
-                let sha = o
-                    .result
-                    .get("sha256")
-                    .cloned()
-                    .unwrap_or_else(|| serde_json::Value::String("-".into()));
-                let filename = o
-                    .result
-                    .get("filename")
-                    .cloned()
-                    .unwrap_or_else(|| serde_json::Value::String("-".into()));
-                let version = o
-                    .result
-                    .get("version")
-                    .cloned()
-                    .unwrap_or(serde_json::Value::Null);
-                job.post_json_as(
-                    &token.lock().unwrap().clone(),
-                    &format!("/factory/tasks/{}/complete", task.id),
-                    &serde_json::json!({ "summary": o.summary, "result": o.result, "duration_ms": took, "sha256": sha, "filename": filename, "version": version }),
-                )?;
-                eprintln!("task {}: done — {} ({} s)", task.id, o.summary, took / 1000);
-            }
-            Err(e) => {
-                let msg = format!("{e:#}");
-                let _ = job.post_json_as(
-                    &token.lock().unwrap().clone(),
-                    &format!("/factory/tasks/{}/fail", task.id),
-                    &serde_json::json!({ "error": msg, "duration_ms": took, "log_tail": msg }),
-                );
-                eprintln!("task {}: failed — {e:#}", task.id);
-            }
-        }
+        report(&job, &token.lock().unwrap().clone(), &task, outcome, took)?;
         done += 1;
         if opts.once {
             eprintln!("{done} task(s) done; exiting");
             return Ok(());
         }
+    }
+}
+
+/// Tells the pool how the task ended: complete with the outcome, or fail
+/// with the error (the pool requeues or gives up by the attempt count).
+fn report(job: &Api, token: &str, task: &Task, outcome: Result<Outcome>, took: u64) -> Result<()> {
+    match outcome {
+        Ok(o) => {
+            let field =
+                |k: &str, default: serde_json::Value| o.result.get(k).cloned().unwrap_or(default);
+            let dash = || serde_json::Value::String("-".into());
+            job.post_json_as(
+                token,
+                &format!("/factory/tasks/{}/complete", task.id),
+                &serde_json::json!({ "summary": o.summary, "result": o.result, "duration_ms": took,
+                    "sha256": field("sha256", dash()), "filename": field("filename", dash()), "version": field("version", serde_json::Value::Null) }),
+            )?;
+            eprintln!("task {}: done — {} ({} s)", task.id, o.summary, took / 1000);
+        }
+        Err(e) => {
+            let msg = format!("{e:#}");
+            let _ = job.post_json_as(
+                token,
+                &format!("/factory/tasks/{}/fail", task.id),
+                &serde_json::json!({ "error": msg, "duration_ms": took, "log_tail": msg }),
+            );
+            eprintln!("task {}: failed — {e:#}", task.id);
+        }
+    }
+    Ok(())
+}
+
+/// Sleeps `d`, a second at a time, unless `stop` says so first.
+fn sleep_unless(d: Duration, stop: &dyn Fn() -> bool) {
+    let end = Instant::now() + d;
+    while Instant::now() < end && !stop() {
+        std::thread::sleep(Duration::from_secs(1));
     }
 }
 

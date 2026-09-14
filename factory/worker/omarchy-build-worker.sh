@@ -233,17 +233,23 @@ container_worker() {
   : "${WORKER_ID:?WORKER_ID (from POST /factory/workers) is required}"
   ARCH="$(uname -m)"; [[ "$ARCH" == arm64 ]] && ARCH=aarch64
   log "container worker $WORKER_ID ($ARCH) preparing"
+  # SIGTERM (docker stop, a rolling upgrade) drains: a build in progress runs
+  # to its end and is reported — bash runs the trap once the foreground
+  # command returns — and nothing new is claimed. Exit 0 either way.
+  DRAIN=0; trap 'DRAIN=1' TERM INT
   prepare_container
   add_pool_repos "$ARCH" "$OMARCHY_POOL"
   local idle=0 out code body task id name group ref version
   while :; do
+    if [[ "$DRAIN" == 1 ]]; then log "draining: nothing claimed since the stop signal; exiting"; exit 0; fi
     out="$(api POST /factory/claim "$(jq -n --arg a "$ARCH" --arg h "$(hostname -s 2>/dev/null || echo ?)" --arg v "container" --arg g "$(agent_label)" --argjson l "${WORKER_LABELS:-"{}"}" --argjson s "$( [[ "${WORKER_SHARED:-0}" == 1 ]] && echo true || echo false)" '{arch:$a,hostname:$h,version:$v,labels:$l,shared:$s,agent:$g}')")" \
       || { log "claim failed: ${out##*$'\n'}"; sleep 60; continue; }
     code="${out##*$'\n'}"; body="${out%$'\n'*}"
     if [[ "$code" == "204" ]]; then
       idle=$((idle + 30))
       if [[ "${IDLE_EXIT:-0}" -gt 0 && "$idle" -ge "${IDLE_EXIT:-0}" ]]; then log "no work for ${idle}s; exiting"; exit 0; fi
-      sleep 30; continue
+      for _ in $(seq 1 30); do [[ "$DRAIN" == 1 ]] && break; sleep 1; done
+      continue
     fi
     break
   done

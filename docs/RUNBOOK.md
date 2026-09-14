@@ -196,11 +196,13 @@ containers of the worker image, two of each role, one per architecture
 | `community-x86_64`, `community-aarch64` | community, shared, an agent key | contributors' registered packages, drafts for package requests |
 
 The host is aarch64: pool and review workers run natively (an x86_64 pool
-job is a label; an x86_64 rebuild is a sibling container the runtime
-emulates), the x86_64 community worker is itself an emulated container.
-Emulated builds are correct and several times slower; a native x86_64
-machine registers as another worker when one is wanted — the pool does
-not care where a worker runs. Everything lives under `/srv/omarchy-pool`
+job is a label). x86_64 *builds* would run under user-mode emulation,
+and on this host's 16K-page kernel (Asahi) qemu cannot map every x86_64
+library — `rustc` and `sudo` fail with *failed to map segment* — so the
+two x86_64 build services sit behind the compose `emulated` profile, off
+by default: x86_64 build tasks wait for an x86_64 worker, and any x86_64
+machine with docker becomes one in minutes (factory/host/README.md,
+*x86_64 builds*) — the pool does not care where a worker runs. Everything lives under `/srv/omarchy-pool`
 (a btrfs subvolume on the internal disk; the 4 TB drive joins when it has a
 USB enclosure — the Asahi kernel has no Thunderbolt tunnelling, so the NVMe
 slot of a Thunderbolt dock is invisible to it): `work/<service>` (the same
@@ -215,8 +217,16 @@ repository). Day to day, on the host:
 cd /srv/omarchy-pool
 docker compose ps                                # six up?
 docker compose logs -f --tail 50 pool-aarch64    # one of them
-docker compose pull && docker compose up -d      # after a pool release
+./rollout.sh                                     # a rolling upgrade to the latest image (a user timer runs it every 15 min)
 ```
+
+Upgrades are **rolling**: a pool release publishes a new image, the timer
+notices within fifteen minutes, and `rollout.sh` replaces the six one at a
+time — a stop is a drain (SIGTERM: the worker finishes the task it holds,
+reports it, claims nothing new and exits; the compose file allows three
+hours), then the new container starts while the other five keep working.
+No task is killed and none is handed to another worker by an expired
+lease, which is what `docker compose up -d` on a busy worker did.
 
 The Factory page shows them by role; the laptop runs nothing any more,
 and GitHub Actions runs CI and the release only — there is no hosted
