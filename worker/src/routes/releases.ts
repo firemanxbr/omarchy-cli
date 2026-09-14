@@ -92,40 +92,43 @@ export async function handleCreateRelease(request: Request, env: Env): Promise<R
     }
   } else if (parent) baseSql = ringMembers(ring);
 
-  const created = await env.DB.prepare(
-    "INSERT INTO releases (ring, seq, parent_id, source_id, note) VALUES (?, ?, ?, ?, ?) RETURNING id",
-  )
-    .bind(ring, seq, parent?.id ?? null, source?.id ?? null, body.note ?? null)
-    .first<{ id: number }>();
-  const id = created!.id;
-
+  // The release row is the first statement of the same batch as its delta:
+  // D1 runs a batch as one transaction, so a failure leaves no half-made
+  // release behind (the row without deltas of a failed attempt would). The
+  // row is addressed by (ring, seq) — unique — until its id is read back.
+  const rel = `(SELECT id FROM releases WHERE ring = ?1 AND seq = ?2)`;
   // The target selection: the base minus the names being removed (within
   // remove_arch) minus any (name, repo_arch) an added package replaces,
   // plus the adds. The delta is the target against what the ring serves
   // now, both ways — the only rows a release writes (migration 0017) —
-  // and the ring's live rows move by exactly that delta.
+  // and the ring's live rows move by exactly that delta. The JSON
+  // parameters are materialised once (a CTE), never re-parsed per row:
+  // evaluated inline over a 32k-row ring they took D1 past its CPU limit.
   const own = ringMembers(ring);
-  const target = `SELECT b.package_id FROM ${baseSql} b JOIN packages p ON p.id = b.package_id
-     WHERE NOT (p.name IN (SELECT value FROM json_each(?1)) AND (?2 IS NULL OR p.repo_arch = ?2))
-       AND NOT EXISTS (SELECT 1 FROM packages q WHERE q.id IN (SELECT value FROM json_each(?3)) AND q.name = p.name AND q.repo_arch = p.repo_arch)
-     UNION SELECT value FROM json_each(?3)`;
-  const args = [JSON.stringify(body.remove ?? []), removeArch, JSON.stringify(added)];
+  const withSets = `WITH rm(name) AS MATERIALIZED (SELECT value FROM json_each(?3)),
+       adds(id) AS MATERIALIZED (SELECT value FROM json_each(?5)),
+       addnames(name, repo_arch) AS MATERIALIZED (SELECT q.name, q.repo_arch FROM packages q WHERE q.id IN (SELECT id FROM adds)),
+       target(package_id) AS MATERIALIZED (
+         SELECT b.package_id FROM ${baseSql} b JOIN packages p ON p.id = b.package_id
+          WHERE NOT (p.name IN (SELECT name FROM rm) AND (?4 IS NULL OR p.repo_arch = ?4))
+            AND NOT EXISTS (SELECT 1 FROM addnames a WHERE a.name = p.name AND a.repo_arch = p.repo_arch)
+         UNION SELECT id FROM adds)`;
+  const args = [ring, seq, JSON.stringify(body.remove ?? []), removeArch, JSON.stringify(added)];
   const stmts: D1PreparedStatement[] = [
-    env.DB.prepare(`INSERT INTO release_deltas (release_id, package_id, op) SELECT ?4, package_id, 'add' FROM (SELECT package_id FROM (${target}) EXCEPT SELECT package_id FROM ${own})`).bind(...args, id),
-    env.DB.prepare(`INSERT INTO release_deltas (release_id, package_id, op) SELECT ?4, package_id, 'remove' FROM (SELECT package_id FROM ${own} EXCEPT SELECT package_id FROM (${target}))`).bind(...args, id),
-    env.DB.prepare("DELETE FROM ring_packages WHERE ring = ?1 AND package_id IN (SELECT package_id FROM release_deltas WHERE release_id = ?2 AND op = 'remove')").bind(ring, id),
-    env.DB.prepare("INSERT OR IGNORE INTO ring_packages (ring, package_id) SELECT ?1, package_id FROM release_deltas WHERE release_id = ?2 AND op = 'add'").bind(ring, id),
-    env.DB.prepare(
-      "INSERT INTO ring_heads (ring, release_id) VALUES (?, ?) ON CONFLICT(ring) DO UPDATE SET release_id = excluded.release_id",
-    ).bind(ring, id),
+    env.DB.prepare("INSERT INTO releases (ring, seq, parent_id, source_id, note) VALUES (?1, ?2, ?3, ?4, ?5)").bind(ring, seq, parent?.id ?? null, source?.id ?? null, body.note ?? null),
+    env.DB.prepare(`${withSets} INSERT INTO release_deltas (release_id, package_id, op) SELECT ${rel}, package_id, 'add' FROM (SELECT package_id FROM target EXCEPT SELECT package_id FROM ${own})`).bind(...args),
+    env.DB.prepare(`${withSets} INSERT INTO release_deltas (release_id, package_id, op) SELECT ${rel}, package_id, 'remove' FROM (SELECT package_id FROM ${own} EXCEPT SELECT package_id FROM target)`).bind(...args),
+    env.DB.prepare(`DELETE FROM ring_packages WHERE ring = ?1 AND package_id IN (SELECT package_id FROM release_deltas WHERE release_id = ${rel} AND op = 'remove')`).bind(ring, seq),
+    env.DB.prepare(`INSERT OR IGNORE INTO ring_packages (ring, package_id) SELECT ?1, package_id FROM release_deltas WHERE release_id = ${rel} AND op = 'add'`).bind(ring, seq),
+    env.DB.prepare(`INSERT INTO ring_heads (ring, release_id) VALUES (?1, ${rel}) ON CONFLICT(ring) DO UPDATE SET release_id = excluded.release_id`).bind(ring, seq),
   ];
   // A checkpoint — the full membership written out — for the first release
   // of a ring and then every CHECKPOINT_EVERY: what bounds a reconstruction.
   const lastCheckpoint = await env.DB.prepare("SELECT COALESCE(MAX(seq), 0) AS seq FROM releases WHERE ring = ? AND checkpoint = 1").bind(ring).first<{ seq: number }>();
   const checkpoint = !parent || seq - (lastCheckpoint?.seq ?? 0) >= CHECKPOINT_EVERY;
   if (checkpoint) {
-    stmts.push(env.DB.prepare("INSERT OR IGNORE INTO release_packages (release_id, package_id) SELECT ?, package_id FROM ring_packages WHERE ring = ?").bind(id, ring));
-    stmts.push(env.DB.prepare("UPDATE releases SET checkpoint = 1 WHERE id = ?").bind(id));
+    stmts.push(env.DB.prepare(`INSERT OR IGNORE INTO release_packages (release_id, package_id) SELECT ${rel}, package_id FROM ring_packages WHERE ring = ?1`).bind(ring, seq));
+    stmts.push(env.DB.prepare(`UPDATE releases SET checkpoint = 1 WHERE id = ${rel}`).bind(ring, seq));
   }
   // The objects this release pins are "released" from now on (the overview
   // counts them without touching the membership again).
@@ -144,11 +147,13 @@ export async function handleCreateRelease(request: Request, env: Env): Promise<R
   if (unchanged.length) {
     stmts.push(
       env.DB.prepare(
-        "INSERT OR IGNORE INTO release_artifacts (release_id, repo, arch, kind, r2_key, size) SELECT ?, repo, arch, kind, r2_key, size FROM release_artifacts WHERE release_id = ? AND arch IN (SELECT value FROM json_each(?))",
-      ).bind(id, parent!.id, JSON.stringify(unchanged)),
+        `INSERT OR IGNORE INTO release_artifacts (release_id, repo, arch, kind, r2_key, size) SELECT ${rel}, repo, arch, kind, r2_key, size FROM release_artifacts WHERE release_id = ?3 AND arch IN (SELECT value FROM json_each(?4))`,
+      ).bind(ring, seq, parent!.id, JSON.stringify(unchanged)),
     );
   }
   await env.DB.batch(stmts);
+  const created = await env.DB.prepare("SELECT id FROM releases WHERE ring = ? AND seq = ?").bind(ring, seq).first<{ id: number }>();
+  const id = created!.id;
   // Immutable from here: what it holds is computed once and kept on the row.
   const summary = await releaseSummary(env, id);
   await releaseSources(env, id);
