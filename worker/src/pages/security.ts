@@ -22,7 +22,7 @@ const BODY = String.raw`
 
   <div class="tiles" id="tiles"></div>
   <div class="charts" style="margin-bottom:32px">
-    <div class="chart"><h3>Open advisories per ring <span id="sc-arch"></span></h3><div class="sub">by severity — edge catches fixes first, stable last</div><div id="sc-chart"><div class="empty loading">Loading</div></div></div>
+    <div class="chart"><h3>Open advisories per ring <span id="sc-arch"></span></h3><div class="sub">by severity — edge catches fixes first, stable last</div><div id="sc-chart"><div class="empty">reading the three rings' reports — a few seconds…</div></div></div>
     <div class="chart"><h3>The feeds <span id="sc-feeds-when"></span></h3><div class="sub">what each one contributes to this ring's report</div><div class="feeds" id="sc-feeds"></div></div>
   </div>
 

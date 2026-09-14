@@ -188,7 +188,8 @@ __CHARTS__
   // ---- the state row: the service (measured now) and the pipeline (from the journal)
   function renderState(d) {
     fetch("/api/v1/status", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (st) { live("api", "API up · index " + (st.index.ok ? st.index.ms + " ms" : "down") + " · pool " + (st.pool.ok ? st.pool.ms + " ms" : "down")); }).catch(function () { live("api", "API not answering"); });
-    var why = problemsOf(d), heads = ["stable", "rc", "edge"].map(function (n) { var r = d.rings.filter(function (x) { return x.ring === n; })[0]; var h = latest(d.latest, "health", n, "x86_64"); return r && r.release ? '<span class="pill ' + (h ? h.status : "none") + '">' + n + ' #' + r.release.seq + (h ? ' · ' + (h.status === "ok" ? "healthy" : h.status) : "") + '</span>' : ""; }).join("");
+    // A ring's pill is the worse of its two architectures' latest health checks.
+    var why = problemsOf(d), heads = ["stable", "rc", "edge"].map(function (n) { var r = d.rings.filter(function (x) { return x.ring === n; })[0]; var hs = ["x86_64", "aarch64"].map(function (a) { return latest(d.latest, "health", n, a); }).filter(Boolean); var worst = hs.reduce(function (w, h) { return { error: 3, warn: 2, ok: 1 }[h.status] > ({ error: 3, warn: 2, ok: 1 }[w] || 0) ? h.status : w; }, null); var bad = hs.filter(function (h) { return h.status !== "ok"; }); return r && r.release ? '<span class="pill ' + (worst || "none") + '">' + n + ' #' + r.release.seq + (worst ? ' · ' + (worst === "ok" ? "healthy" : bad.map(function (h) { return (h.source || "x86_64") + " " + h.status; }).join(", ")) : "") + '</span>' : ""; }).join("");
     $("#state").innerHTML = '<span class="pill ' + (why.length ? "warn" : "ok") + '">' + (why.length ? "pipeline behind: " + esc(why.join(" · ")) : "pipeline keeping up") + '</span>' + heads + '<span class="pill none">running ' + esc(d.version && d.version.version || "") + '</span>';
   }
 
