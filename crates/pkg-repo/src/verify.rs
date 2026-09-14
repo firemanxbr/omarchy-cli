@@ -12,7 +12,7 @@
 //! the bytes when the index never saw them). What no channel serves any
 //! more is reported for a replacement.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use crate::client::{Api, ReleaseRequest};
@@ -86,7 +86,11 @@ pub fn run(api: &Api, opts: &VerifyOptions) -> Result<VerifyReport, RepoError> {
     // (arch, filename, indexed sha) already verified in this run: the rings
     // mostly share objects.
     let mut seen: BTreeSet<(String, String, String)> = BTreeSet::new();
-    let mut ok_shas: BTreeSet<String> = BTreeSet::new();
+    // What the pool stores under `<arch>/<filename>`, per directory: an
+    // `any` package is one object per architecture directory, with
+    // different bytes (Arch Linux ARM rebuilds them), so the filename
+    // alone does not name an object.
+    let mut stored_by_object: BTreeMap<(String, String), String> = BTreeMap::new();
     for ring in &opts.rings {
         for arch in &opts.arches {
             let Some(view) = api.release_summary_arch(ring, arch)? else {
@@ -96,11 +100,16 @@ pub fn run(api: &Api, opts: &VerifyOptions) -> Result<VerifyReport, RepoError> {
             for p in view.packages.iter().filter(|p| p.source == "packages") {
                 let key = (arch.clone(), p.filename.clone(), p.sha256.clone());
                 if seen.contains(&key) {
-                    if !ok_shas.contains(&p.sha256) && opts.repair {
-                        // Verified for another ring already and found wrong: same re-pin here.
-                        if let Some(stored) = stored_for(&work, &p.filename) {
-                            if stored != p.sha256 {
-                                repin.push(stored);
+                    // Verified for another ring already. Whatever the
+                    // signature's story was (repaired once, for the object),
+                    // this ring pins the same bytes — wrong the same way when
+                    // the pool stores something else under the name.
+                    if opts.repair {
+                        if let Some(stored) =
+                            stored_by_object.get(&(arch.clone(), p.filename.clone()))
+                        {
+                            if *stored != p.sha256 {
+                                repin.push(stored.clone());
                             }
                         }
                     }
@@ -119,7 +128,7 @@ pub fn run(api: &Api, opts: &VerifyOptions) -> Result<VerifyReport, RepoError> {
                             continue;
                         }
                     };
-                remember_stored(&work, &p.filename, &stored)?;
+                stored_by_object.insert((arch.clone(), p.filename.clone()), stored.clone());
                 let has_sig = api
                     .download(&format!("{}/{arch}/{}.sig", opts.pool, p.filename), &sig)
                     .is_ok();
@@ -136,15 +145,32 @@ pub fn run(api: &Api, opts: &VerifyOptions) -> Result<VerifyReport, RepoError> {
                         &p.sha256[..12]
                     ));
                     if opts.repair {
+                        // The ring can only pin bytes the index knows for
+                        // this architecture; index them from the object when
+                        // it never did. What the index refuses (one row per
+                        // sha256: the same bytes already indexed for the
+                        // other architecture) stays as it is and is reported.
+                        let mut indexed = true;
                         if api.known(std::slice::from_ref(&stored), arch)?.is_empty() {
                             let manifest = pkg_extract::extract_manifest(&pkg)?;
-                            api.index_manifest(&manifest, "packages", arch)?;
-                            report.details.push(format!(
-                                "{ring}/{arch} {}: indexed the stored bytes",
-                                p.filename
-                            ));
+                            match api.index_manifest(&manifest, "packages", arch) {
+                                Ok(()) => report.details.push(format!(
+                                    "{ring}/{arch} {}: indexed the stored bytes",
+                                    p.filename
+                                )),
+                                Err(e) => {
+                                    indexed = false;
+                                    report.unfixable += 1;
+                                    report.details.push(format!(
+                                        "{ring}/{arch} {}: the stored bytes cannot be indexed for {arch} ({e}); the pin stays",
+                                        p.filename
+                                    ));
+                                }
+                            }
                         }
-                        repin.push(stored.clone());
+                        if indexed {
+                            repin.push(stored.clone());
+                        }
                     }
                 }
                 if !sig_ok {
@@ -181,8 +207,6 @@ pub fn run(api: &Api, opts: &VerifyOptions) -> Result<VerifyReport, RepoError> {
                             report.details.push(format!("{ring}/{arch} {}: no channel serves these bytes any more — the object needs replacing", p.filename));
                         }
                     }
-                } else if stored == p.sha256 {
-                    ok_shas.insert(p.sha256.clone());
                 }
             }
             if opts.repair && !repin.is_empty() {
@@ -209,18 +233,6 @@ pub fn run(api: &Api, opts: &VerifyOptions) -> Result<VerifyReport, RepoError> {
     }
     let _ = std::fs::remove_dir_all(&work);
     Ok(report)
-}
-
-fn stored_for(work: &Path, filename: &str) -> Option<String> {
-    std::fs::read_to_string(work.join(format!("stored-{}", filename.replace('/', "_")))).ok()
-}
-
-fn remember_stored(work: &Path, filename: &str, sha: &str) -> Result<(), RepoError> {
-    std::fs::write(
-        work.join(format!("stored-{}", filename.replace('/', "_"))),
-        sha,
-    )?;
-    Ok(())
 }
 
 impl VerifyReport {

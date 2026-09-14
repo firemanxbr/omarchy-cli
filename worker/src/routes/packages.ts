@@ -69,10 +69,13 @@ export async function handlePostPackage(url: URL, request: Request, env: Env): P
   if (blob.size !== m.size_download) {
     return json({ error: `pool object is ${blob.size} bytes, manifest says ${m.size_download}` }, 422);
   }
-  const existing = await env.DB.prepare("SELECT id FROM packages WHERE sha256 = ? AND repo_arch = ?")
-    .bind(m.sha256, repoArch)
-    .first<{ id: number }>();
-  if (existing) return json({ id: existing.id, sha256: m.sha256, status: "already-indexed" });
+  const existing = await env.DB.prepare("SELECT id, repo_arch FROM packages WHERE sha256 = ?").bind(m.sha256).first<{ id: number; repo_arch: string }>();
+  if (existing?.repo_arch === repoArch) return json({ id: existing.id, sha256: m.sha256, status: "already-indexed" });
+  // One row per sha256 (0001_init.sql): the same bytes stored under both
+  // architecture directories can be indexed for one of them only.
+  if (existing) {
+    return json({ error: `these bytes are indexed for ${existing.repo_arch}; the index holds one row per sha256`, id: existing.id, repo_arch: existing.repo_arch }, 409);
+  }
 
   const hasSig = (await env.PACKAGES.head(signatureKey(dir, m.filename))) ? 1 : 0;
   const files = m.files ?? [];
