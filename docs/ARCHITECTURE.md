@@ -144,8 +144,10 @@ and is undone automatically when the target ring turns out not to be:
    layer reports no **regression** — a package the target serves clean today
    that the source would replace with a version under an open advisory the
    tracker is sure about (exact match, medium or worse, or exploited in the
-   wild). The fast-track pulls fixes forward; the gate never pushes a known
-   hole. A ring with nothing rendered for an architecture is not evidence
+   wild). Clean means examined: a version indexed before the component
+   scan existed has no embedded components and no OSV advisories, and
+   counts as clean for nothing an OSV advisory is about. The fast-track
+   pulls fixes forward; the gate never pushes a known hole. A ring with nothing rendered for an architecture is not evidence
    against it. If the target already serves the source's head there is
    nothing to promote. The verdict and its reasons are a `gate` event.
 3. **Promote, render, verify.** The index write records the previous head; the

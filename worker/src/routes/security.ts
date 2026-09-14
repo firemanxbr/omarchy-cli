@@ -165,19 +165,35 @@ export async function handleSecurity(url: URL, env: Env): Promise<Response> {
   const vulnerable = [...byPkg.values()];
 
   // Where is a version without open advisories? (per ring, same name/arch)
+  // Clean must mean examined: a package whose vulnerable object carries
+  // embedded components (Go modules, crates — what the OSV advisories are
+  // about) is only clean elsewhere when that object was scanned for them
+  // too; one indexed before the scan existed has no components and no
+  // advisories, and knows nothing (smolvm 1.15.0 "clean" in rc, 2026-09-14).
   const otherHeads = await Promise.all(RINGS.filter((r) => r !== ring).map(async (r) => ({ ring: r as Ring, head: await ringHead(env, r) })));
   const fixedElsewhere = new Map<string, { ring: string; version: string }[]>();
   if (vulnerable.length) {
+    const withComponents = new Set(
+      (
+        await env.DB.prepare("SELECT DISTINCT p.name FROM package_components c JOIN packages p ON p.id = c.package_id WHERE c.package_id IN (SELECT value FROM json_each(?))")
+          .bind(JSON.stringify(vulnerable.map((v) => v.id)))
+          .all<{ name: string }>()
+      ).results.map((r) => r.name),
+    );
     for (const { ring: r, head: h } of otherHeads) {
       if (!h) continue;
       const clean = await env.DB.prepare(
-        `SELECT p.name, p.version FROM ${ringMembers(r)} rp JOIN packages p ON p.id = rp.package_id
+        `SELECT p.name, p.version, EXISTS (SELECT 1 FROM package_components c WHERE c.package_id = p.id) AS scanned
+           FROM ${ringMembers(r)} rp JOIN packages p ON p.id = rp.package_id
           WHERE p.repo_arch = ?1 AND p.name IN (SELECT value FROM json_each(?2))
             AND NOT EXISTS (SELECT 1 FROM package_advisories pa WHERE pa.package_id = p.id AND pa.status = 'vulnerable')`,
       )
         .bind(arch, JSON.stringify(vulnerable.map((v) => v.name)))
-        .all<{ name: string; version: string }>();
-      for (const c of clean.results) fixedElsewhere.set(c.name, [...(fixedElsewhere.get(c.name) ?? []), { ring: r, version: c.version }]);
+        .all<{ name: string; version: string; scanned: number }>();
+      for (const c of clean.results) {
+        if (withComponents.has(c.name) && !c.scanned) continue;
+        fixedElsewhere.set(c.name, [...(fixedElsewhere.get(c.name) ?? []), { ring: r, version: c.version }]);
+      }
     }
   }
 
