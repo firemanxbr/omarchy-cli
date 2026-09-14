@@ -19,7 +19,7 @@ command -v jq >/dev/null || { echo "jq is required (pacman -S jq)"; exit 2; }
 api() { curl -sS --fail-with-body --max-time 30 -X "$1" "$OMARCHY_API/api/v1$2" -H "authorization: Bearer $OMARCHY_CONTRIBUTOR_TOKEN" -H "content-type: application/json" ${3:+-d "$3"}; }
 
 me="$(api GET /factory/me)" || { echo "the pool did not accept the contributor token: $me" >&2; exit 2; }
-login="$(jq -r .login <<<"$me")"; role="$(jq -r .role <<<"$me")"
+login="$(jq -r .contributor.login <<<"$me")"; role="$(jq -r .contributor.role <<<"$me")"
 [[ "$role" == maintainer ]] || { echo "$login is a $role; a maintainer's token is needed to trust the project's workers" >&2; exit 2; }
 
 for svc in pool-x86_64 pool-aarch64 review-x86_64 review-aarch64 community-x86_64 community-aarch64; do
