@@ -1,82 +1,105 @@
 /**
- * Contribute: the contributor's own page. Sign in with a GitHub identity,
- * register a package, run a worker for it, follow the builds. Everything
- * here is the public API (`/api/v1/factory/*`) called with the contributor
- * token, kept in this browser only.
+ * The Factory: the door for contributors. How a package gets in (drawn as the
+ * assembly line it is), the three ways to bring one, what landed lately —
+ * and, signed in, the contributor's own workspace: packages, workers,
+ * builds. Everything here is the public API (`/api/v1/factory/*`) called
+ * with the contributor token, kept in this browser only.
  */
 import { page } from "./layout";
 import type { RunningVersion } from "../meta";
 import { REPO_URL } from "../meta";
+import { GITHUB_ICON } from "./layout";
+import { CHARTS } from "./charts";
+import { factoryDiagram } from "./diagrams";
 
 const BODY = String.raw`
-  <h1>Contribute a package</h1>
-  <p class="lede">You have something to package for Omarchy. Register it here — no permission needed, nothing spent by the project — then run the project's signed worker image on your own machine — the same tools a maintainer uses, with your own agent if you want one — and the build, its PKGBUILD, log and manifest land in your staging workspace as evidence. A maintainer of the group does not use what you built: they rebuild it from your recipe on a worker the project trusts, and approve it knowing it already works. Nobody knows better than you how your software should be compiled and packaged; the maintainer learns it from you. New upstream releases come back to your worker the same way. <a href="/docs/governance">Contributors and maintainers →</a> · <a href="/docs/how-it-works#factory">How the factory works →</a></p>
-
-  <section id="signin">
-    <h2>1. Who you are</h2>
-    <p class="sub">A GitHub account is your identity — nothing else is asked. <a class="button" id="oauth-link" href="/auth/github?next=/contribute"><b>Sign in with GitHub →</b></a></p>
-    <details id="token-alt"><summary class="sub">Without a browser sign-in (scripts, CI): a GitHub token, used once</summary>
+  <div class="hero">
+    <p class="eyebrow">For contributors</p>
+    <h1>Package what you love. The factory builds it, a maintainer checks it.</h1>
+    <p class="lede">Register a project, build it on your own worker or on the ones the community shares, and a maintainer rebuilds it from <em>your</em> recipe before it enters the rings. A GitHub account is the only thing asked.</p>
+    <div class="cta-row" id="signin">
+      <a class="btn" id="oauth-link" href="/auth/github?next=/factory">${GITHUB_ICON} Sign in with GitHub</a>
+      <a class="btn ghost" href="#ways">Request a package</a>
+      <span class="hint">No permission needed. A worker of your own is optional.</span>
+    </div>
+    <details id="token-alt"><summary class="sub" style="cursor:pointer">Without a browser sign-in (scripts, CI): a GitHub token, used once</summary>
       <p class="sub">Paste a <a href="https://github.com/settings/personal-access-tokens/new">fine-grained token</a> with <b>no permissions</b> (or the output of <code>gh auth token</code>): the pool reads your login with it and never stores it; you get a contributor token for the API, kept in this browser.</p>
       <form class="searchbar" id="signin-form" onsubmit="return false">
         <input type="password" id="gh-token" placeholder="github_pat_… or gho_…" autocomplete="off" style="flex:1;min-width:280px">
-        <button type="submit" id="signin-btn">Sign in with a token</button>
+        <button type="submit" id="signin-btn" class="btn ghost">Sign in with a token</button>
       </form>
     </details>
     <p class="sub" id="signin-state"></p>
+  </div>
+
+  <div class="tiles" id="tiles"></div>
+
+  <section>
+    <div class="h2row"><h2>How a package gets in</h2><a class="more-link" href="/docs/governance">Governance: contributors and maintainers →</a></div>
+    <p class="sub">Nobody knows better than you how your software should be built. The maintainer learns it from you — and rebuilds it from scratch.</p>
+    <figure class="diagram">${factoryDiagram()}<figcaption>Your build is evidence, never what users install: the project builds it again from your PKGBUILD, signs it, and your name goes on the record. The agents draft and audit — their keys stay with whoever runs the worker.</figcaption></figure>
+  </section>
+
+  <section id="ways">
+    <h2>Three ways to bring one</h2>
+    <p class="sub">Pick the one that matches how much you want to do.</p>
+    <div class="ways">
+      <div class="way"><div class="tag"><span>Request</span><span>no account</span></div><h3>Just ask for it</h3><p>A project URL is enough. The factory drafts the PKGBUILD, builds it as a dry run on both architectures and opens a pull request for a maintainer.</p><div class="go"><a class="btn ghost" href="${REPO_URL}/issues/new?template=package-request.yml">Request a package</a></div></div>
+      <div class="way"><div class="tag"><span>Recipe</span><span>GitHub sign-in</span></div><h3>Bring your PKGBUILD</h3><p>Register the repository and say where the PKGBUILD lives. Shared workers build it; you follow the builds and the review here.</p><div class="go"><a class="btn ghost" href="/auth/github?next=/factory">Register a package</a></div></div>
+      <div class="way"><div class="tag"><span>Worker</span><span>optional</span></div><h3>Bring a worker</h3><p>You never need one — the shared workers build for everyone. Run the signed image anyway and your builds skip the queue; one flag shares it with the community.</p><div class="go"><a class="btn ghost" href="/docs/workers">Write my run command →</a></div></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="h2row"><h2>Landed lately</h2><a class="more-link" href="/review">Every decision →</a></div>
+    <p class="sub">Contributed by people like you, rebuilt and approved by a maintainer.</p>
+    <div class="landed" id="landed"><div class="muted">loading…</div></div>
+  </section>
+
+  <section>
+    <div class="charts">
+      <div class="chart"><h3>Factory builds <span>14 days</span></h3><div class="sub">per day: contributors' builds staged, the project's published, failed</div><div id="c-builds"></div></div>
+      <div class="chart"><h3>Decisions <span>per week</span></h3><div class="sub">what maintainers approved and what they sent back</div><div id="c-decisions"></div></div>
+    </div>
   </section>
 
   <div id="signed" hidden>
-    <section>
-      <h2>2. Register a package</h2>
-      <p class="sub">A GitHub repository with releases. The pool refuses names that Arch, Arch Linux ARM or the OPR already ship (install those from the pool), detects the build system and reserves the name for you. If your repository carries a <code>PKGBUILD</code>, say where; otherwise one is drafted on your worker.</p>
-      <form id="pkg-form" class="form" onsubmit="return false">
-        <label>Project URL <input type="url" id="pkg-url" placeholder="https://github.com/you/project" required></label>
-        <label>Package name <input type="text" id="pkg-name" placeholder="(repository name)" pattern="[a-z0-9@._+-]+"></label>
-        <label>Group <select id="pkg-group"><option value="community">community</option></select> <span class="sub">who reviews it — <a href="/docs/governance">Governance</a></span></label>
-        <label>Architectures <span class="choice"><label><input type="checkbox" id="pkg-x86" checked> x86_64</label> <label><input type="checkbox" id="pkg-arm" checked> aarch64</label></span></label>
-        <label>Release tag <input type="text" id="pkg-release" placeholder="(latest)"></label>
-        <label>PKGBUILD in your repo <input type="text" id="pkg-path" placeholder="(none — drafted) e.g. packaging/PKGBUILD"></label>
-        <button type="submit" id="pkg-btn">Register</button>
-      </form>
-      <p class="sub" id="pkg-state"></p>
-    </section>
-
-    <section>
-      <h2>3. Your packages</h2>
-      <div class="table-wrap"><table id="my-packages"><thead><tr><th>Package</th><th>Project</th><th>Arches</th><th>Detected</th><th>Stage</th><th>Detail</th><th></th></tr></thead><tbody></tbody></table></div>
-    </section>
-
-    <section>
-      <h2>4. A worker of yours</h2>
-      <p class="sub">Builds happen on your machine, with your resources (and your agent's key, if you want PKGBUILDs drafted and corrected for you — the pool never holds one). Register a worker, then run the signed image with the token it gives you — shown once. It builds <b>your</b> packages; start it with <code>WORKER_SHARED=1</code> to donate it to anyone's. Step by step, for Docker Desktop and Podman: <a href="/docs/workers">Run a worker</a>.</p>
-      <form id="worker-form" class="form" onsubmit="return false">
-        <label>Name <input type="text" id="w-name" placeholder="laptop" required></label>
-        <label>Architecture <select id="w-arch"><option>x86_64</option><option>aarch64</option></select></label>
-        <button type="submit" id="w-btn">Register worker</button>
-      </form>
-      <div id="w-new" hidden>
-        <p class="sub">Your worker token, shown once. Run one of these wherever the worker lives (podman or docker):</p>
-        <pre id="w-cmd"></pre>
-        <p class="sub">Each container is one task; <code>restart: unless-stopped</code> (or a loop) gives you the next. Add your agent key — <code>-e ANTHROPIC_API_KEY=…</code>, <code>OPENAI_API_KEY</code>, <code>GEMINI_API_KEY</code> or <code>XAI_API_KEY</code> — for an agent-drafted PKGBUILD; the <em>Agent</em> column below shows what the worker reported it runs. The same image serves maintainers: the registration decides what it does (<a href="/docs/workers">Run a worker</a>). Verify it: <code>cosign verify ghcr.io/firemanxbr/omarchy-worker:latest --certificate-identity-regexp github.com/firemanxbr/omarchy-pool --certificate-oidc-issuer https://token.actions.githubusercontent.com</code></p>
+    <div class="private-head" id="workspace"><span class="lock">private</span><h2>Your workspace</h2><span class="muted" id="ws-who"></span><span class="right"><a class="more-link" href="/pipeline#throughput">Where your builds sit in the queue →</a><a class="more-link" id="ws-profile" href="/factory">Your public profile →</a></span></div>
+    <div class="two">
+      <div class="panel"><h3>Your packages <button type="button" id="reg-toggle">+ register one</button></h3>
+        <form id="pkg-form" class="form" onsubmit="return false" hidden>
+          <label>Project URL <input type="url" id="pkg-url" placeholder="https://github.com/you/project" required></label>
+          <label>Package name <input type="text" id="pkg-name" placeholder="(repository name)" pattern="[a-z0-9@._+-]+"></label>
+          <label>Group <select id="pkg-group"><option value="community">community</option></select></label>
+          <label>Architectures <span class="choice"><label><input type="checkbox" id="pkg-x86" checked> x86_64</label> <label><input type="checkbox" id="pkg-arm" checked> aarch64</label></span></label>
+          <label>Release tag <input type="text" id="pkg-release" placeholder="(latest)"></label>
+          <label>PKGBUILD in your repo <input type="text" id="pkg-path" placeholder="(none — drafted) e.g. packaging/PKGBUILD"></label>
+          <button type="submit" id="pkg-btn">Register</button>
+        </form>
+        <p class="sub" id="pkg-state"></p>
+        <div class="table-wrap" style="border:0"><table id="my-packages"><thead><tr><th>Package</th><th>Project</th><th>Arches</th><th>Detected</th><th>Stage</th><th>Detail</th><th></th></tr></thead><tbody></tbody></table></div>
       </div>
-      <div class="table-wrap"><table id="my-workers"><thead><tr><th>Worker</th><th>Arch</th><th>Mode</th><th>Agent</th><th>Last seen</th><th>Building</th><th>Done / failed</th><th></th></tr></thead><tbody></tbody></table></div>
-    </section>
-
-    <section>
-      <h2>5. On the command line</h2>
-      <p class="sub">Scripts and <code>pkg-repo</code> use a contributor token (<code>Authorization: Bearer omc_…</code>), separate from this browser session. <button type="button" id="cli-token">Generate a token</button> <span class="sub">— shown once; it replaces the previous one, your workers keep theirs.</span></p>
-      <pre id="cli-token-out" hidden></pre>
-    </section>
-
-    <section>
-      <h2>6. Your builds</h2>
-      <p class="sub" id="quota"></p>
-      <div class="table-wrap"><table id="my-tasks"><thead><tr><th>#</th><th>Package</th><th>Arch</th><th>Status</th><th>Worker</th><th>Took</th><th>Evidence</th><th>Error</th></tr></thead><tbody></tbody></table></div>
-    </section>
+      <div class="panel"><h3>Your workers <button type="button" id="w-toggle">+ register one</button></h3>
+        <p class="sub" style="margin:0 0 10px;font-size:12.5px">Optional: builds happen on the shared workers otherwise. Register one, run the signed image with the token it gives you — shown once — and your builds skip the queue. <code>WORKER_SHARED=1</code> donates it to everyone's. <a href="/docs/workers">Run a worker →</a></p>
+        <form id="worker-form" class="form" onsubmit="return false" hidden>
+          <label>Name <input type="text" id="w-name" placeholder="laptop" required></label>
+          <label>Architecture <select id="w-arch"><option>x86_64</option><option>aarch64</option></select></label>
+          <button type="submit" id="w-btn">Register worker</button>
+        </form>
+        <div id="w-new" hidden><p class="sub">Your worker token, shown once. Run one of these wherever the worker lives (podman or docker):</p><pre id="w-cmd"></pre></div>
+        <div class="table-wrap" style="border:0"><table id="my-workers"><thead><tr><th>Worker</th><th>Arch</th><th>Mode</th><th>Agent</th><th>Last seen</th><th>Building</th><th>Done / failed</th><th></th></tr></thead><tbody></tbody></table></div>
+        <p class="sub" style="margin:12px 0 0;font-size:12.5px">Scripts and CI use a contributor token (<code>Authorization: Bearer omc_…</code>): <button type="button" class="small-btn" id="cli-token">Generate a token</button> <span class="dim">shown once; it replaces the previous one, your workers keep theirs</span></p>
+        <pre id="cli-token-out" hidden></pre>
+      </div>
+    </div>
+    <div class="panel" style="margin-top:16px"><h3>Your builds <span class="dim" id="quota" style="font-size:12px;font-weight:400"></span></h3>
+      <div class="table-wrap" style="border:0"><table id="my-tasks"><thead><tr><th>#</th><th>Package</th><th>Arch</th><th>Status</th><th>Worker</th><th>Took</th><th>Evidence</th><th>Error</th></tr></thead><tbody></tbody></table></div>
+    </div>
   </div>
 `;
 
 const SCRIPT = String.raw`
+__CHARTS__
   var API = "/api/v1/factory", REPO = "${REPO_URL}";
   var token = null, login = null;
   try { token = localStorage.getItem("omc_token"); login = localStorage.getItem("omc_login"); } catch (e) {}
@@ -95,6 +118,7 @@ const SCRIPT = String.raw`
   function showSigned() {
     $("#signin-state").innerHTML = 'Signed in as <a href="/user/' + encodeURIComponent(login) + '"><b>' + esc(login) + '</b></a>' + (role ? ' · ' + esc(role) + (areas.length ? ' of ' + esc(areas.join(", ")) : '') : '') + ' · <a href="#" id="signout">sign out</a>' + (role === "maintainer" ? ' · <a href="/review">Review</a>' : '');
     $("#oauth-link").hidden = true; $("#token-alt").hidden = true; $("#signed").hidden = false;
+    $("#ws-who").textContent = login + (role ? " · " + role : ""); $("#ws-profile").href = "/user/" + encodeURIComponent(login);
     $("#signout").onclick = function () { try { localStorage.removeItem("omc_token"); localStorage.removeItem("omc_login"); } catch (e) {} location.href = "/auth/logout"; return false; };
     refresh();
   }
@@ -182,18 +206,63 @@ const SCRIPT = String.raw`
     call("POST", "/token", {}).then(function (d) { $("#cli-token").disabled = false; if (d.error) { $("#pkg-state").textContent = d.error; return; } $("#cli-token-out").hidden = false; $("#cli-token-out").textContent = "export OMARCHY_CONTRIBUTOR_TOKEN=" + d.token + "\n# " + d.note; })
       .catch(function (e) { $("#cli-token").disabled = false; $("#pkg-state").textContent = "failed: " + e; });
   };
+  $("#reg-toggle").onclick = function () { $("#pkg-form").hidden = !$("#pkg-form").hidden; };
+  $("#w-toggle").onclick = function () { $("#worker-form").hidden = !$("#worker-form").hidden; };
   if (token && login) showSigned();
   else whoami(function (me) { if (me) { login = me.login; role = me.role; areas = me.areas || []; showSigned(); } });
-  liveStats(function () {}, 120000);
+
+  // The public part: tiles, what landed, the charts — all from the factory's own records.
+  skeletonTiles("#tiles", 5);
+  function publicLoad() {
+    Promise.all([
+      busy(fetch("/api/v1/factory")).then(function (r) { return r.json(); }),
+      fetch("/api/v1/factory/packages").then(function (r) { return r.json(); }).catch(function () { return { packages: [] }; }),
+      fetch("/api/v1/factory/approvals").then(function (r) { return r.json(); }).catch(function () { return { approvals: [] }; }),
+      fetch("/api/v1/factory/review").then(function (r) { return r.json(); }).catch(function () { return { staged: [] }; })
+    ]).then(function (res) {
+      var f = res[0], pkgs = res[1].packages || [], apps = res[2].approvals || [], staged = res[3].staged || [];
+      var shared = f.workers.filter(function (w) { return w.alive && (w.side === "omarchy" || w.mode === "shared"); });
+      var owners = {}; pkgs.forEach(function (p) { owners[p.name] = p.owner; });
+      var week = Date.now() - 7 * 86400000;
+      var builds7 = f.tasks.filter(function (t) { return t.kind === "build" && Date.parse(t.created_at) > week; });
+      var approved = apps.filter(function (a) { return a.decision === "approved"; });
+      var waits = staged.map(function (s) { return Date.now() - Date.parse(s.finished_at || s.created_at || 0); }).filter(function (x) { return x > 0; }).sort(function (a, b) { return a - b; });
+      setTiles("#tiles", [
+        ["Community packages", num(pkgs.filter(function (p) { return p.status === "approved"; }).length), "approved into the rings, from " + num(Object.keys(pkgs.reduce(function (o, p) { o[p.owner] = 1; return o; }, {})).length) + " contributors"],
+        ["Waiting for review", num(staged.length), waits.length ? "oldest " + ago(new Date(Date.now() - waits[waits.length - 1]).toISOString()).replace(" ago", "") : "nothing staged right now", staged.length ? "warn" : ""],
+        ["Shared workers online", num(shared.length), num(shared.filter(function (w) { return w.side === "community"; }).length) + " community · " + num(shared.filter(function (w) { return w.side === "omarchy"; }).length) + " project — for everyone", shared.length ? "ok" : ""],
+        ["Builds this week", num(builds7.length), num(builds7.filter(function (t) { return t.status === "staged"; }).length) + " staged · " + num(builds7.filter(function (t) { return t.status === "done"; }).length) + " published · " + num(builds7.filter(function (t) { return t.status === "failed"; }).length) + " failed"],
+        ["Open requests", num(f.requests.filter(function (r) { return r.status === "requested"; }).length), "a URL each, no account needed"]
+      ]);
+      document.querySelectorAll('[data-live="shared-online"]').forEach(function (el) { el.textContent = num(shared.length) + " online now"; });
+      $("#landed").innerHTML = approved.slice(0, 6).map(function (a) {
+        var owner = owners[a.name];
+        return '<div class="land">' + (owner ? avatar(owner, "contributor") : '<span class="avatar">?</span>') + '<div class="n"><span>' + esc(a.name) + ' <span class="v">' + esc(a.version || "") + '</span></span><span class="pill ' + (a.rebuild_status === "done" ? "ok" : "blue") + '">' + (a.rebuild_status === "done" ? "in the rings" : "rebuilding") + '</span></div><div class="b">by ' + (owner ? '<a href="/user/' + encodeURIComponent(owner) + '">' + esc(owner) + '</a>' : "—") + ' · approved by <a href="/user/' + encodeURIComponent(a.by) + '">' + esc(a.by) + '</a> · ' + ago(a.created_at) + ' · ' + esc(a.arch) + '</div></div>';
+      }).join("") || '<div class="muted">nothing approved yet — <a href="/auth/github?next=/factory">be the first</a></div>';
+      // Decisions per week, from the approvals list.
+      var weeks = [], now = Date.now(); for (var i = 7; i >= 0; i--) weeks.push(new Date(now - i * 7 * 86400000).toISOString().slice(0, 10));
+      var ap = weeks.map(function () { return 0; }), rj = weeks.map(function () { return 0; });
+      apps.forEach(function (a) { var t = Date.parse(a.created_at); for (var i = weeks.length - 1; i >= 0; i--) { if (t >= Date.parse(weeks[i])) { if (a.decision === "approved") ap[i]++; else rj[i]++; break; } } });
+      $("#c-decisions").innerHTML = stacked(weeks.map(function (w) { return w.slice(5); }), [{ name: "approved", color: C.green, values: ap }, { name: "sent back", color: C.amber, values: rj }], { label: "Decisions per week over eight weeks", full: true, empty: "no decision yet" });
+      endSkeleton();
+    }).catch(function () { endSkeleton(); });
+  }
+  publicLoad();
+  liveStats(function (d) {
+    var bd = (d.series || {}).builds_daily || [], byDay = {};
+    bd.forEach(function (r) { var x = byDay[r.day] = byDay[r.day] || { staged: 0, published: 0, failed: 0 }; if (r.status === "staged") x.staged += Number(r.n); else if (r.status === "done") x.published += Number(r.n); else if (r.status === "failed") x.failed += Number(r.n); });
+    var days = lastDays(14);
+    $("#c-builds").innerHTML = stacked(days, [{ name: "staged", color: C.blue, values: days.map(function (x) { return (byDay[x] || {}).staged || 0; }) }, { name: "published", color: C.green, values: days.map(function (x) { return (byDay[x] || {}).published || 0; }) }, { name: "failed", color: C.red, values: days.map(function (x) { return (byDay[x] || {}).failed || 0; }) }], { label: "Factory builds per day over fourteen days", empty: "no build yet" });
+  }, 120000);
 `;
 
-export function contributeHtml(poolUrl: string, version: RunningVersion): string {
+export function factoryHtml(poolUrl: string, version: RunningVersion): string {
   return page({
-    title: "Contributors · omarchy-pool",
-    description: "Register a package, run your own worker, follow your builds to a maintainer's approval.",
-    active: "contribute",
+    title: "Factory · omarchy-pool",
+    description: "Bring a package: register it, build it on your worker or the community's, follow it to a maintainer's approval.",
+    active: "factory",
     body: BODY,
-    script: SCRIPT,
+    script: SCRIPT.replace("__CHARTS__", CHARTS),
     poolUrl,
     version,
   });

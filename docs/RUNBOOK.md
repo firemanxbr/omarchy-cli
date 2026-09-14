@@ -83,7 +83,7 @@ tests/abi-gate.sh rc x86_64                                    # ABI check of rc
 The reads run directly from anywhere (`pkg-repo releases --ring stable`,
 `pkg-repo diff`, `pkg-repo head`, `pkg-repo gc --keep 3` without `--delete`
 is a report); the writes above are jobs. A signed-in maintainer also rolls a
-ring back from the overview's *Ring history* (the *roll back* button on any
+ring back from the Journal's *Ring history* (the *roll back* button on any
 earlier row queues the same `rollback` job), and every row's *diff* link,
 like the *diff* on a promotion or rollback line of the journal, opens
 `/diff?ring=&from=&to=` — added, removed and upgraded packages, per
@@ -252,7 +252,7 @@ token is used once, to read the login). Its client id is
 app's page (*Generate a new client secret*, set, then delete the old one).
 The logo is `docs/omarchy-pool-logo.png`.
 The session is an HttpOnly cookie on the dashboard's origin; the pages call
-the API same-origin. Without the app, the Contributors page still accepts a
+the API same-origin. Without the app, the Factory page still accepts a
 GitHub token used once.
 
 Roles come from the repository, not from an API: `factory/MAINTAINERS.toml`
@@ -323,7 +323,7 @@ re-pinned the 5 objects (rc#18, stable#8) and every OPR object verified.
 What no upstream ships is built from `factory/pkgbuilds` by workers that pull
 tasks from the pool ([factory/README.md](../factory/README.md)). Day to day:
 
-- **Add a package**: sign in and register it on the Contributors page, run
+- **Add a package**: sign in and register it on the Factory page, run
   your worker, and a maintainer of the group reviews the staged build
   (docs/GOVERNANCE.md). A *Package request* issue does the same for someone
   without a worker: the brain reads open issues every ten minutes and queues
@@ -360,7 +360,7 @@ tasks from the pool ([factory/README.md](../factory/README.md)). Day to day:
   whose PKGBUILD changed — and records whether each OPR recipe is Omarchy's
   own or synced from the AUR (`.omarchy/package.json`), the AUR commit it
   tracks and the last commit that touched it. The package page says which;
-  the overview's coverage section counts the AUR-synced recipes `stable`
+  the Status page's coverage section counts the AUR-synced recipes `stable`
   still serves — the number to drive to zero. `provenance` lines in the
   journal record each scan that changed something.
 - **OSV**: the security job also asks OSV about what the served packages
@@ -454,7 +454,7 @@ shows in the next estimate instead of being averaged with the expensive
 days before it (`src/cost.ts`; secret
 `CLOUDFLARE_ANALYTICS_TOKEN`, an API token with *Account Analytics: Read*
 and *D1: Read*) and records a `cost` journal line; `GET /api/v1/cost` has
-the breakdown and the overview shows the projection. `cost-report.yml`
+the breakdown and the Pipeline page shows the projection. `cost-report.yml`
 (06:45 UTC) posts it as a comment on the *Cost report* issue — GitHub
 e-mails it to whoever watches the issue — and fails the run at a projected
 US$ 15, which is one more e-mail. Cloudflare's own budget notifications
@@ -465,7 +465,7 @@ Usage based billing*; the API token cannot create them).
 `settings.cost_guard` and the scheduler stops creating the jobs that write
 (sync, promote, render, security, enqueue) until the next daily estimate is
 back under the line; health, gc and metrics keep running, the pool keeps
-serving. The header of the overview says so. To lift it by hand:
+serving. The header of every page says so. To lift it by hand:
 `npx wrangler d1 execute omarchy-repo --remote --command "DELETE FROM settings WHERE key = 'cost_guard'"`.
 
 ## Known limits

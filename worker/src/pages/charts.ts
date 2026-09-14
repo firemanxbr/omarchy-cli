@@ -1,77 +1,73 @@
 /**
- * Status: is the pool serving, is it being fed, did anything go wrong
- * recently — and every number behind the Pool page: coverage per source,
- * the jobs, the charts. The page to open when something looks off.
+ * The dashboard's charts: small inline SVG with no library (the pages have no
+ * build step). A page that draws includes CHARTS in its script; every helper
+ * takes the numbers /api/v1/stats already returns. Bars carry their value in
+ * data-tip; the layout's tooltip shows it.
  */
-import { page } from "./layout";
-import { CHARTS } from "./charts";
-import type { RunningVersion } from "../meta";
+export const CHARTS = String.raw`  // ---- tiny SVG charts (no library; the page has no build step) ----
+  var C = { green: "#9ece6a", amber: "#e0af68", red: "#f7768e", blue: "#7aa2f7", dim: "#414868", grid: "#2a2e3f", text: "#8b93b8" };
+  // The viewBox is the drawing; the SVG scales uniformly with its column
+  // (no preserveAspectRatio="none": stretched text overflowed its space).
+  function svg(w, h, body) { return '<svg viewBox="0 0 ' + w + ' ' + h + '" width="100%" style="display:block;height:auto" font-family="JetBrains Mono, ui-monospace, monospace" font-size="11" fill="' + C.text + '">' + body + '</svg>'; }
+  // Labels get the room they have, not more: cut with an ellipsis, full text in the tooltip.
+  function fit(t, n) { t = String(t || ""); return t.length > n ? t.slice(0, n - 1) + "…" : t; }
+  function day(iso) { return iso.slice(0, 10); }
+  function lastDays(n) { var out = [], t = Date.now(); for (var i = n - 1; i >= 0; i--) out.push(new Date(t - i * 86400000).toISOString().slice(0, 10)); return out; }
+  function bars(items, fmt) { // vertical bars, items: [{label, value, color, title}]
+    if (!items.length || !items.some(function (i) { return i.value > 0; })) return '<div class="empty">nothing yet</div>';
+    var W = 360, H = 150, top = 16, bottom = 22, left = 6, max = Math.max.apply(null, items.map(function (i) { return i.value; })) || 1;
+    var bw = (W - left * 2) / items.length, body = '';
+    body += '<line x1="0" y1="' + (H - bottom) + '" x2="' + W + '" y2="' + (H - bottom) + '" stroke="' + C.grid + '"/>';
+    items.forEach(function (it, i) {
+      var h = (H - top - bottom) * it.value / max, x = left + i * bw, y = H - bottom - h;
+      body += '<rect x="' + (x + bw * 0.15) + '" y="' + y + '" width="' + (bw * 0.7) + '" height="' + h + '" fill="' + (it.color || C.green) + '"><title>' + esc(it.title || it.label + ": " + fmt(it.value)) + '</title></rect>';
+      var step = items.length > 8 ? 2 : 1;
+      if (i % step === 0) body += '<text x="' + (x + bw / 2) + '" y="' + (H - 7) + '" text-anchor="middle" font-size="10">' + esc(it.label) + '</text>';
+    });
+    body += '<text x="' + left + '" y="11" font-size="10">max ' + esc(fmt(max)) + '</text>';
+    return svg(W, H, body);
+  }
+  function area(points, fmt) { // points: [{t: ms, v}]
+    if (points.length < 2) return '<div class="empty">' + (points.length ? 'one snapshot so far — the line needs two' : 'collecting snapshots') + '</div>';
+    var W = 360, H = 150, top = 16, bottom = 20, left = 6, right = 6;
+    var vs = points.map(function (p) { return p.v; }), max = Math.max.apply(null, vs) || 1, min = Math.min.apply(null, vs);
+    var t0 = points[0].t, t1 = points[points.length - 1].t || t0 + 1;
+    var lo = min === max ? 0 : min;
+    var X = function (t) { return left + (W - left - right) * (t - t0) / (t1 - t0 || 1); }, Y = function (v) { return H - bottom - (H - top - bottom) * (v - lo) / (max - lo || 1); };
+    var pts = points.map(function (p) { return X(p.t).toFixed(1) + "," + Y(p.v).toFixed(1); }).join(" ");
+    var body = '<polygon points="' + X(t0).toFixed(1) + ',' + (H - bottom) + ' ' + pts + ' ' + X(t1).toFixed(1) + ',' + (H - bottom) + '" fill="' + C.green + '" fill-opacity="0.15"/>';
+    body += '<polyline points="' + pts + '" fill="none" stroke="' + C.green + '" stroke-width="1.5"/>';
+    body += '<text x="' + left + '" y="11" font-size="10">' + esc(fmt(max)) + '</text><text x="' + left + '" y="' + (H - bottom - 3) + '" font-size="10">' + esc(fmt(lo)) + '</text>';
+    body += '<text x="' + left + '" y="' + (H - 6) + '" font-size="10">' + esc(new Date(t0).toUTCString().slice(5, 16)) + '</text><text x="' + (W - right) + '" y="' + (H - 6) + '" text-anchor="end" font-size="10">' + esc(new Date(t1).toUTCString().slice(5, 16)) + '</text>';
+    return svg(W, H, body);
+  }
+  function heat(rows, days, cell) { // rows: [{key,label}], cell(key, day) -> status|null
+    if (!rows.length) return '<div class="empty">no health checks yet</div>';
+    var W = 360, labelW = 110, rh = 18, H = rows.length * rh + 22, cw = (W - labelW) / days.length, body = '';
+    rows.forEach(function (r, ri) {
+      body += '<text x="0" y="' + (ri * rh + 13) + '" font-size="10.5"><title>' + esc(r.label) + '</title>' + esc(fit(r.label, 17)) + '</text>';
+      days.forEach(function (dd, di) {
+        var st = cell(r.key, dd), col = st === "error" ? C.red : st === "warn" ? C.amber : st === "ok" ? C.green : C.dim;
+        body += '<rect x="' + (labelW + di * cw + 1) + '" y="' + (ri * rh + 2) + '" width="' + (cw - 2) + '" height="' + (rh - 4) + '" fill="' + col + '" fill-opacity="' + (st ? 1 : 0.35) + '"><title>' + esc(r.label + " " + dd + ": " + (st || "no check")) + '</title></rect>';
+      });
+    });
+    body += '<text x="' + labelW + '" y="' + (H - 4) + '" font-size="10">' + esc(days[0].slice(5)) + '</text><text x="' + W + '" y="' + (H - 4) + '" text-anchor="end" font-size="10">' + esc(days[days.length - 1].slice(5)) + '</text>';
+    return svg(W, H, body);
+  }
+  function hbars(items) { // items: [{label, parts: [{v, color}], note}]
+    if (!items.length) return '<div class="empty">no snapshot yet</div>';
+    var W = 360, labelW = 112, noteW = 66, rh = 20, H = items.length * rh + 4, body = '';
+    var max = Math.max.apply(null, items.map(function (i) { return i.parts.reduce(function (a, p) { return a + p.v; }, 0); })) || 1;
+    items.forEach(function (it, i) {
+      var x = labelW, y = i * rh + 2;
+      body += '<text x="0" y="' + (y + 12) + '" font-size="10.5"><title>' + esc(it.label) + '</title>' + esc(fit(it.label, 17)) + '</text>';
+      it.parts.forEach(function (p) { var w = (W - labelW - noteW - 10) * p.v / max; if (w > 0) { body += '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + (rh - 6) + '" fill="' + p.color + '"><title>' + esc(it.label + ": " + p.v + " " + p.name) + '</title></rect>'; x += w; } });
+      body += '<text x="' + (W) + '" y="' + (y + 12) + '" text-anchor="end" font-size="10">' + esc(it.note) + '</text>';
+    });
+    return svg(W, H, body);
+  }
+  function worst(a, b) { var rank = { error: 3, warn: 2, ok: 1 }; return (rank[b] || 0) > (rank[a] || 0) ? b : a; }
 
-const BODY = String.raw`
-  <div class="hero compact">
-    <p class="eyebrow">Status</p>
-    <h1>Is it up, is it keeping up, is every ring healthy</h1>
-    <p class="lede" id="headline">Checking…</p>
-  </div>
-
-  <section>
-    <h2>Service</h2>
-    <p class="sub">Measured right now by the API: can it reach the index and the pool. This is what <em>online</em> in the header means.</p>
-    <div class="tiles" id="service"></div>
-  </section>
-
-  <section>
-    <h2>Pipeline <span id="pipeline-state" class="pill none" style="vertical-align:middle;margin-left:8px">checking</span></h2>
-    <p class="sub">Whether the pool is being kept up to date: the syncs, the checks, the promotions.</p>
-    <div class="tiles" id="tiles"></div>
-  </section>
-
-  <section>
-    <h2>Rings</h2>
-    <p class="sub">Latest real-pacman check per ring and architecture, and when the ring last moved.</p>
-    <div class="table-wrap"><table id="rings"><thead><tr><th>Ring</th><th>Arch</th><th>Health</th><th>Checked</th><th>Release</th><th>Moved</th><th>Databases</th></tr></thead><tbody></tbody></table></div>
-  </section>
-
-  <section>
-    <h2>Sources</h2>
-    <p class="sub">Last sync of every upstream repository. A source is late when its last sync is older than six hours (a long import of one source makes the others wait their turn).</p>
-    <div class="table-wrap"><table id="sources"><thead><tr><th>Source</th><th>Arch</th><th>Last sync</th><th>Result</th><th class="num">Upstream</th><th class="num">In edge</th><th class="num">Missing</th></tr></thead><tbody></tbody></table></div>
-  </section>
-
-  <section>
-    <div class="h2row"><h2>Coverage</h2><span class="hint">every source, every number</span></div>
-    <p class="sub">What upstream serves, what <code>edge</code> already pins, what <code>stable</code> pins. Superseded versions stay in the pool until retention runs, so the size can exceed the upstream's.</p>
-    <div class="table-wrap"><table id="coverage"><thead><tr><th>Source</th><th>Arch</th><th class="num">Upstream</th><th class="num">In edge</th><th class="num">Missing</th><th class="num">In stable</th><th>Progress</th><th class="num">Size</th><th>Last sync</th></tr></thead><tbody></tbody></table></div>
-    <p class="sub" id="provenance" hidden></p>
-    <p class="sub" id="any" hidden></p>
-  </section>
-
-  <section>
-    <div class="h2row"><h2>The pipeline, in numbers</h2><a class="more-link" href="/pipeline">Watch it run →</a></div>
-    <p class="sub">The pool's own jobs, pulled by workers with a per-job credential; a snapshot every 30 minutes records what ran, what is running now and the worker minutes.</p>
-    <div class="tiles" id="systiles"></div>
-    <div class="charts">
-      <div class="chart"><h3>Pool growth <span>7 days</span></h3><div class="sub">bytes stored once, from the metrics snapshots</div><div id="c-pool"></div></div>
-      <div class="chart"><h3>Imports per day <span>14 days</span></h3><div class="sub">packages brought into the pool by the sync runs</div><div id="c-imports"></div></div>
-      <div class="chart"><h3>Health <span>14 days</span></h3><div class="sub">worst result per day, per ring and architecture</div><div id="c-health"></div></div>
-      <div class="chart"><h3>Sync throughput <span>last runs</span></h3><div class="sub">MB/s per sync run, one worker each</div><div id="c-sync"></div></div>
-      <div class="chart"><h3>Worker minutes <span>per day</span></h3><div class="sub">time the project's workers spent on pool jobs</div><div id="c-minutes"></div></div>
-      <div class="chart"><h3>Pool jobs <span>7 days</span></h3><div class="sub">sync, promote, health, gc pulled by workers: done, failed, waiting</div><div id="c-jobs"></div></div>
-      <div class="chart"><h3>Factory builds <span>14 days</span></h3><div class="sub">per day: contributors' builds staged, the project's published, failed</div><div id="c-builds"></div></div>
-    </div>
-    <div class="table-wrap"><table id="workflows"><thead><tr><th>Job</th><th>Last</th><th class="num">Runs 7d</th><th class="num">Failed</th><th class="num">Running</th><th class="num">Minutes 7d</th></tr></thead><tbody></tbody></table></div>
-  </section>
-
-  <section>
-    <h2>Incidents</h2>
-    <p class="sub">Rollbacks, blocked gates and failed checks in the journal, newest first. An empty list is the goal.</p>
-    <div class="table-wrap"><table id="incidents"><thead><tr><th>Status</th><th>What</th><th>Ring</th><th>Summary</th><th>When</th></tr></thead><tbody></tbody></table></div>
-  </section>
-`;
-
-const SCRIPT = String.raw`
-  skeletonRows("#coverage", 9, 5); skeletonRows("#workflows", 7, 4); skeletonTiles("#systiles", 8);
-__CHARTS__
   function renderSystem(d) {
     // Snapshots before v0.0.51 measured GitHub Actions ("actions"); now the pool's own jobs.
     var m = d.metrics, a = m && (m.jobs || m.actions), w = m && m.workers;
@@ -166,69 +162,54 @@ __CHARTS__
   }
 
 
-  function render(d) {
-    var RINGS = ["stable", "rc", "edge"], ARCHES = ["x86_64", "aarch64"];
-    var problems = problemsOf(d);
-    var lastSync = latest(d.events, "sync");
-    var healthRows = [];
-    RINGS.forEach(function (ring) {
-      var r = d.rings.filter(function (x) { return x.ring === ring; })[0] || {};
-      ARCHES.forEach(function (arch) {
-        var h = latest(d.latest, "health", ring, arch);
-        var dbs = (r.artifacts || []).filter(function (a) { return a.kind === "db" && a.arch === arch; });
-        if (!dbs.length && !(r.sources || []).some(function (s) { return s.arch === arch; })) return;
-        healthRows.push('<tr><td>' + ring + '</td><td>' + arch + '</td><td>' + (h ? '<span class="pill ' + h.status + '">' + h.status + '</span>' : '<span class="pill none">none</span>') + '</td><td class="when">' + (h ? ago(h.created_at) : "—") + '</td><td>' + (r.release ? "#" + r.release.seq : "—") + '</td><td class="when">' + (r.release ? ago(r.release.created_at) : "—") + '</td><td>' + (dbs.length ? dbs.map(function (a) { return '<code>' + esc(a.repo) + '</code>'; }).join(" ") : '<span class="muted">not rendered</span>') + '</td></tr>');
-      });
+  // ---- v2 charts: stacked bars, several lines on one axis, html bars, a 14-day heat grid ----
+  function nice(max) { var p = Math.pow(10, Math.floor(Math.log10(max || 1))), n = max / p; var s = n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10; return s * p; }
+  function shortDay(l) { return String(l).length === 10 ? l.slice(5) : String(l).replace(/^\w+ /, ""); }
+  // series: [{name, color, values}] over labels; every bar carries a data-tip with all its parts.
+  function stacked(labels, series, opts) {
+    opts = opts || {}; var W = 520, H = 170, L = 36, R = 6, T = 8, B = 24, n = labels.length || 1, iw = (W - L - R) / n, bw = Math.max(2, iw - 3);
+    var sums = labels.map(function (_, i) { return series.reduce(function (a, s) { return a + (Number(s.values[i]) || 0); }, 0); });
+    if (!labels.length || !sums.some(function (v) { return v > 0; })) return '<div class="empty">' + (opts.empty || "nothing yet") + '</div>';
+    var max = nice(Math.max.apply(null, sums)); var ys = function (v) { return T + (H - T - B) * (1 - v / max); };
+    var out = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="' + esc(opts.label || "") + '">';
+    [0, .5, 1].forEach(function (f) { var y = ys(max * f); out += '<line class="grid" x1="' + L + '" x2="' + (W - R) + '" y1="' + y + '" y2="' + y + '"/><text class="ax" x="' + (L - 6) + '" y="' + (y + 3.5) + '" text-anchor="end">' + num(Math.round(max * f)) + '</text>'; });
+    labels.forEach(function (lab, i) {
+      var y0 = ys(0), x = L + i * iw + 1.5, tip = lab + series.map(function (s) { return " · " + s.name + " " + num(s.values[i] || 0); }).join("");
+      series.forEach(function (s) { var v = Number(s.values[i]) || 0; if (!v) return; var y1 = ys(v); var h = y0 - y1; out += '<rect class="mark" x="' + x + '" y="' + (y0 - h) + '" width="' + bw + '" height="' + Math.max(0, h - 2) + '" fill="' + s.color + '" data-tip="' + esc(tip) + '"/>'; y0 -= h; });
+      if (n <= 8 || i % 2 === 1) out += '<text class="ax" x="' + (x + bw / 2) + '" y="' + (H - 8) + '" text-anchor="middle">' + esc(opts.full ? lab : shortDay(lab)) + '</text>';
     });
-    $("#rings tbody").innerHTML = healthRows.join("") || '<tr><td colspan="7" class="muted">no rings yet</td></tr>';
-
-    $("#sources tbody").innerHTML = (d.coverage || []).map(function (c) {
-      var isLate = c.last_sync && Date.now() - Date.parse(c.last_sync) > 6 * 3600e3;
-      return '<tr><td>' + esc(c.source) + '</td><td>' + esc(c.arch) + '</td><td class="when">' + (c.last_sync ? ago(c.last_sync) + (isLate ? ' <span class="pill warn">late</span>' : '') : '<span class="pill none">never</span>') + '</td><td>' + (c.last_status ? '<span class="pill ' + c.last_status + '">' + c.last_status + '</span>' : '—') + '</td><td class="num">' + (c.upstream_total == null ? "—" : num(c.upstream_total)) + '</td><td class="num">' + num(c.indexed) + '</td><td class="num">' + (c.missing == null ? "—" : num(c.missing)) + '</td></tr>';
-    }).join("");
-
-    var incidents = d.events.filter(function (e) { return e.kind === "rollback" || e.status === "error" || (e.kind === "gate" && e.payload && e.payload.verdict === "block"); });
-    $("#incidents tbody").innerHTML = incidents.map(function (e) {
-      var run = e.payload && e.payload.ci && e.payload.ci.run_url;
-      return '<tr><td><span class="dot ' + e.status + '"></span>' + e.status + '</td><td><span class="kind">' + esc(e.kind) + '</span></td><td>' + esc(e.ring || "") + '</td><td>' + (run ? '<a class="run" href="' + esc(run) + '">' + esc(e.summary) + '</a>' : esc(e.summary)) + '</td><td class="when">' + ago(e.created_at) + '</td></tr>';
-    }).join("") || '<tr><td colspan="5" class="muted">none in the last 40 journal entries</td></tr>';
-
-    $("#headline").innerHTML = problems.length
-      ? '<span style="color:var(--amber)">Pipeline behind:</span> ' + esc(problems.join("; ")) + '. The rings keep serving what they have; the journal below shows what the pipeline is doing about it.'
-      : '<span style="color:var(--green)">Pipeline keeping up.</span> Every source synced recently, every ring passed its latest health check.';
-    var stable = d.rings.filter(function (r) { return r.ring === "stable"; })[0] || {};
-    var tiles = [
-      ["Stable", stable.release ? "#" + stable.release.seq : "—", stable.release ? "moved " + ago(stable.release.created_at) : "no release"],
-      ["Last sync", lastSync ? ago(lastSync.created_at) : "never", lastSync ? esc(lastSync.summary) : ""],
-      ["Incidents", num(incidents.length), "in the last 40 journal entries"]
-    ];
-    renderCoverage(d); renderSystem(d); endSkeleton();
-    tiles.forEach(function (t, i) { var el = $("#tiles"), cell = el.children[i]; if (!cell) { cell = document.createElement("div"); cell.className = "tile"; el.appendChild(cell); } setTile(cell, '<div class="k">' + t[0] + '</div><div class="v num">' + t[1] + '</div><div class="s">' + t[2] + '</div>'); });
+    out += '</svg>';
+    if (series.length > 1) out += '<div class="legend">' + series.map(function (s) { return '<span><i style="background:' + s.color + '"></i>' + esc(s.name) + '</span>'; }).join("") + '</div>';
+    return out;
   }
-  function renderService() {
-    fetch("/api/v1/status", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (s) {
-      var tiles = [
-        ["API", "up", "answering · " + esc(s.checked_at.replace("T", " ").slice(0, 19)) + " UTC"],
-        ["Index", s.index.ok ? "up" : "down", s.index.ok ? "D1 answered in " + s.index.ms + " ms" : esc(s.index.error || "failed")],
-        ["Pool", s.pool.ok ? "serving" : "down", s.pool.ok ? "R2 answered in " + s.pool.ms + " ms" : esc(s.pool.error || "failed")]
-      ];
-      tiles.forEach(function (t, i) { var el = $("#service"), cell = el.children[i]; if (!cell) { cell = document.createElement("div"); cell.className = "tile"; el.appendChild(cell); } setTile(cell, '<div class="k">' + t[0] + '</div><div class="v num" style="color:' + (t[1] === "down" ? "var(--red)" : "var(--green)") + '">' + t[1] + '</div><div class="s">' + t[2] + '</div>'); });
-    }).catch(function (e) {
-      $("#service").innerHTML = '<div class="tile"><div class="k">API</div><div class="v" style="color:var(--red)">down</div><div class="s">' + esc(String(e)) + '</div></div>';
+  function lines(labels, series, unit, label) {
+    var W = 520, H = 170, L = 36, R = 10, T = 12, B = 24, n = labels.length, all = [];
+    series.forEach(function (s) { all = all.concat(s.values.map(Number)); });
+    if (n < 2 || !all.some(function (v) { return v > 0; })) return '<div class="empty">nothing yet</div>';
+    var max = nice(Math.max.apply(null, all)), xs = function (i) { return L + (W - L - R) * i / (n - 1); }, ys = function (v) { return T + (H - T - B) * (1 - v / max); };
+    var out = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="' + esc(label || "") + '">';
+    [0, .5, 1].forEach(function (f) { var y = ys(max * f); out += '<line class="grid" x1="' + L + '" x2="' + (W - R) + '" y1="' + y + '" y2="' + y + '"/><text class="ax" x="' + (L - 6) + '" y="' + (y + 3.5) + '" text-anchor="end">' + num(Math.round(max * f)) + '</text>'; });
+    series.forEach(function (s) {
+      out += '<polyline points="' + s.values.map(function (v, i) { return xs(i) + "," + ys(Number(v) || 0); }).join(" ") + '" fill="none" stroke="' + s.color + '" stroke-width="2"/>';
+      s.values.forEach(function (v, i) { out += '<circle class="mark" cx="' + xs(i) + '" cy="' + ys(Number(v) || 0) + '" r="' + (i === n - 1 ? 4.5 : 3) + '" fill="' + s.color + '" stroke="#1f2230" stroke-width="2" data-tip="' + esc(labels[i] + " · " + s.name + " " + num(v) + (unit ? " " + unit : "")) + '"/>'; });
     });
+    labels.forEach(function (lab, i) { if (n <= 8 || i % 2 === 1) out += '<text class="ax" x="' + xs(i) + '" y="' + (H - 6) + '" text-anchor="middle">' + esc(shortDay(lab)) + '</text>'; });
+    return out + '</svg><div class="legend">' + series.map(function (s) { return '<span><i style="background:' + s.color + '"></i>' + esc(s.name) + '</span>'; }).join("") + '</div>';
   }
-  renderService(); setInterval(renderService, 60000);
-  liveStats(render, 60000);
+  // rows: [[label, small, percent, color?]] — a labelled bar per row, percent of a full bar.
+  function hrows(rows, w) {
+    if (!rows.length) return '<div class="empty">nothing yet</div>';
+    return '<div class="hrows">' + rows.map(function (r) { var full = r[2] >= 100; return '<div class="hrow"' + (w ? ' style="grid-template-columns:' + w + 'px 1fr 52px"' : "") + '><div class="l">' + esc(r[0]) + (r[1] ? ' <small>' + esc(r[1]) + '</small>' : "") + '</div><div class="bar" data-tip="' + esc(r[0] + (r[1] ? " " + r[1] : "") + " · " + (r[4] || r[2] + "%")) + '"><i class="' + (full ? "" : "partial") + '" style="width:' + Math.min(100, r[2]) + '%' + (r[3] ? ";background:" + r[3] : "") + '"></i></div><div class="p num">' + (r[4] || r[2] + "%") + '</div></div>'; }).join("") + '</div>';
+  }
+  // Fourteen days of health per ring and architecture, worst result per day, as html cells.
+  function heatGrid(health) {
+    var days = lastDays(14), cells = {}, RINGS = ["stable", "rc", "edge"], ARCHES = ["x86_64", "aarch64"];
+    (health || []).forEach(function (h) { var k = h.ring + "/" + h.arch + "/" + day(h.created_at); cells[k] = worst(cells[k], h.status); });
+    if (!Object.keys(cells).length) return '<div class="empty">no health checks yet</div>';
+    var rows = []; RINGS.forEach(function (r) { ARCHES.forEach(function (a) { rows.push([r + " " + a, r + "/" + a]); }); });
+    var names = { ok: "healthy", warn: "warning", error: "failed" };
+    return '<div class="heat">' + rows.map(function (r) { return '<div class="r"><span class="l">' + esc(r[0]) + '</span>' + days.map(function (dd) { var st = cells[r[1] + "/" + dd]; return '<span class="c ' + (st || "") + '" data-tip="' + esc(dd + " · " + r[0] + " · " + (names[st] || "no check")) + '"></span>'; }).join("") + '</div>'; }).join("") +
+      '<div class="days"><span></span>' + days.map(function (d, i) { return '<span>' + (i % 2 ? esc(d.slice(5)) : "") + '</span>'; }).join("") + '</div></div>';
+  }
 `;
 
-export function statusHtml(poolUrl: string, version: RunningVersion): string {
-  return page({
-    title: "Status · omarchy-pool",
-    description: "Is the pool serving, is it being fed, and did anything go wrong recently.",
-    active: "none",
-    body: BODY,
-    script: SCRIPT.replace("__CHARTS__", CHARTS),
-    poolUrl,
-    version,
-  });
-}

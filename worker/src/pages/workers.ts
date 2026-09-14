@@ -42,7 +42,7 @@ const BODY = String.raw`
     <div class="steps">
       <div class="step"><h3>A container runtime</h3><p><b>Docker Desktop</b> on macOS, Windows or Linux, or <b>Podman</b> — the <code>podman</code> command, or <a href="https://podman-desktop.io/">Podman Desktop</a> with its graphical window. Every command below is shown for both; they differ only in the first word. Give the runtime at least 2 CPUs and 4 GB of memory (Docker Desktop: <em>Settings → Resources</em>; Podman on macOS: <code>podman machine set --cpus 4 --memory 8192</code>); a browser-class package needs far more.</p></div>
       <div class="step"><h3>Which architecture you build</h3><p>A worker builds for its own architecture: an Apple silicon Mac or a Raspberry Pi builds <code>aarch64</code>, an Intel or AMD machine <code>x86_64</code>. Register the worker for the architecture of the machine it will run on; the image refuses a mismatch.</p></div>
-      <div class="step"><h3>An account, a worker registration</h3><p>Sign in with GitHub (top right), open <a href="/contribute">Contributors</a> and register a worker: a name and its architecture. You get a <b>token</b>, shown once — that machine's identity. Revoke it on the same page if the machine is lost.</p></div>
+      <div class="step"><h3>An account, a worker registration</h3><p>Sign in with GitHub (top right), open <a href="/factory">the Factory</a> and register a worker: a name and its architecture. You get a <b>token</b>, shown once — that machine's identity. Revoke it on the same page if the machine is lost.</p></div>
     </div>
   </section>
 
@@ -60,7 +60,7 @@ podman run -d --name omarchy-worker --restart unless-stopped \
   -e OMARCHY_WORKER_TOKEN=&lt;omw_…&gt; \
   ${IMG}:latest</pre>
       <p>Or keep the settings in a file with <a href="${REPO_URL}/blob/main/factory/image/compose.yml">compose.yml</a>: <code>OMARCHY_WORKER_TOKEN=… docker compose up -d</code> (<code>podman compose</code> works the same).</p></div>
-      <div class="step"><h3>2. Give it work</h3><p>On <a href="/contribute">Contributors</a>, register a package (the project's URL) and press <b>Build</b>. Your worker picks it up within a minute; the <em>Your builds</em> table follows it, and the <em>A worker of yours</em> table shows it alive. When the build is staged, a maintainer of the group sees it on <a href="/review">Review</a>.</p></div>
+      <div class="step"><h3>2. Give it work</h3><p>On <a href="/factory">the Factory</a>, register a package (the project's URL) and press <b>Build</b>. Your worker picks it up within a minute; the <em>Your builds</em> table follows it, and the <em>A worker of yours</em> table shows it alive. When the build is staged, a maintainer of the group sees it on <a href="/review">Review</a>.</p></div>
       <div class="step"><h3>3. Donate the machine, bring your agent</h3><p>Two switches, both yours to flip:</p>
 <pre># also build other contributors' packages (their bumps after 14 days, package requests at once)
   -e WORKER_SHARED=1
@@ -119,7 +119,7 @@ podman run -d --name omarchy-worker --restart unless-stopped --security-opt labe
     <h2>Keeping it running</h2>
     <div class="steps">
       <div class="step"><h3>Update</h3><p>The image follows the pool's releases. <code>docker pull ${IMG}:latest</code> (or <code>podman pull</code>), then remove and recreate the container with the same command; a contributor's worker only needs the pull, the next container starts from the new image.</p></div>
-      <div class="step"><h3>Stop, remove, revoke</h3><p><code>docker rm -f omarchy-worker</code> stops and removes it. The registration stays until you revoke it on <a href="/contribute">Contributors</a> (or a maintainer does); a revoked token claims nothing, immediately.</p></div>
+      <div class="step"><h3>Stop, remove, revoke</h3><p><code>docker rm -f omarchy-worker</code> stops and removes it. The registration stays until you revoke it on <a href="/factory">the Factory</a> (or a maintainer does); a revoked token claims nothing, immediately.</p></div>
       <div class="step"><h3>Disk</h3><p>Every task builds in a fresh container that is removed afterwards; images and package caches stay. <code>docker system prune</code> / <code>podman system prune</code> reclaims them. A project worker's working directory holds the upstream keyrings, a checkout of the repository and the last builds — safe to delete when the worker is stopped.</p></div>
       <div class="step"><h3>Something is off</h3><p><em>the pool did not accept this token</em>: it was revoked, or mistyped. <em>registered for aarch64 but this machine is x86_64</em>: register a worker for this machine. <em>mount its socket</em>: the registration is project-trusted and needs the runtime's socket (above). <em>permission denied … docker.sock</em>: add <code>--security-opt label=disable</code> (Podman) or check the socket path. <em>No task for a while</em>: a contributor's worker only sees its owner's tasks unless started shared; a project worker only claims once trusted. The Factory page shows every queued task and every worker the pool has heard from.</p></div>
     </div>

@@ -8,8 +8,11 @@ import { page } from "./layout";
 import type { RunningVersion } from "../meta";
 
 const BODY = String.raw`
-  <h1>Review</h1>
-  <p class="lede">What contributors built, waiting for a maintainer. Each row is one build in a contributor's staging workspace — evidence, not a package: you do not ship their bytes, you learn from them. Read the PKGBUILD, the log and the manifest — and the <b>audit</b>, the second agent's report when a project worker with an agent key has read the same evidence — then <b>approve</b> — the project rebuilds the same recipe on a trusted worker, signs it and publishes it into <code>edge</code>, where it takes the usual 48-hour path to <code>stable</code> — or <b>reject</b> with a note the contributor sees. Approvals are recorded with your name: every package users get was checked by two different people.</p>
+  <div class="hero compact">
+    <p class="eyebrow">Review</p>
+    <h1>What contributors built, waiting for a maintainer</h1>
+    <p class="lede">Each row is evidence, not a package: read the PKGBUILD, the log, the manifest and the audit, then <b>approve</b> — the project rebuilds the same recipe on a trusted worker, signs it and publishes it into <code>edge</code> — or <b>reject</b> with a note the contributor sees. Every decision carries a name. <a href="/docs/governance">Governance →</a></p>
+  </div>
   <p class="sub" id="who"></p>
 
   <section>
@@ -103,7 +106,7 @@ export function reviewHtml(poolUrl: string, version: RunningVersion): string {
   return page({
     title: "Review · omarchy-pool",
     description: "Staged contributor builds waiting for a maintainer; trust; the record of decisions.",
-    active: "review",
+    active: "none",
     body: BODY,
     script: SCRIPT,
     poolUrl,

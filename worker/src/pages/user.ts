@@ -6,12 +6,16 @@ import { page } from "./layout";
 import type { RunningVersion } from "../meta";
 
 const BODY = String.raw`
-  <p class="crumbs"><a href="/contribute">Contributors</a> / <span id="crumb"></span></p>
-  <div id="who" style="display:flex;gap:18px;align-items:center;margin-bottom:8px">
-    <img id="avatar" alt="" width="64" height="64" style="border-radius:8px;background:var(--panel-2)" hidden>
-    <div><h1 id="title" style="margin:0">…</h1><p class="sub" id="line" style="margin:4px 0 0"></p></div>
+  <div class="profile-head">
+    <span class="avatar lg" id="avatar">…</span>
+    <div><p class="crumbs"><a href="/factory">Factory</a> / <span id="crumb"></span></p><h1 id="title">…</h1><p class="line" id="line"></p></div>
+    <span id="share-btn"></span>
   </div>
   <div class="tiles" id="tiles"></div>
+  <section id="share" hidden>
+    <div class="h2row"><h2>Share it</h2><span class="hint">this page is public — everything on it is on the record anyway</span></div>
+    <div class="share"><p><b style="color:var(--text)">You are part of open source.</b> Copy the link and post it wherever you like — your GitHub profile, LinkedIn, a blog. What it shows is what the pool recorded: packages, builds, decisions.</p><pre><span class="copy" id="copy-link">copy</span><span id="share-url"></span></pre><div class="row"><a class="btn ghost" href="/factory#workspace">Your workspace →</a><a class="btn ghost" href="/auth/logout">Sign out</a></div></div>
+  </section>
 
   <section id="record-section" hidden>
     <h2>Track record</h2>
@@ -55,11 +59,12 @@ const SCRIPT = String.raw`
   busy(fetch("/api/v1/users/" + encodeURIComponent(login))).then(function (r) { return r.json().then(function (d) { d.__status = r.status; return d; }); }).then(function (d) {
     if (d.__status !== 200) { $("#title").textContent = login; $("#line").textContent = d.error || "not found"; endSkeleton(); return; }
     document.title = login + " · omarchy-pool";
-    $("#title").textContent = d.name ? d.name + " (" + d.login + ")" : d.login;
-    if (d.avatar_url) { $("#avatar").src = d.avatar_url; $("#avatar").hidden = false; }
-    $("#line").innerHTML = '<a href="' + esc(d.github) + '">github.com/' + esc(d.login) + '</a> · <b>' + esc(d.role) + '</b>' +
-      (d.groups.length ? ' of ' + d.groups.map(function (g) { return '<a href="/docs/governance">' + esc(g.name) + '</a>'; }).join(", ") : '') +
-      ' · since ' + esc(String(d.since).slice(0, 10)) + ' · last seen ' + ago(d.last_seen);
+    $("#title").innerHTML = esc(d.name || d.login) + ' <span class="dim" style="font-weight:500">@' + esc(d.login) + '</span>';
+    // An icon, never a photo: two letters, green for a maintainer.
+    $("#avatar").textContent = d.login.slice(0, 2); if (d.role === "maintainer") $("#avatar").classList.add("m");
+    $("#line").innerHTML = '<span class="pill ' + (d.role === "maintainer" ? "rec" : "ok") + '">' + esc(d.role) + '</span>' +
+      (d.groups.length ? d.groups.map(function (g) { return '<a class="pill none" href="/docs/governance" style="text-decoration:none">' + esc(g.name) + '</a>'; }).join("") : '') +
+      '<span>since ' + esc(String(d.since).slice(0, 10)) + '</span><span class="dim">·</span><span>last seen ' + ago(d.last_seen) + '</span><span class="dim">·</span><a href="' + esc(d.github) + '" style="color:var(--muted);text-decoration:none">github.com/' + esc(d.login) + ' ↗</a>';
     var c = d.build_counts;
     var tiles = [
       ["Packages", num(d.packages.length), "registered under this name"],
@@ -95,7 +100,12 @@ const SCRIPT = String.raw`
     }, { empty: "no worker registered" });
     endSkeleton();
     // Your own page: the place to sign out, and to get a token for the command line.
-    whoami(function (me) { if (me && me.login === d.login) $("#line").insertAdjacentHTML("beforeend", ' · <a href="/contribute">your workspace</a> · <a href="/auth/logout">sign out</a>'); });
+    whoami(function (me) {
+      if (!me || me.login !== d.login) return;
+      var url = location.origin + "/user/" + encodeURIComponent(d.login);
+      $("#share").hidden = false; $("#share-url").textContent = url; $("#share-btn").innerHTML = '<a class="btn" href="#share">Share your profile</a>';
+      $("#copy-link").onclick = function () { navigator.clipboard.writeText(url).then(function () { $("#copy-link").textContent = "copied"; setTimeout(function () { $("#copy-link").textContent = "copy"; }, 1500); }); };
+    });
   }).catch(function (e) { $("#line").textContent = "could not load: " + e; endSkeleton(); });
   liveStats(function () {}, 120000);
 `;
@@ -104,7 +114,7 @@ export function userHtml(login: string, poolUrl: string, version: RunningVersion
   return page({
     title: `${login} · omarchy-pool`,
     description: `What ${login} contributes to and maintains in the pool.`,
-    active: "contribute",
+    active: "factory",
     body: BODY,
     script: SCRIPT,
     poolUrl,
