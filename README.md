@@ -67,7 +67,12 @@ with the same tools maintainers use (one signed worker image for everyone,
 the owner's own agent if they like — Anthropic, OpenAI, Gemini or xAI), a
 second agent audits the staged evidence, maintainers rebuild and attest
 them, never their own — *we do not use what you built, we learn from it*
-([docs/GOVERNANCE.md](docs/GOVERNANCE.md)).
+([docs/GOVERNANCE.md](docs/GOVERNANCE.md)). Every package carries its
+**seal**: where the exact object came from and the proof — the upstream
+project and keyring for a synced package; for a factory package the whole
+chain (evidence build, audit, approval, rebuild) and a signed attestation
+next to the object in the pool (`GET /api/v1/packages/<sha256>/provenance`,
+the package page, `omarchy-cli info`, a pacman hook).
 
 | | |
 |---|---|

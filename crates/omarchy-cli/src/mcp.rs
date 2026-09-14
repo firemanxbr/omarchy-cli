@@ -24,7 +24,7 @@ fn tools() -> Value {
           "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false } },
         { "name": "check", "description": "Whether installing packages out of band is safe here: the plan (install/upgrade), ABI findings against this system's libraries (blockers = symbol versions it cannot satisfy) and the libalpm hooks pacman would run. Read-only.",
           "inputSchema": { "type": "object", "properties": { "targets": { "type": "array", "items": { "type": "string" }, "minItems": 1, "description": "Package names as the ring serves them." } }, "required": ["targets"], "additionalProperties": false } },
-        { "name": "info", "description": "A package as the ring's release publishes it: version, description, dependencies, provides, ABI needs, embedded libraries, size, checksum, mirror URL.",
+        { "name": "info", "description": "A package as the ring's release publishes it: version, description, dependencies, provides, ABI needs, embedded libraries, size, checksum, mirror URL, and its seal (where the object came from — the factory chain with audit, approval and attestation, or the upstream project and keyring).",
           "inputSchema": { "type": "object", "properties": { "package": { "type": "string" } }, "required": ["package"], "additionalProperties": false } },
         { "name": "search", "description": "Packages in the ring's release whose name or description contains the query.",
           "inputSchema": { "type": "object", "properties": { "query": { "type": "string", "minLength": 2 } }, "required": ["query"], "additionalProperties": false } },

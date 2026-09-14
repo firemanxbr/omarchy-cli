@@ -2,6 +2,7 @@ import { isRing, json, RINGS, type Env, type Ring } from "../index";
 import { isRepoArch } from "../r2";
 import { ringHead, ringMembers } from "../db";
 import { maintenanceOf } from "./users";
+import { sealOf } from "./seal";
 import { provenanceOf } from "../provenance";
 import { gunzipJson } from "../gzip";
 
@@ -211,6 +212,8 @@ export async function handlePackage(name: string, url: URL, env: Env): Promise<R
       maintenance: await maintenanceOf(env, chosen.name, chosen.source, manifest.pkginfo?.packager),
       // An OPR package: where its recipe comes from (omacom/omarchy-pkgs, read daily).
       provenance: chosen.source === "packages" ? await provenanceOf(env, chosen.name) : null,
+      // The seal: where this object came from and the proof (routes/seal.ts).
+      seal: await sealOf(env, chosen.sha256),
       package: { version: chosen.version, arch: chosen.arch, source: chosen.source, filename: chosen.filename, sha256: chosen.sha256, size_download: chosen.size_download, size_installed: chosen.size_installed, has_signature: chosen.has_signature === 1, created_at: chosen.created_at },
       manifest,
       depends,

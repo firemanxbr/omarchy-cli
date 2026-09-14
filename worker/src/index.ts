@@ -14,6 +14,7 @@
  *   POST /api/v1/packages?source=core              manifest JSON → index rows
  *   POST /api/v1/packages/known                    which sha256s are already indexed
  *   GET  /api/v1/packages/:sha256
+ *   GET  /api/v1/packages/:sha256/provenance      the seal: where the object came from, and the proof
  *   GET  /api/v1/releases/:ring[?fields=summary|include=files][&arch=&limit=&offset=&release_id=]
  *   GET  /api/v1/releases/:ring/history
  *   GET  /api/v1/releases/:ring/diff?from=&to=&arch=  added / removed / upgraded between two releases
@@ -41,6 +42,7 @@
 
 import { handleMultipartComplete, handleMultipartCreate, handleMultipartPart, handlePutPool, handlePutPoolSig } from "./routes/pool";
 import { handleGetPackage, handleKnownPackages, handlePostPackage } from "./routes/packages";
+import { handleProvenance } from "./routes/seal";
 import { handleCreateRelease, handleGetRelease, handleReleaseHistory, handlePutArtifact, handleReleaseDiff } from "./routes/releases";
 import { handleGraph } from "./routes/graph";
 import { handlePackage, handlePackageFiles, handleSearch } from "./routes/search";
@@ -406,6 +408,9 @@ async function api(method: string, path: string, url: URL, request: Request, env
   }
   if ((m = path.match(/^\/packages\/([0-9a-f]{64})$/)) && method === "GET") {
     return handleGetPackage(m[1], env);
+  }
+  if ((m = path.match(/^\/packages\/([0-9a-f]{64})\/provenance$/)) && method === "GET") {
+    return handleProvenance(m[1], env);
   }
   if (path === "/releases" && method === "POST") {
     return (await authorizeRelease(request, env)) ?? handleCreateRelease(request, env);

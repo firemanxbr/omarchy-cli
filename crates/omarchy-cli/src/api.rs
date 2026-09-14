@@ -122,6 +122,12 @@ impl Api {
     }
 
     /// Light listing for status / list / search.
+    /// The seal of an object: where it came from and the proof
+    /// (`GET /packages/:sha256/provenance`, routes/seal.ts).
+    pub fn provenance(&self, sha256: &str) -> Result<serde_json::Value> {
+        self.get(&format!("/packages/{sha256}/provenance"))
+    }
+
     pub fn release_summary(&self, ring: &str) -> Result<ReleaseSummaryView> {
         self.get(&format!("/releases/{ring}?fields=summary"))
     }

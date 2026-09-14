@@ -10,7 +10,7 @@ and the system without shelling out and parsing text. Everything is
 |---|---|---|
 | `status` | — | the ring, the pinned release, the head the ring serves now, how many installed packages come from it, the pending updates |
 | `check` | `targets: string[]` | the plan (install / upgrade per package), the ABI findings against this system's libraries (`safe`, blockers = symbol versions it cannot satisfy), the libalpm hooks pacman would run |
-| `info` | `package` | the manifest as the ring publishes it: version, description, dependencies, provides, ABI needs, embedded libraries, size, checksum, mirror URL, the release |
+| `info` | `package` | the manifest as the ring publishes it: version, description, dependencies, provides, ABI needs, embedded libraries, size, checksum, mirror URL, the release, and `seal` — where the object came from and the proof (the factory chain with audit, approval and attestation, or the upstream project and keyring) |
 | `search` | `query` | packages whose name or description contains it |
 | `list` | — | installed packages the ring also serves, each `current`, `update` or `ahead` |
 | `security` | — | installed packages with an open advisory (severity, CVEs, exploited in the wild, EPSS) and whether an upgrade from the ring fixes each |

@@ -1,4 +1,5 @@
 import { json, type Env } from "../index";
+import { writeAttestation } from "./seal";
 import { isRepoArch } from "../r2";
 import type { WorkerIdentity } from "./contributors";
 import { issueJobToken, scopesFor, type JobClaims } from "../jobtoken";
@@ -414,7 +415,16 @@ export async function handleComplete(id: number, request: Request, env: Env, act
     .run();
   await env.DB.prepare("UPDATE build_workers SET last_seen = ?, current_task = NULL, builds_done = builds_done + 1 WHERE id = ?").bind(now(), who).run();
   await event(env, "build", "ok", `${task.name} ${b.version ?? ""} built for ${task.arch} by ${who}${b.duration_ms ? " in " + Math.round(b.duration_ms / 60000) + " min" : ""}${task.publish === 0 ? " (dry run, not published)" : ""}`, { task: id, arch: task.arch, sha256: indexed.sha256, filename: b.filename, worker: who, attempts: task.attempts, duration_ms: b.duration_ms ?? null });
-  return json({ task: id, status: "done" });
+  // The seal, next to the object: the chain that produced it, signed by the pool.
+  let attested = false;
+  if (task.publish !== 0) {
+    try {
+      attested = await writeAttestation(env, indexed.sha256);
+    } catch (e) {
+      await event(env, "build", "warn", `${task.name}: attestation not written — ${String(e)}`, { task: id, sha256: indexed.sha256 });
+    }
+  }
+  return json({ task: id, status: "done", attested });
 }
 
 export async function handleFail(id: number, request: Request, env: Env, actor: Actor): Promise<Response> {
