@@ -26,6 +26,12 @@ describe("job tokens", () => {
     expect(scopesFor("promote", 8, "project", { from: "rc", to: "stable" })).toEqual(["task:8", "events", "release:stable", "artifacts:*:stable"]);
     expect(scopesFor("gc", 9, "project", {})).toEqual(["task:9", "events", "gc"]);
     expect(scopesFor("sync", 10, "project", { ring: "rc" })).toContain("release:rc");
+    // A scheduled sync names its sources, each with a ring: the OPR's rc and
+    // stable channels need their rings' scopes too (task 120, 2026-09-14).
+    const sources = JSON.stringify([{ source: "extra", arch: "x86_64", ring: "edge" }, { source: "packages", arch: "x86_64", ring: "rc" }, { source: "packages", arch: "x86_64", ring: "stable" }]);
+    const sync = scopesFor("sync", 11, "project", { arch: "x86_64", sources });
+    expect(sync).toEqual(expect.arrayContaining(["pool:write", "release:edge", "release:rc", "release:stable", "artifacts:*:rc", "artifacts:*:stable"]));
+    expect(scopesFor("sync", 12, "project", { sources: "not json" })).toEqual(["task:12", "events", "pool:write", "release:edge", "artifacts:*:edge"]);
   });
 });
 
