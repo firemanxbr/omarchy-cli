@@ -85,6 +85,16 @@ pool's jobs (sync, promote, health, security, gc) and the rebuild of a
 package a maintainer approved. They never pull a new package that has no
 evidence and no review yet — that is a contributor's worker's job.
 
+The project runs them as two roles of the same image, and a third for the
+community (`OMARCHY_WORKER_ROLE`, [factory/README.md](../factory/README.md)
+*Three roles*): a **pool** worker takes the pool's jobs and nothing else; a
+**review** worker takes the maintainers' work and nothing else — the
+rebuild after an approval and the audit of every staged build (the second
+agent); a shared **community** worker builds contributors' packages and
+drafts package requests with an agent key its owner brought. The split
+keeps the maintainers' agent and the contributors' agent apart, and a
+container that is not a review worker never audits.
+
 ## Becoming a maintainer
 
 1. **Contribute first.** Every maintainer was a contributor: packages
@@ -130,9 +140,9 @@ bypassed review. The exception ends the moment a second maintainer exists.
   (`factory/bin/agent.py`; `FACTORY_MODEL` picks the model). The worker
   reports *which* agent it runs (`anthropic/claude-sonnet-5`,
   `openai/gpt-5`, …) so the Factory page can show it; the key itself never
-  travels. The pool holds no agent key and GitHub runs no agent — the
-  hosted fallback never takes an audit; what an agent produces is evidence
-  like any other build, reviewed by a maintainer before it reaches anyone.
+  travels. The pool holds no agent key and GitHub runs no agent — nothing
+  of the pipeline runs there; what an agent produces is evidence like any
+  other build, reviewed by a maintainer before it reaches anyone.
 - **Package requests** (a GitHub issue) become a task for a *shared*
   community worker whose owner runs an agent. No such worker, no draft: the
   request waits, visibly, on the Factory page.

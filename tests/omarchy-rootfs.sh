@@ -87,7 +87,11 @@ echo "installed: $n packages"
 tar -C / -cf /repo/rootfs.tar var/lib/pacman/local usr/lib/lib*.so* 2>/dev/null
 BUILD
 echo "building the Omarchy reference from $RING ($(wc -l < "$WORK/install.txt" | tr -d ' ') packages) — a few minutes" >&2
-"$RUNTIME" run --rm --platform linux/amd64 -v "$WORK:/repo" "$ARCHLINUX_BASE" bash /repo/build.sh >&2 || exit 1
+# OMARCHY_PKG_CACHE: a package cache the host shares with its build
+# containers (one directory per architecture) — the reference downloads once.
+cache_mount=()
+if [[ -n "${OMARCHY_PKG_CACHE:-}" ]]; then mkdir -p "$OMARCHY_PKG_CACHE/x86_64"; cache_mount=(-v "$OMARCHY_PKG_CACHE/x86_64:/var/cache/pacman/pkg"); fi
+"$RUNTIME" run --rm --platform linux/amd64 -v "$WORK:/repo" ${cache_mount[@]+"${cache_mount[@]}"} "$ARCHLINUX_BASE" bash /repo/build.sh >&2 || exit 1
 rm -rf "$CACHE"; mkdir -p "$CACHE"
 tar -xf "$WORK/rootfs.tar" -C "$CACHE"
 date +%s > "$CACHE/.built"

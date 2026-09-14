@@ -26,6 +26,17 @@ const BODY = String.raw`
   --certificate-oidc-issuer https://token.actions.githubusercontent.com</pre></div></div>
   </section>
 
+  <section id="roles">
+    <h2>The three roles</h2>
+    <p class="sub">The project runs its workers as three kinds of container, and anyone donating a machine can run the same. A role is set with <code>OMARCHY_WORKER_ROLE</code>; it narrows what the registration allows, never widens it, and the container refuses to start under a registration that does not match (a <em>pool</em> or <em>review</em> role needs project trust, a <em>community</em> role a community registration). The Factory page shows each worker's role.</p>
+    <div class="table-wrap"><table><thead><tr><th>Role</th><th>Registration</th><th>What it does</th><th>Agent key</th></tr></thead><tbody>
+      <tr><td><b>pool</b></td><td>project trust</td><td>the pool's own jobs and nothing else: sync, render, promote, rollback, health, security, enqueue, gc, verify. Never a build, never an audit.</td><td>none</td></tr>
+      <tr><td><b>review</b></td><td>project trust</td><td>the maintainers' work and nothing else: the rebuild of approved packages in fresh sibling containers, and the audit of every staged build (the second agent). Never a pool job.</td><td>wanted — without one, audits wait</td></tr>
+      <tr><td><b>community</b></td><td>community registration</td><td>a shared community worker (<code>WORKER_SHARED=1</code> implied): builds anyone's registered packages and drafts PKGBUILDs for package requests, one task per container.</td><td>wanted — without one, package requests wait</td></tr>
+    </tbody></table></div>
+    <p class="sub">Two of each — one per architecture — is what the project runs on its own host (RUNBOOK, <em>The Studio host</em>): x86_64 pool jobs are only a label and run natively on any machine; x86_64 <em>builds</em> on an aarch64 host run under user-mode emulation, correct but slower. Without a role the trust decides everything: a project worker takes pool jobs, rebuilds and audits alike; a community worker builds its owner's packages.</p>
+  </section>
+
   <section>
     <h2>Before you start</h2>
     <div class="steps">
