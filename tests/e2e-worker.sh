@@ -165,6 +165,25 @@ done
 grep -q '"unchanged_arches":\["x86_64"\]' <<<"$unch" || { echo "an aarch64-scoped release must report x86_64 unchanged"; curl -s "$OMARCHY_API/api/v1/status"; echo; exit 1; }
 carried=$(curl -s "$OMARCHY_API/api/v1/releases/stable?fields=summary"); grep -q '"repo":"omarchy-packages-stable","arch":"x86_64","kind":"db"' <<<"$carried" || { echo "the parent's x86_64 databases were not carried over: $(head -c 300 <<<"$carried")"; exit 1; }
 
+step "Verify across rings: an any package is one object per architecture directory"
+# An `any` package is one object per architecture directory, with different
+# bytes (Arch Linux ARM rebuilds them). Pinned by two rings with a bad
+# signature on the x86_64 copy, verify used to carry the aarch64 bytes into
+# the x86_64 re-pin of the second ring (production, 2026-09-14: "packages
+# not indexed"). Now: one bad signature, nothing re-pinned.
+for a in x86_64 aarch64; do
+  mkdir -p "$E2E/any/$a/root"
+  printf 'pkgname = e2e-any\npkgver = 1-1\npkgdesc = one object per directory (%s)\narch = any\nsize = 1\n' "$a" > "$E2E/any/$a/root/.PKGINFO"
+  (cd "$E2E/any/$a/root" && tar -cf - .PKGINFO | xz -c > "../e2e-any-1-1-any.pkg.tar.xz")
+  gpg --batch --yes --detach-sign --no-armor --local-user "$KEYID" --output "$E2E/any/$a/e2e-any-1-1-any.pkg.tar.xz.sig" "$E2E/any/$a/e2e-any-1-1-any.pkg.tar.xz"
+  for r in rc stable; do "$PKG_REPO" publish --ring "$r" --source packages --arch "$a" --note "e2e-any $a" "$E2E/any/$a/e2e-any-1-1-any.pkg.tar.xz" >/dev/null; done
+done
+any_x86=$(sha256sum "$E2E/any/x86_64/e2e-any-1-1-any.pkg.tar.xz" | cut -d' ' -f1)
+curl -s -o /dev/null -X PUT "$OMARCHY_API/api/v1/pool/$any_x86/sig?filename=e2e-any-1-1-any.pkg.tar.xz&arch=x86_64" -H "Authorization: Bearer $OMARCHY_TOKEN" --data-binary "@$E2E/any/aarch64/e2e-any-1-1-any.pkg.tar.xz.sig"
+vout=$("$PKG_REPO" verify --keyring "$E2E/verify-key.asc" --work-dir "$E2E/verify-work" --pool "$OMARCHY_API/pool" --repair 2>&1 || true)
+grep -q "1 bad signature(s)" <<<"$vout" && grep -q "0 pinned bytes the pool does not store (0 re-pinned)" <<<"$vout" || { echo "verify must find one bad signature and re-pin nothing: $vout"; exit 1; }
+curl -s -o /dev/null -X PUT "$OMARCHY_API/api/v1/pool/$any_x86/sig?filename=e2e-any-1-1-any.pkg.tar.xz&arch=x86_64" -H "Authorization: Bearer $OMARCHY_TOKEN" --data-binary "@$E2E/any/x86_64/e2e-any-1-1-any.pkg.tar.xz.sig"
+
 step "Pool sanity (flat layout: databases beside the packages)"
 for f in omarchy-packages-stable.db omarchy-packages-stable.db.sig omarchy-packages-stable.files "zlib-1:1.3.2-3-x86_64.pkg.tar.zst" "zlib-1:1.3.2-3-x86_64.pkg.tar.zst.sig"; do
   code=$(curl -s -o /dev/null -w '%{http_code}' "$OMARCHY_API/pool/x86_64/$f")

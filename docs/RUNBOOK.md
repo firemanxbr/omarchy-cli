@@ -263,6 +263,19 @@ evidence the day it appears; the sync pins the stored object whenever a
 filename collides, known sha or not; GC never deletes an object another
 index row still names.
 
+The first run (task 98, 2026-09-14) repaired the 69 signatures and then
+failed on its own re-pin: `packages not indexed`. An `any` package is one
+object per architecture directory with different bytes (Arch Linux ARM
+rebuilds them), and the job remembered what the pool stores by filename
+alone — so a ring's x86_64 re-pin carried the aarch64 bytes. It now keeps
+one entry per `<arch>/<filename>`, and a re-pin happens exactly when the
+ring's pin differs from what that directory stores, whatever the
+signature's story was. The index holds one row per sha256 (0001_init.sql):
+the same bytes stored under both directories can be indexed for one of
+them, and the other directory's pin is reported rather than forced
+(`POST /packages` answers 409, not a database error). The second attempt
+re-pinned the 5 objects (rc#18, stable#8) and every OPR object verified.
+
 ## The factory
 
 What no upstream ships is built from `factory/pkgbuilds` by workers that pull

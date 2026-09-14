@@ -76,6 +76,20 @@ describe("embedded components", () => {
   });
 });
 
+describe("POST /packages", () => {
+  it("indexes one row per sha256: the same bytes under the other architecture directory are refused, not a database error", async () => {
+    const filename = "fonts-1-1-any.pkg.tar.zst";
+    const bytes = new TextEncoder().encode("the same any package in both directories");
+    const manifest = { schema_version: 1, name: "fonts", version: "1-1", arch: "any", sha256: sha("fonts-any"), filename, size_download: bytes.length, size_installed: 1, description: "fonts", provides: ["fonts"], requires: [], files: [] };
+    for (const arch of ["x86_64", "aarch64"]) await env.PACKAGES.put(packageKey(arch, filename), bytes);
+    expect((await call("POST", "/packages?source=packages&arch=x86_64", manifest, pool)).status).toBe(201);
+    expect((await call("POST", "/packages?source=packages&arch=x86_64", manifest, pool)).json.status).toBe("already-indexed");
+    const other = await call("POST", "/packages?source=packages&arch=aarch64", manifest, pool);
+    expect(other.status).toBe(409);
+    expect(other.json.repo_arch).toBe("x86_64");
+  });
+});
+
 describe("POST /releases", () => {
   it("needs a job token with the ring's scope", async () => {
     expect((await call("POST", "/releases", { ring: "edge", add: [shas["zlib-x86"]] })).status).toBe(401);
