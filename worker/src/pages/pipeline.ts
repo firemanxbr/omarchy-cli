@@ -21,7 +21,7 @@ const BODY = String.raw`
   <div class="state-row" id="state"><span class="pill none">checking…</span></div>
 
   <section id="live">
-    <div class="h2row"><h2>A living system</h2><a class="more-link" href="/docs/how-it-works">What each stage does →</a></div>
+    <div class="h2row"><h2>A living system</h2><a class="more-link" href="/docs#security/feeds">What each security feed contributes →</a></div>
     <p class="sub">Every three hours: packages are verified and promoted, five security feeds are matched against what every ring serves, and a confident fix does not wait for the soak.</p>
     <figure class="diagram live-diagram">${liveDiagram()}<figcaption>Green marks are packages on their way to <code>stable</code>; amber marks are advisories being matched against each ring. The dashed arc is the fast-track. The numbers are the pool's own.</figcaption></figure>
     <div class="live-grid" style="margin-top:16px">
