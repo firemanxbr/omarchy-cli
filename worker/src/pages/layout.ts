@@ -412,7 +412,13 @@ const CSS = String.raw`
     .gate, .sponsor { grid-template-columns: 1fr; } .sponsor .side { justify-items: start; } .sponsor .promise { text-align: left; }
     .heat .r, .heat .days { grid-template-columns: 80px repeat(14, 1fr); }
   }
-  @media (max-width: 720px) { .hero h1 { font-size: 24px; } .hrow { grid-template-columns: 110px 1fr 46px; } }
+  .live-grid > * { min-width: 0; } .ticker .row > span { min-width: 0; overflow-wrap: anywhere; }
+  #seal .mono, .meta .mono, .kv dd .mono, .whorow, .whoc span { overflow-wrap: anywhere; }
+  @media (max-width: 720px) {
+    .hero h1 { font-size: 24px; } .hrow { grid-template-columns: 110px 1fr 46px; }
+    .ticker .row { grid-template-columns: 1fr; gap: 1px; padding-bottom: 6px; border-bottom: 1px solid var(--line); } .ticker .row .when { font-size: 11px; }
+    .flow .st { min-width: 130px; } .roles-grid { grid-template-columns: 1fr; }
+  }
 `;
 
 /** Helpers shared by every page script; runs before the page's own script. */
