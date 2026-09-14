@@ -142,18 +142,17 @@ reconcile (`enqueue`, hourly); daily slots for promote (06:00 edge→rc,
 pulled job (below) when due and never doubled while one is queued or
 running. The metrics snapshot (30 min), the governance sync (10 min), the
 package-request issues (10 min), the update check (05:45) and the cost
-estimate (06:30) it does itself. Two things still start on GitHub, by
+estimate (06:30) it does itself. One thing still starts on GitHub, by
 dispatch: `factory-update.yml` (05:45, pull requests for the project's own
-recipes) and `pool-worker.yml` (a hosted worker when pool jobs wait and no
-project worker is idle). Each dispatch is a `dispatch` line in the journal
-and needs the worker secret `GITHUB_TOKEN` (fine-grained, this repository,
-*Actions: read and write*):
+recipes). Each dispatch is a `dispatch` line in the journal and needs the
+worker secret `GITHUB_TOKEN` (fine-grained, this repository, *Actions: read
+and write*):
 
 ```bash
 cd worker && npx wrangler secret put GITHUB_TOKEN < ~/.cache/omarchy-cli-poc/github-token
 ```
 
-Without the secret the jobs still run; only those two dispatches stop.
+Without the secret the jobs still run; only that dispatch stops.
 
 ## Pulled jobs (the pool without GitHub)
 
@@ -175,11 +174,52 @@ with a maintainer's contributor token; maintainers are named by
 `factory/MAINTAINERS.toml` (docs/GOVERNANCE.md), nowhere else. Every task
 runs with a per-job token the pool issues at claim time (SECURITY.md);
 the worker's own token only claims. No pipeline step runs on GitHub any
-more: the workflows that did are gone, and a run by hand is a job. When
-pool jobs wait and no project worker is idle, the scheduler starts one on
-a GitHub-hosted runner (`pool-worker.yml`, a registered project worker per
-architecture) — the fallback fleet, never for a package build. Worker
-secret: `JOB_TOKEN_SECRET` (any random string) signs the job tokens.
+more: the workflows that did are gone, and a run by hand is a job. GitHub
+Actions runs CI and the release only — there is no hosted worker: when
+pool jobs wait and no project worker is alive, they wait, the scheduler
+log and the Factory page say so, and *The Studio host* (below) is where
+to look. Worker secret: `JOB_TOKEN_SECRET` (any random string) signs the
+job tokens.
+
+## The Studio host
+
+The project's workers run on one machine — `omarchy-studio`, a Mac Studio
+on Arch Linux ARM (Asahi), 12 cores, 32 GB, on around the clock — as six
+containers of the worker image, two of each role, one per architecture
+([factory/host/](../factory/host/README.md); the roles:
+[factory/README.md](../factory/README.md) *Three roles*):
+
+| Service | Registration | Takes |
+|---|---|---|
+| `pool-x86_64`, `pool-aarch64` | project trust | the pool's jobs: sync, render, promote, rollback, health, security, enqueue, gc, verify |
+| `review-x86_64`, `review-aarch64` | project trust, an agent key | the rebuild of approved packages, the audit of staged builds |
+| `community-x86_64`, `community-aarch64` | community, shared, an agent key | contributors' registered packages, drafts for package requests |
+
+The host is aarch64: pool and review workers run natively (an x86_64 pool
+job is a label; an x86_64 rebuild is a sibling container the runtime
+emulates), the x86_64 community worker is itself an emulated container.
+Emulated builds are correct and several times slower; a native x86_64
+machine registers as another worker when one is wanted — the pool does
+not care where a worker runs. Everything lives under `/srv/omarchy-pool`
+(a btrfs subvolume on the internal disk; the 4 TB drive joins when it has a
+USB enclosure — the Asahi kernel has no Thunderbolt tunnelling, so the NVMe
+slot of a Thunderbolt dock is invisible to it): `work/<service>` (the same
+path inside the project workers), `cache/pacman/<arch>` (one package cache
+per architecture, mounted into every build container: `OMARCHY_PKG_CACHE`),
+`etc/` (the six worker tokens and `agent.env`, mode 600, never in the
+repository). Day to day, on the host:
+
+```bash
+cd /srv/omarchy-pool
+docker compose ps                                # six up?
+docker compose logs -f --tail 50 pool-aarch64    # one of them
+docker compose pull && docker compose up -d      # after a pool release
+```
+
+The Factory page shows them by role; the laptop runs nothing any more,
+and GitHub Actions runs CI and the release only — there is no hosted
+fallback worker: when the host is down, pool jobs wait, and the dashboard
+says so.
 
 ## Maintainers: reviewing contributed builds
 
@@ -190,8 +230,8 @@ in with GitHub — approves or rejects:
 
 - **Approve** records the decision (`approvals`, with your login and note)
   and queues a **project build** of the staged PKGBUILD (`pkgbuild_ref =
-  staging:<task>`, trust `project`). A project worker (`pkg-repo work`, or
-  the hosted fallback) builds it in a fresh container, signs it, publishes
+  staging:<task>`, trust `project`). A review worker (`pkg-repo work`)
+  builds it in a fresh container, signs it, publishes
   it into `edge` as source `factory` and renders; from there the package
   follows the rings like any other. The contributor's bytes are never
   served.
@@ -363,13 +403,13 @@ tasks from the pool ([factory/README.md](../factory/README.md)). Day to day:
   contributor token (`omc_…`) or worker token (`omw_…`) is a random secret
   hashed in D1; revoke a worker with `DELETE /factory/workers/<id>` as its
   owner, or set `revoked_at` in `build_workers` by hand.
-- **Tokens**: there is no shared worker secret. Every worker — the Mac's,
-  a droplet's, the hosted fallback's — is a registration with its own
-  `omw_` token; project trust is a maintainer's decision on that
-  registration. The hosted `pool-worker.yml` runs as two registered
-  workers, one per architecture, whose tokens are the GitHub secrets
-  `POOL_WORKER_TOKEN_X86_64` / `POOL_WORKER_TOKEN_AARCH64`; to rotate one,
-  revoke the worker, register a new one, trust it, `gh secret set`.
+- **Tokens**: there is no shared worker secret. Every worker — each of the
+  Studio's six, a droplet's, a contributor's — is a registration with its
+  own `omw_` token; project trust is a maintainer's decision on that
+  registration. The Studio's tokens live in `/srv/omarchy-pool/etc/*.env`
+  on the host (`factory/host/register.sh` writes them); to rotate one,
+  revoke the worker, blank its env file, run `register.sh` again,
+  `docker compose up -d`.
 
 ## Costs
 

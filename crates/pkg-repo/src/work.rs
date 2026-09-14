@@ -382,6 +382,22 @@ fn fresh_within(stamp: &Path, max: Duration) -> bool {
 }
 
 /// The repository checkout the scripts live in, cloned at this binary's version when missing.
+/// `$OMARCHY_PKG_CACHE/<arch>`, created, when the operator shares a pacman
+/// package cache with the build containers (a path on the host: the
+/// runtime mounts it, so it must be the same on both sides).
+fn pkg_cache_dir(arch: &str) -> Result<Option<PathBuf>> {
+    let Some(root) = std::env::var_os("OMARCHY_PKG_CACHE") else {
+        return Ok(None);
+    };
+    if root.is_empty() {
+        return Ok(None);
+    }
+    let dir = PathBuf::from(root).join(arch);
+    std::fs::create_dir_all(&dir)
+        .with_context(|| format!("creating the package cache {}", dir.display()))?;
+    Ok(Some(dir))
+}
+
 fn repo_dir(opts: &WorkOptions) -> Result<PathBuf> {
     if let Some(d) = &opts.repo_dir {
         return Ok(d.clone());
@@ -788,17 +804,25 @@ fn build_job(opts: &WorkOptions, job: &Api, task: &Task) -> Result<Outcome> {
         ("docker.io/library/archlinux:base-devel", "linux/amd64")
     };
     let log = std::fs::File::create(dir.join("build.log"))?;
-    let status = Command::new(runtime)
-        .args([
-            "run",
-            "--rm",
-            "--platform",
-            platform,
-            "--name",
-            &format!("omarchy-build-{}", task.id),
-            "-v",
-        ])
-        .arg(format!("{}:/task", dir.display()))
+    let mut run = Command::new(runtime);
+    run.args([
+        "run",
+        "--rm",
+        "--platform",
+        platform,
+        "--name",
+        &format!("omarchy-build-{}", task.id),
+        "-v",
+    ])
+    .arg(format!("{}:/task", dir.display()));
+    // A package cache shared by every build container on this host
+    // (OMARCHY_PKG_CACHE, one directory per architecture): pacman downloads
+    // a dependency once, not once per build.
+    if let Some(cache) = pkg_cache_dir(&task.arch)? {
+        run.arg("-v")
+            .arg(format!("{}:/var/cache/pacman/pkg", cache.display()));
+    }
+    let status = run
         .args([image, "bash", "/task/worker.sh", "--inside"])
         .stdout(log.try_clone()?)
         .stderr(log)

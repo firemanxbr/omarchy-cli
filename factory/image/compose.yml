@@ -11,6 +11,10 @@ services:
       WORKER_LABELS: '{"where":"${WHERE:-my-machine}"}'
       # 1 = also build other contributors' packages (donated compute); default: yours only.
       WORKER_SHARED: ${WORKER_SHARED:-0}
+      # Optional role — pool, review or community (docs: /docs/workers#roles):
+      # narrows the container to one kind of work; the project's own hosts
+      # run two of each (factory/host/compose.yml).
+      OMARCHY_WORKER_ROLE: ${OMARCHY_WORKER_ROLE:-}
       # Optional: your own agent — one key is enough (your key, your cost). A
       # contributor's worker drafts and corrects PKGBUILDs with it; a project
       # worker audits staged builds. FACTORY_MODEL picks the model.

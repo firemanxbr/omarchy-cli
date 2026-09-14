@@ -460,7 +460,7 @@ export async function handleFactory(env: Env, url?: URL): Promise<Response> {
   const limit = Math.min(200, Math.max(10, Number(url?.searchParams.get("limit") ?? 60) || 60));
   const counts = await env.DB.prepare("SELECT status, arch, COUNT(*) AS n FROM build_tasks GROUP BY status, arch").all();
   // Every worker belongs to someone: the project (trust project, granted by
-  // a maintainer; or the hosted fallback, owner NULL) or a contributor.
+  // a maintainer) or a contributor.
   const workers = await env.DB.prepare(
     "SELECT * FROM build_workers WHERE revoked_at IS NULL ORDER BY (last_seen > ?) DESC, last_seen DESC LIMIT 200",
   )
@@ -480,7 +480,7 @@ export async function handleFactory(env: Env, url?: URL): Promise<Response> {
         labels: w.labels ? JSON.parse(w.labels) : null,
         packages: w.packages ? JSON.parse(w.packages) : null,
         alive: Date.parse(w.last_seen) > alive,
-        // omarchy: runs for the project (trusted, or the hosted fallback) · community: a contributor's
+        // omarchy: runs for the project (trusted; owner NULL is an old hosted registration) · community: a contributor's
         side: w.trust === "project" || w.owner === null ? "omarchy" : "community",
       })),
       tasks: tasks.results.map((t) => ({ ...t, log_tail: undefined })),

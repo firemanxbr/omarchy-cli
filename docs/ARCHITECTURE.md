@@ -89,7 +89,12 @@ serves data. Decisions are made by the publisher (`pkg-repo`) and the client.
 Every row below is a **pulled job**: the Worker's cron queues it in
 `build_tasks` on this schedule (`JOB_KINDS`), a project worker runs it with a
 per-job token, and a maintainer queues the same by hand (`pkg-repo job`).
-Nothing of the pipeline runs on GitHub Actions.
+Nothing of the pipeline runs on GitHub Actions. The project's workers are
+three roles of one image ([factory/README.md](../factory/README.md) *Three
+roles*): *pool* workers take the rows below, *review* workers the `build`
+of approved packages and the `audit`, shared *community* workers the
+contributors' builds — two of each, one per architecture, on the project's
+host (RUNBOOK, *The Studio host*).
 
 | Job | Schedule | What it does |
 |---|---|---|
@@ -101,17 +106,18 @@ Nothing of the pipeline runs on GitHub Actions.
 | `enqueue` | hourly | the PKGBUILDs on `main` reconciled with what the factory built: every (package, architecture, version) without a task is queued at that commit |
 | `rollback` | by hand only | a ring pointed at an earlier release, both architectures re-rendered |
 | `verify` | weekly (Saturday 03:00 UTC), or by hand | does what the pool serves verify? Every OPR object of every ring and architecture downloaded and checked: the bytes are the ones the index names, the `.sig` beside them is Omarchy's signature of those bytes. What is wrong is repaired — the right signature from the upstream channel that still serves the bytes, the ring re-pinned to the object the pool actually holds (indexed from the bytes if the index never saw them), rendered — and what no channel serves any more is reported for a replacement (`verify` event, `pkg-repo verify --repair`) |
-| `audit` | when a community build is staged | the second agent ([GOVERNANCE.md](GOVERNANCE.md#the-second-agent)): a project worker whose owner set an agent key (Anthropic, OpenAI, Gemini or xAI) reads the staged PKGBUILD, log and `.PKGINFO`, asks its model for a structured review (`factory/bin/audit-pkgbuild`, `factory/prompts/audit.md`) and attaches `audit.json` / `audit.md` to the evidence; the Review page shows the verdict. Never taken by the hosted fallback |
+| `audit` | when a community build is staged | the second agent ([GOVERNANCE.md](GOVERNANCE.md#the-second-agent)): a project worker whose owner set an agent key (Anthropic, OpenAI, Gemini or xAI) reads the staged PKGBUILD, log and `.PKGINFO`, asks its model for a structured review (`factory/bin/audit-pkgbuild`, `factory/prompts/audit.md`) and attaches `audit.json` / `audit.md` to the evidence; the Review page shows the verdict. A review worker's job |
 | `build` | on approval, on merge, on a new upstream release | a package built in a fresh container: community trust on a contributor's worker into their staging workspace, project trust on a trusted worker into `edge` |
 | metrics snapshot (`src/metrics.ts`) | every 30 minutes | taken by the Worker itself, no job: the pool's jobs of the last 7 days (runs, failures, worker minutes, per kind), builds, workers alive, pool totals and ring sizes, as a `metrics` event; the dashboard's charts and jobs table read from it |
-| worker cron trigger | every 10 minutes | the pool's own scheduler: queues the jobs above when due, requeues expired leases, applies `factory/MAINTAINERS.toml`, reads package-request issues, reads the OPR's recipe repository for provenance (05:15, `src/provenance.ts`: per package, Omarchy's own or AUR-synced, the upstream AUR commit, the last commit), checks upstreams for bumps (05:45), estimates the bill (06:30), starts the hosted fallback worker when pool jobs wait and no project worker is idle; see RUNBOOK |
+| worker cron trigger | every 10 minutes | the pool's own scheduler: queues the jobs above when due, requeues expired leases, applies `factory/MAINTAINERS.toml`, reads package-request issues, reads the OPR's recipe repository for provenance (05:15, `src/provenance.ts`: per package, Omarchy's own or AUR-synced, the upstream AUR commit, the last commit), checks upstreams for bumps (05:45), estimates the bill (06:30), logs pool jobs waiting for a project worker; see RUNBOOK |
 | `ci.yml`, `e2e.yml` | every pull request | fmt, clippy, tests and the worker typecheck on x86_64 and aarch64; real pacman end to end through a local worker |
 | `release.yml` | every merge into `main` | CI + E2E again on the merged commit, next version from the last tag (`v0.0.1`, `v0.0.2`, …), binaries for both architectures, GitHub release, `wrangler deploy` carrying `POOL_VERSION` — the dashboard shows what is running |
 
 Every step posts an event; https://omarchy-pool.firemanxbr.org renders them.
-Two workflows remain on GitHub besides CI and the release: `factory-update.yml`
+One workflow remains on GitHub besides CI and the release: `factory-update.yml`
 (pull requests bumping the project's own recipes, reviewed by their group's
-maintainers) and `pool-worker.yml` (the hosted fallback worker).
+maintainers). No worker runs on GitHub: the project's six run on its own
+host (RUNBOOK, *The Studio host*).
 Operations, trust model and the kill switch are in [RUNBOOK.md](RUNBOOK.md).
 
 #### Promotion by evidence, not by calendar

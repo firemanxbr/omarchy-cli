@@ -1,0 +1,87 @@
+# The project's own host — two workers of each role, one per architecture
+# (docs/RUNBOOK.md, *The Studio host*; the roles: /docs/workers#roles).
+#
+#   docker compose up -d            start (or restart on a new image)
+#   docker compose pull && docker compose up -d      upgrade after a pool release
+#   docker compose logs -f review-aarch64            one worker's log
+#
+# Everything lives under POOL_ROOT (.env, written by setup.sh): the work
+# directories (the same path on the host and inside a project worker, so the
+# sibling build containers it starts can mount subdirectories), one pacman
+# package cache per architecture shared by every build, and etc/ with the
+# secrets — a worker token per service (register.sh writes them) and the
+# agent key the review and community workers use (etc/agent.env, yours).
+#
+# The host is aarch64: the pool and review workers run natively (an x86_64
+# pool job is only a label; an x86_64 rebuild starts an emulated sibling
+# container), the x86_64 community worker is itself an emulated container.
+
+x-project: &project
+  image: ghcr.io/firemanxbr/omarchy-worker:latest
+  restart: unless-stopped
+  volumes:
+    - /var/run/docker.sock:/var/run/docker.sock
+    - ${POOL_ROOT:-/srv/omarchy-pool}:${POOL_ROOT:-/srv/omarchy-pool}
+  logging: &logging
+    driver: json-file
+    options: { max-size: "20m", max-file: "3" }
+
+services:
+  pool-x86_64:
+    <<: *project
+    env_file: [etc/pool-x86_64.env]
+    environment:
+      OMARCHY_WORKER_ROLE: pool
+      OMARCHY_WORK_DIR: ${POOL_ROOT:-/srv/omarchy-pool}/work/pool-x86_64
+      OMARCHY_PKG_CACHE: ${POOL_ROOT:-/srv/omarchy-pool}/cache/pacman
+      WORKER_LABELS: '{"where":"${WHERE:-omarchy-studio}"}'
+  pool-aarch64:
+    <<: *project
+    env_file: [etc/pool-aarch64.env]
+    environment:
+      OMARCHY_WORKER_ROLE: pool
+      OMARCHY_WORK_DIR: ${POOL_ROOT:-/srv/omarchy-pool}/work/pool-aarch64
+      OMARCHY_PKG_CACHE: ${POOL_ROOT:-/srv/omarchy-pool}/cache/pacman
+      WORKER_LABELS: '{"where":"${WHERE:-omarchy-studio}"}'
+
+  review-x86_64:
+    <<: *project
+    env_file: [etc/agent.env, etc/review-x86_64.env]
+    environment:
+      OMARCHY_WORKER_ROLE: review
+      OMARCHY_WORK_DIR: ${POOL_ROOT:-/srv/omarchy-pool}/work/review-x86_64
+      OMARCHY_PKG_CACHE: ${POOL_ROOT:-/srv/omarchy-pool}/cache/pacman
+      WORKER_LABELS: '{"where":"${WHERE:-omarchy-studio}","emulated":true}'
+  review-aarch64:
+    <<: *project
+    env_file: [etc/agent.env, etc/review-aarch64.env]
+    environment:
+      OMARCHY_WORKER_ROLE: review
+      OMARCHY_WORK_DIR: ${POOL_ROOT:-/srv/omarchy-pool}/work/review-aarch64
+      OMARCHY_PKG_CACHE: ${POOL_ROOT:-/srv/omarchy-pool}/cache/pacman
+      WORKER_LABELS: '{"where":"${WHERE:-omarchy-studio}"}'
+
+  # A community worker builds inside its own container, one task per
+  # container (the restart policy starts the next one); no socket, no work
+  # directory — only the package cache of its architecture.
+  community-x86_64:
+    image: ghcr.io/firemanxbr/omarchy-worker:x86_64
+    platform: linux/amd64
+    restart: unless-stopped
+    env_file: [etc/agent.env, etc/community-x86_64.env]
+    environment:
+      OMARCHY_WORKER_ROLE: community
+      WORKER_LABELS: '{"where":"${WHERE:-omarchy-studio}","emulated":true}'
+    volumes:
+      - ${POOL_ROOT:-/srv/omarchy-pool}/cache/pacman/x86_64:/var/cache/pacman/pkg
+    logging: *logging
+  community-aarch64:
+    image: ghcr.io/firemanxbr/omarchy-worker:aarch64
+    restart: unless-stopped
+    env_file: [etc/agent.env, etc/community-aarch64.env]
+    environment:
+      OMARCHY_WORKER_ROLE: community
+      WORKER_LABELS: '{"where":"${WHERE:-omarchy-studio}"}'
+    volumes:
+      - ${POOL_ROOT:-/srv/omarchy-pool}/cache/pacman/aarch64:/var/cache/pacman/pkg
+    logging: *logging

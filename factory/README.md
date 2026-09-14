@@ -201,17 +201,33 @@ pkg-repo work --worker-token omw_… --labels '{"where":"laptop"}'
 pkg-repo work --worker-token omw_… --arch x86_64 --labels '{"where":"laptop","emulated":true}'
 ```
 
-`--idle-exit 300` makes a worker exit after five minutes without work (what
-the hosted fallback uses); `--once` makes it one-shot. A build container gets `[omarchy-factory-edge]` in its `pacman.conf` once that
-database exists, so a package can depend on an earlier factory build.
+`--idle-exit 300` makes a worker exit after five minutes without work;
+`--once` makes it one-shot. A build container gets `[omarchy-factory-edge]`
+in its `pacman.conf` once that database exists, so a package can depend on
+an earlier factory build. `OMARCHY_PKG_CACHE=/path` on the host shares one
+pacman package cache (a directory per architecture) with every build
+container it starts, so a dependency downloads once.
+
+**Three roles.** The project runs its workers as three kinds of container
+of that same image, `OMARCHY_WORKER_ROLE` set (`factory/image/entrypoint.sh`;
+the dashboard's *Run a worker* page, *The three roles*): **pool** — a
+project-trusted registration that takes only the pool's jobs (sync, render,
+promote, rollback, health, security, enqueue, gc, verify); **review** — a
+project-trusted registration that takes only the maintainers' work, the
+rebuild of approved packages and the audit of staged builds, with an agent
+key; **community** — a community registration, shared, that builds anyone's
+registered packages and drafts PKGBUILDs for package requests with an agent
+key. A role narrows what the trust allows and the container refuses a
+registration that does not match. Two of each, one per architecture, run on
+the project's own host (`factory/host/`, RUNBOOK *The Studio host*).
 
 **Whose compute.** Contributors build on their own workers (or a shared
 community worker someone else runs); project builds — the rebuild after an
 approval, the packages in `factory/pkgbuilds` — run on machines the project
 trusts. No GitHub runner ever builds a package: the project's compute is
-not for building everyone's software. The pool's own jobs (sync, promote,
-health, gc) do get a hosted fallback when no project worker is idle
-(`pool-worker.yml`), so operations never stop.
+not for building everyone's software, and GitHub Actions runs CI and the
+release only — no worker, not even for the pool's own jobs: when the
+project's host is down they wait, and the Factory page says so.
 
 ## The contract
 

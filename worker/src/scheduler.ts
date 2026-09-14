@@ -168,11 +168,12 @@ export function isDue(rule: Rule, runs: RunSummary[], now: Date): { due: boolean
 }
 
 /**
- * The factory queue lives in D1; workers can run anywhere. GitHub's hosted
- * runners are one free, ephemeral place to run them (x86_64 and aarch64
- * natively on a public repository), so when tasks are queued for an
- * architecture and no worker of that architecture is alive, the scheduler
- * starts one there. It is a worker like any other: it claims from Cloudflare.
+ * The factory queue lives in D1; workers can run anywhere — the project's
+ * own host (RUNBOOK, *The Studio host*) or a machine somebody donates.
+ * Per architecture: what is queued for a project worker, and how many are
+ * alive and idle. Nothing starts a worker: GitHub runs CI and the release
+ * only, so when no project worker is alive the jobs wait and the log says
+ * so (the Factory page too).
  */
 export async function factoryDemand(env: Env, now = new Date()): Promise<{ arch: string; queued: number; alive: number; pool: number }[]> {
   // "alive" here means alive *and idle*: a worker busy with a nine-hour
@@ -306,31 +307,8 @@ export async function runScheduler(env: Env, now = new Date()): Promise<string[]
   }
   try {
     for (const d of await factoryDemand(env, now)) {
-      if (d.alive > 0) {
-        log.push(`factory ${d.arch}: ${d.queued} queued, ${d.alive} idle project worker(s)`);
-        continue;
-      }
-      // Only pool jobs get a hosted fallback. Builds — contributors' on their
-      // own workers, the project's on its trusted machines — never start a
-      // GitHub runner: the project's compute is not for building packages.
-      // Audits neither: they need a worker owner's agent key, which GitHub
-      // never holds (SECURITY.md).
-      const pending = await env.DB.prepare("SELECT COUNT(*) AS n FROM build_tasks WHERE status = 'queued' AND arch = ? AND kind NOT IN ('build', 'audit') AND trust = 'project'").bind(d.arch).first<{ n: number }>();
-      if (!pending?.n) {
-        log.push(`factory ${d.arch}: ${d.queued} queued build(s) wait for a project worker (no hosted build workers)`);
-        continue;
-      }
-      const runs = await recentRuns(env, "pool-worker.yml");
-      const busy = runs.find((r) => (r.display_title ?? "").includes(d.arch) && ["queued", "in_progress", "waiting", "pending"].includes(r.status));
-      if (busy) {
-        log.push(`pool-worker.yml ${d.arch}: a hosted worker is ${busy.status}`);
-        continue;
-      }
-      await dispatch(env, "pool-worker.yml", { arch: d.arch });
-      log.push(`pool-worker.yml ${d.arch}: hosted worker dispatched for ${pending.n} queued pool job(s)`);
-      await env.DB.prepare("INSERT INTO events (kind, ring, source, status, summary, payload) VALUES ('dispatch', NULL, 'factory', 'ok', ?, ?)")
-        .bind(`hosted ${d.arch} pool worker started by the pool scheduler — ${pending.n} pool job(s) queued, no idle project worker`, JSON.stringify({ workflow: "pool-worker.yml", arch: d.arch, queued: pending.n }))
-        .run();
+      if (d.alive > 0) log.push(`factory ${d.arch}: ${d.queued} queued, ${d.alive} idle project worker(s)`);
+      else log.push(`factory ${d.arch}: ${d.queued} queued task(s) wait — no project worker of that architecture is alive`);
     }
   } catch (e) {
     log.push(`factory workers: ${String(e)}`);
