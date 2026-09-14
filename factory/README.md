@@ -206,7 +206,11 @@ pkg-repo work --worker-token omw_… --arch x86_64 --labels '{"where":"laptop","
 in its `pacman.conf` once that database exists, so a package can depend on
 an earlier factory build. `OMARCHY_PKG_CACHE=/path` on the host shares one
 pacman package cache (a directory per architecture) with every build
-container it starts, so a dependency downloads once.
+container it starts, so a dependency downloads once; `OMARCHY_BUILD_CACHE`
+likewise mounts a build cache at `/build/cache` — cargo's registry, Go's
+module and build caches, ccache's objects — so a Rust or Go package
+rebuilds in minutes. A build container uses every core it sees
+(`MAKEFLAGS`, `NINJAFLAGS`, `CARGO_BUILD_JOBS`) with ccache on.
 
 **Three roles.** The project runs its workers as three kinds of container
 of that same image, `OMARCHY_WORKER_ROLE` set (`factory/image/entrypoint.sh`;

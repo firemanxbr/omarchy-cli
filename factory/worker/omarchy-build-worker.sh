@@ -65,11 +65,20 @@ prepare_container() {
     grep -q "^$opt" /etc/pacman.conf || sed -i "0,/^\[options\]/s//[options]\n$opt/" /etc/pacman.conf
   done
   pacman-key --init >/dev/null 2>&1 || true
-  pacman -Syu --noconfirm --needed base-devel git namcap jq python pacman-contrib >/dev/null
+  pacman -Syu --noconfirm --needed base-devel git namcap jq python pacman-contrib ccache >/dev/null
   # makepkg refuses root; `builder` builds, root installs the dependencies
   # (install_deps) — no sudo anywhere: a setuid sudo does not start under
   # user-mode emulation (an x86_64 build on an aarch64 host).
   id builder >/dev/null 2>&1 || useradd -m -s /bin/bash builder
+  # Every core the container sees, for make, ninja and cargo alike — the
+  # image's makepkg.conf leaves MAKEFLAGS unset, which is one job; ccache
+  # on, so a rebuild of the same sources compiles only what changed.
+  mkdir -p /etc/makepkg.conf.d
+  printf 'MAKEFLAGS="-j%s"\nNINJAFLAGS="-j%s"\nBUILDENV=(!distcc color ccache check !sign)\n' "$(nproc)" "$(nproc)" > /etc/makepkg.conf.d/omarchy-pool.conf
+  # Caches that outlive the container when the operator mounts /build/cache
+  # (a directory per architecture on the host: cargo's registry, Go's module
+  # and build caches, ccache's objects); a fresh directory otherwise.
+  install -d -o builder -g builder /build/cache /build/cache/cargo /build/cache/go /build/cache/go/mod /build/cache/go/build /build/cache/ccache
   # The pool's tooling and key, at main.
   rm -rf /build/pool && git clone -q --depth 1 "$REPO_URL" /build/pool
 }
@@ -180,6 +189,7 @@ run_makepkg() { # → /build/out/*.pkg.tar.zst
   install_deps
   # zst whatever the image's makepkg.conf says (Arch Linux ARM defaults to xz).
   (cd /build/pkg && as_builder env PKGDEST=/build/out PKGEXT=.pkg.tar.zst PACKAGER="omarchy-pool factory <https://github.com/firemanxbr/omarchy-pool>" \
+    CARGO_HOME=/build/cache/cargo CARGO_BUILD_JOBS="$(nproc)" GOMODCACHE=/build/cache/go/mod GOCACHE=/build/cache/go/build GOFLAGS=-modcacherw CCACHE_DIR=/build/cache/ccache \
     makepkg --noconfirm --clean --cleanbuild --nosign)
 }
 

@@ -34,7 +34,7 @@ if [[ ! -d "$root" ]]; then
     mkdir -p "$root"
   fi
 fi
-for d in work cache/pacman/x86_64 cache/pacman/aarch64 etc; do mkdir -p "$root/$d"; done
+for d in work cache/pacman/x86_64 cache/pacman/aarch64 cache/build/x86_64 cache/build/aarch64 etc; do mkdir -p "$root/$d"; done
 chown -R "$user:$user" "$root"
 chmod 700 "$root/etc"
 

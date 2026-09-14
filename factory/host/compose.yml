@@ -8,7 +8,8 @@
 # Everything lives under POOL_ROOT (.env, written by setup.sh): the work
 # directories (the same path on the host and inside a project worker, so the
 # sibling build containers it starts can mount subdirectories), one pacman
-# package cache per architecture shared by every build, and etc/ with the
+# package cache and one build cache (cargo, Go, ccache) per architecture
+# shared by every build, and etc/ with the
 # secrets — a worker token per service (register.sh writes them) and the
 # agent key the review and community workers use (etc/agent.env, yours).
 #
@@ -51,6 +52,7 @@ services:
       OMARCHY_WORKER_ROLE: review
       OMARCHY_WORK_DIR: ${POOL_ROOT:-/srv/omarchy-pool}/work/review-x86_64
       OMARCHY_PKG_CACHE: ${POOL_ROOT:-/srv/omarchy-pool}/cache/pacman
+      OMARCHY_BUILD_CACHE: ${POOL_ROOT:-/srv/omarchy-pool}/cache/build
       WORKER_LABELS: '{"where":"${WHERE:-omarchy-studio}","emulated":true}'
   review-aarch64:
     <<: *project
@@ -59,6 +61,7 @@ services:
       OMARCHY_WORKER_ROLE: review
       OMARCHY_WORK_DIR: ${POOL_ROOT:-/srv/omarchy-pool}/work/review-aarch64
       OMARCHY_PKG_CACHE: ${POOL_ROOT:-/srv/omarchy-pool}/cache/pacman
+      OMARCHY_BUILD_CACHE: ${POOL_ROOT:-/srv/omarchy-pool}/cache/build
       WORKER_LABELS: '{"where":"${WHERE:-omarchy-studio}"}'
 
   # A community worker builds inside its own container, one task per
@@ -74,6 +77,7 @@ services:
       WORKER_LABELS: '{"where":"${WHERE:-omarchy-studio}","emulated":true}'
     volumes:
       - ${POOL_ROOT:-/srv/omarchy-pool}/cache/pacman/x86_64:/var/cache/pacman/pkg
+      - ${POOL_ROOT:-/srv/omarchy-pool}/cache/build/x86_64:/build/cache
     logging: *logging
   community-aarch64:
     image: ghcr.io/firemanxbr/omarchy-worker:aarch64
@@ -84,4 +88,5 @@ services:
       WORKER_LABELS: '{"where":"${WHERE:-omarchy-studio}"}'
     volumes:
       - ${POOL_ROOT:-/srv/omarchy-pool}/cache/pacman/aarch64:/var/cache/pacman/pkg
+      - ${POOL_ROOT:-/srv/omarchy-pool}/cache/build/aarch64:/build/cache
     logging: *logging
