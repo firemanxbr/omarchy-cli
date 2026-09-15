@@ -28,7 +28,7 @@
  *   POST /api/v1/security/prune?before=
  *   GET  /api/v1/factory · POST /factory/{claim,requests,enqueue,jobs} · /factory/tasks/:id/{heartbeat,complete,fail,cancel,approve,reject,artifacts/<file>}
  *   GET  /api/v1/factory/{packages,built,review,approvals,groups,trust,workers/self,me} · GET /api/v1/users/:login · GET /api/v1/cost
- *                                                  the factory's brain: requests, build tasks, pull-based workers
+ *                                                  the factory's brain: package requests, build tasks, pull-based workers
  *   GET  /api/v1/graph?targets=a,b&ring=stable
  *   POST /api/v1/events   GET /api/v1/events       activity log
  *   GET  /api/v1/stats                             everything the dashboard shows
@@ -51,12 +51,12 @@ import { handleGraph } from "./routes/graph";
 import { handlePackage, handlePackageFiles, handleSearch } from "./routes/search";
 import { handlePrune, handlePutAdvisories, handlePutMatches, handleSecurity, handleComponents } from "./routes/security";
 import {
-  handleApproveRequest, handleCancelTask, handleClaim, handleComplete, handleCreateRequest, handleEnqueue, handleFactory, handleFail,
-  handleHeartbeat, handleRejectRequest, handleTask, handleBuilt, handleUpdateRequest,
+  handleCancelTask, handleClaim, handleComplete, handleEnqueue, handleFactory, handleFail,
+  handleHeartbeat, handleTask, handleBuilt,
 } from "./routes/factory";
 import { authorize, authorizeRelease, authorizeArtifacts, authorizeJobOrMaintainer, maintainerOf } from "./auth";
 import {
-  contributorOf, workerOf, handleRegister, handleMe, handleRegisterPackage, handleDeletePackage, handleBuildPackage, handleRegisterWorker,
+  contributorOf, workerOf, handleRegister, handleMe, handleRequestPackage, handleDeletePackage, handleBuildPackage, handleRegisterWorker,
   handleRevokeWorker, handleListPackages, handleStagingPut, handleStagingMultipart, handleStagingList, handleStagingGet,
 } from "./routes/contributors";
 import type { Actor } from "./routes/factory";
@@ -108,6 +108,8 @@ export interface Env {
   POOL_DEPLOYED_AT?: string;
   /** Fine-grained GitHub token (Actions: read and write) for the pool's own scheduler. */
   GITHUB_TOKEN?: string;
+  /** "off" only in tests: the request's source URL is not fetched. */
+  SOURCE_CHECK?: string;
   /** Signs per-job tokens (jobtoken.ts); any random string. */
   JOB_TOKEN_SECRET?: string;
   /** A Cloudflare API token with Analytics: Read, and the account, for the daily cost estimate (cost.ts). */
@@ -220,7 +222,7 @@ async function factoryRoutes(method: string, path: string, url: URL, request: Re
   if (path === "/factory/packages" || path.startsWith("/factory/packages/") || path === "/factory/workers" || path.startsWith("/factory/workers/")) {
     const c = await contributorOf(request, env);
     if (!c) return json({ error: "a contributor token is required (POST /factory/register with a GitHub token)" }, 401);
-    if (method === "POST" && path === "/factory/packages") return handleRegisterPackage(c, request, env);
+    if (method === "POST" && path === "/factory/packages") return handleRequestPackage(c, request, env);
     if ((m = path.match(/^\/factory\/packages\/([a-z0-9@._+-]+)\/build$/)) && method === "POST") return handleBuildPackage(c, m[1], request, env);
     if ((m = path.match(/^\/factory\/packages\/([a-z0-9@._+-]+)$/)) && method === "DELETE") return handleDeletePackage(c, m[1], env);
     if (method === "POST" && path === "/factory/workers") return handleRegisterWorker(c, request, env);
@@ -377,11 +379,6 @@ async function api(method: string, path: string, url: URL, request: Request, env
   // The factory's writes: the enqueue job (its token carries factory:write) or a maintainer by hand.
   const factoryWrite = () => authorizeJobOrMaintainer(request, env, "factory:write");
   if ((m = path.match(/^\/factory\/tasks\/(\d+)\/cancel$/)) && method === "POST") return (await factoryWrite()) ?? handleCancelTask(Number(m[1]), env);
-  if (method === "POST" && path === "/factory/requests") return (await factoryWrite()) ?? handleCreateRequest(request, env);
-  if ((m = path.match(/^\/factory\/requests\/(\d+)\/approve$/)) && method === "POST") return (await factoryWrite()) ?? handleApproveRequest(Number(m[1]), request, env);
-  if ((m = path.match(/^\/factory\/requests\/(\d+)$/)) && method === "PATCH") return (await factoryWrite()) ?? handleUpdateRequest(Number(m[1]), request, env);
-  if ((m = path.match(/^\/factory\/requests\/name\/([a-z0-9@._+-]+)$/)) && method === "PATCH") return (await factoryWrite()) ?? handleUpdateRequest(m[1], request, env);
-  if ((m = path.match(/^\/factory\/requests\/(\d+)\/reject$/)) && method === "POST") return (await factoryWrite()) ?? handleRejectRequest(Number(m[1]), request, env);
   if (method === "POST" && path === "/factory/enqueue") return (await factoryWrite()) ?? handleEnqueue(request, env);
   // A maintainer runs a pool job by hand: queued like the scheduler's, executed by a project worker.
   if (method === "POST" && path === "/factory/jobs") {

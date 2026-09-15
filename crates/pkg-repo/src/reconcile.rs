@@ -181,11 +181,6 @@ pub fn run(api: &Api, work_dir: &Path, arch: &str) -> Result<Report> {
                         .collect::<Vec<_>>()
                         .join(", ")
                 ));
-                // A merged PKGBUILD is the approval of its request, if there was one.
-                let _ = api.patch_json(
-                    &format!("/factory/requests/name/{}", m.name),
-                    &serde_json::json!({ "status": "approved", "pkgbuild_ref": commit, "by": "enqueue job", "detail": "PKGBUILD merged; building" }),
-                );
             }
             Err(RepoError::Api { status: 409, body }) => {
                 report

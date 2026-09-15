@@ -2,7 +2,7 @@
 
 Two roles, one file, decisions by pull request.
 
-- Anyone who signs in with GitHub is a **contributor**: registers packages,
+- Anyone who signs in with GitHub is a **contributor**: requests packages,
   runs workers on their own machines, follows their builds. Nothing to ask,
   nothing spent by the project.
 - The logins listed under a group in [`factory/MAINTAINERS.toml`](../factory/MAINTAINERS.toml)

@@ -154,6 +154,10 @@ const CSS = String.raw`
   .form { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 12px 18px; align-items: end; margin: 14px 0; }
   .form label { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--dim); letter-spacing: .04em; text-transform: uppercase; }
   .form label .choice label { flex-direction: row; text-transform: none; letter-spacing: 0; font-size: 13.5px; color: var(--text); align-items: center; gap: 6px; }
+  .form .checklist { grid-column: 1 / -1; display: grid; gap: 7px; padding: 10px 12px; border: 1px solid var(--line); background: var(--bg-deep); }
+  .form .checklist label { flex-direction: row; align-items: flex-start; gap: 9px; text-transform: none; letter-spacing: 0; font-size: 13px; color: var(--muted); line-height: 1.45; } .form .checklist input { margin-top: 3px; flex: none; }
+  .form details.form-more { grid-column: 1 / -1; } .form details.form-more summary { cursor: pointer; font-size: 12.5px; color: var(--dim); letter-spacing: .04em; text-transform: uppercase; }
+  .form details.form-more[open] { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 12px 18px; } .form details.form-more[open] summary { grid-column: 1 / -1; }
   .form input[type="text"], .form input[type="url"], .form select, .searchbar input[type="password"] { background: var(--bg-deep); border: 1px solid var(--line); color: var(--text); padding: 8px 10px; font: inherit; font-size: 13.5px; }
   .form button, .searchbar button, table button { background: var(--panel-2); border: 1px solid var(--line); color: var(--text); padding: 8px 14px; font: inherit; font-size: 13.5px; cursor: pointer; }
   .form button:hover, .searchbar button:hover, table button:hover { border-color: var(--green); }

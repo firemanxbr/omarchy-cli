@@ -110,9 +110,6 @@ export async function handleApprove(c: Contributor, id: number, request: Request
   await env.DB.prepare("UPDATE factory_packages SET status = 'approved', detail = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE name = ?")
     .bind(`${t.version ?? ""} for ${t.arch} approved by ${c.login}; waiting for a maintainer's recipe in ${recipe}`, t.name)
     .run();
-  await env.DB.prepare("UPDATE build_requests SET status = 'approved', approved_by = ?, approved_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), detail = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE name = ? AND status != 'approved'")
-    .bind(c.login, `approved by ${c.login}; the project builds ${recipe} once it is on main`, t.name)
-    .run();
   await cancelPendingAudit(env, id);
   await env.DB.prepare("INSERT INTO events (kind, ring, source, status, summary, payload) VALUES ('approve', 'edge', 'factory', 'ok', ?, ?)")
     .bind(`${t.name} ${t.version ?? ""} (${t.arch}) approved by ${c.login}${b.note ? " — " + b.note.slice(0, 120) : ""}; the project builds it once ${recipe} is on main`, JSON.stringify({ task: id, name: t.name, arch: t.arch, by: c.login, owner: t.owner, note: b.note ?? null, recipe }))
@@ -134,9 +131,6 @@ export async function handleReject(c: Contributor, id: number, request: Request,
   await cancelPendingAudit(env, id);
   await env.DB.prepare("UPDATE factory_packages SET status = 'registered', detail = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE name = ?")
     .bind(`rejected by ${c.login}: ${b.note.slice(0, 200)}`, t.name)
-    .run();
-  await env.DB.prepare("UPDATE build_requests SET status = 'rejected', detail = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE name = ? AND status NOT IN ('approved', 'rejected')")
-    .bind(`rejected by ${c.login}: ${b.note}`, t.name)
     .run();
   await env.DB.prepare("INSERT INTO events (kind, ring, source, status, summary, payload) VALUES ('approve', NULL, 'factory', 'warn', ?, ?)")
     .bind(`${t.name} ${t.version ?? ""} (${t.arch}) rejected by ${c.login}: ${b.note.slice(0, 140)}`, JSON.stringify({ task: id, name: t.name, arch: t.arch, by: c.login, owner: t.owner, note: b.note }))

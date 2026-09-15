@@ -17,6 +17,7 @@ export default defineConfig(async () => {
             JOB_TOKEN_SECRET: "test-secret",
             POOL_URL: "http://pool.test",
             POOL_VERSION: "test",
+            SOURCE_CHECK: "off",
           },
         },
       }),
