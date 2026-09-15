@@ -19,6 +19,17 @@ cd "$(dirname "${BASH_SOURCE[0]}")"
 check=0; [[ "${1:-}" == "--check" ]] && check=1
 log() { printf '[%s] %s\n' "$(date -u +%H:%M:%S)" "$*"; }
 
+# The socket is root:docker. A login shell carries the group; the user
+# manager that runs the timer may predate the membership and not — then
+# every docker call is "permission denied", the pipefail took the script
+# down at the first one and the journal showed exit 1 and nothing else
+# (omarchy-studio, every 15 minutes from 2026-09-14 to 09-15). A member
+# without the group re-enters with it; anyone else hears why.
+if ! id -Gn | tr ' ' '\n' | grep -qx docker && getent group docker | cut -d: -f4 | tr ',' '\n' | grep -qx "$(id -un)"; then
+  exec newgrp docker <<<"exec $(printf '%q ' "${BASH_SOURCE[0]}" "$@")"
+fi
+docker info >/dev/null 2>&1 || { log "docker is not reachable: $(docker info 2>&1 | tail -n1)"; exit 1; }
+
 docker compose pull --quiet 2>&1 | grep -viE "pulled|pulling|^\s*$" || true
 changed=0
 # Community workers first (one task per container, quick to drain), the
