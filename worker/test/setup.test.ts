@@ -37,10 +37,10 @@ describe("GET /api/v1/pacman.conf", () => {
       env.DB.prepare("INSERT INTO releases (id, ring, seq) VALUES (901, 'stable', 7)"),
       env.DB.prepare("INSERT INTO ring_heads (ring, release_id) VALUES ('stable', 901)"),
       env.DB.prepare(`INSERT INTO release_artifacts (release_id, repo, arch, kind, r2_key, size) VALUES
-        (901, 'omarchy-core-stable', 'x86_64', 'db', 'k1', 1), (901, 'omarchy-core-stable', 'x86_64', 'files', 'k2', 1),
-        (901, 'omarchy-extra-stable', 'x86_64', 'db', 'k3', 1), (901, 'omarchy-chaotic-stable', 'x86_64', 'db', 'k4', 1),
-        (901, 'omarchy-core-stable', 'aarch64', 'db', 'k5', 1), (901, 'omarchy-alarm-stable', 'aarch64', 'db', 'k6', 1),
-        (901, 'omarchy-packages-stable', 'aarch64', 'db', 'k7', 1), (901, 'omarchy-factory-stable', 'aarch64', 'db', 'k8', 1)`),
+        (901, 'omarchy-core-stable', 'x86_64', 'db', 'core/x86_64/omarchy-core-stable.db', 1), (901, 'omarchy-core-stable', 'x86_64', 'files', 'core/x86_64/omarchy-core-stable.files', 1),
+        (901, 'omarchy-extra-stable', 'x86_64', 'db', 'extra/x86_64/omarchy-extra-stable.db', 1), (901, 'omarchy-chaotic-stable', 'x86_64', 'db', 'chaotic/x86_64/omarchy-chaotic-stable.db', 1),
+        (901, 'omarchy-core-stable', 'aarch64', 'db', 'core/aarch64/omarchy-core-stable.db', 1), (901, 'omarchy-alarm-stable', 'aarch64', 'db', 'aarch64/omarchy-alarm-stable.db', 1),
+        (901, 'omarchy-packages-stable', 'aarch64', 'db', 'packages/aarch64/omarchy-packages-stable.db', 1), (901, 'omarchy-factory-stable', 'aarch64', 'db', 'factory/aarch64/omarchy-factory-stable.db', 1)`),
     ]);
   });
   it("lists the ring's databases for the architecture, the optional ones only when asked", async () => {
@@ -48,7 +48,9 @@ describe("GET /api/v1/pacman.conf", () => {
     expect(x.status).toBe(200);
     expect(x.type).toContain("text/plain");
     expect(x.text).toContain("release #7");
-    expect(x.text).toContain("[omarchy-core-stable]\nSigLevel = Required DatabaseRequired\nServer = ");
+    // Each section's Server is the directory its database is in: the source's own.
+    expect(x.text).toContain("[omarchy-core-stable]\nSigLevel = Required DatabaseRequired\nServer = http://pool.test/core/$arch\n\n");
+    expect(x.text).toContain("[omarchy-extra-stable]\nSigLevel = Required DatabaseRequired\nServer = http://pool.test/extra/$arch\n");
     expect(x.text).toContain("[omarchy-extra-stable]");
     expect(x.text).not.toContain("[omarchy-chaotic-stable]");
     expect(x.text).toContain("http://pool.test/setup rewrites this file");
@@ -59,11 +61,22 @@ describe("GET /api/v1/pacman.conf", () => {
     expect(withChaotic.text).toContain("[omarchy-chaotic-stable]");
     expect(withChaotic.text.indexOf("[omarchy-extra-stable]")).toBeLessThan(withChaotic.text.indexOf("[omarchy-chaotic-stable]"));
     const arm = await get("/api/v1/pacman.conf?ring=stable&arch=aarch64");
-    expect(arm.text).toContain("[omarchy-alarm-stable]");
+    // A database still rendered into the flat directory (before the relayout) is served from there.
+    expect(arm.text).toContain("[omarchy-alarm-stable]\nSigLevel = Required DatabaseRequired\nServer = http://pool.test/$arch\n");
     expect(arm.text).not.toContain("[omarchy-extra-stable]");
     // Omarchy's own packages and the factory's builds sit above Arch's, alarm last — the order [omarchy] has on an Omarchy install.
     const order = ["[omarchy-packages-stable]", "[omarchy-factory-stable]", "[omarchy-core-stable]", "[omarchy-alarm-stable]"].map((r) => arm.text.indexOf(r));
     expect(order).toEqual([...order].sort((a, b) => a - b));
+  });
+  it("names the flat directory second while objects are still moving out of it", async () => {
+    await env.DB.prepare(`INSERT INTO packages (sha256, name, version, arch, filename, size_download, size_installed, has_signature, manifest_json, source, r2_key, repo_arch)
+      VALUES ('9999999999999999999999999999999999999999999999999999999999999999', 'old', '1-1', 'x86_64', 'old-1-1-x86_64.pkg.tar.zst', 1, 1, 0, '{}', 'core', 'x86_64/old-1-1-x86_64.pkg.tar.zst', 'x86_64')`).run();
+    // (A distinct query each time: the include is served through the edge cache.)
+    const x = await get("/api/v1/pacman.conf?ring=stable&arch=x86_64&with=moving");
+    expect(x.text).toContain("[omarchy-core-stable]\nSigLevel = Required DatabaseRequired\nServer = http://pool.test/core/$arch\nServer = http://pool.test/$arch\n\n");
+    await env.DB.prepare("UPDATE packages SET r2_key = 'core/x86_64/old-1-1-x86_64.pkg.tar.zst' WHERE name = 'old'").run();
+    expect((await get("/api/v1/pacman.conf?ring=stable&arch=x86_64&with=moved")).text).not.toContain("Server = http://pool.test/$arch");
+    await env.DB.prepare("DELETE FROM packages WHERE name = 'old'").run();
   });
   it("says so when the ring has no release, or the ring or arch is unknown", async () => {
     expect((await get("/api/v1/pacman.conf?ring=rc&arch=x86_64")).status).toBe(404);

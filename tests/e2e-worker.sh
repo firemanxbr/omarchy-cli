@@ -132,9 +132,13 @@ step "Render databases for stable (the pool signs them)"
 signing_key=$(curl -s "$OMARCHY_API/api/v1/signing-key")
 grep -q "\"fingerprint\":\"$KEYID\"" <<<"$signing_key" || { echo "pool does not hold the signing key: $signing_key"; exit 1; }
 "$PKG_REPO" render --ring stable
-curl -so "$E2E/stable.db" "$OMARCHY_API/pool/x86_64/omarchy-packages-stable.db"
-curl -so "$E2E/stable.db.sig" "$OMARCHY_API/pool/x86_64/omarchy-packages-stable.db.sig"
+curl -so "$E2E/stable.db" "$OMARCHY_API/pool/packages/x86_64/omarchy-packages-stable.db"
+curl -so "$E2E/stable.db.sig" "$OMARCHY_API/pool/packages/x86_64/omarchy-packages-stable.db.sig"
 gpg --verify "$E2E/stable.db.sig" "$E2E/stable.db" 2>/dev/null || { echo "the pool's database signature does not verify"; exit 1; }
+# The include names the directory the database is in — the source's own — and no other (nothing is moving).
+inc=$(curl -s "$OMARCHY_API/api/v1/pacman.conf?ring=stable&arch=x86_64")
+grep -q '^Server = .*/pool/packages/\$arch$' <<<"$inc" || { echo "the include does not name the source's directory: $inc"; exit 1; }
+! grep -q '^Server = .*/pool/\$arch$' <<<"$inc" || { echo "the include still names the flat directory: $inc"; exit 1; }
 # A client's own signature is not taken over the pool's.
 sup=$(curl -s -X PUT "$OMARCHY_API/api/v1/releases/1/artifacts/db.sig?repo=omarchy-packages-stable&arch=x86_64" -H "Authorization: Bearer $OMARCHY_TOKEN" --data-binary 'not a signature')
 grep -q '"status":"superseded"' <<<"$sup" || { echo "client signature was not superseded: $sup"; exit 1; }
@@ -146,10 +150,10 @@ gpg --armor --export "$KEYID" > "$E2E/verify-key.asc"
 vout=$("$PKG_REPO" verify --ring stable --arch x86_64 --keyring "$E2E/verify-key.asc" --work-dir "$E2E/verify-work" --pool "$OMARCHY_API/pool" 2>&1) || { echo "verify failed: $vout"; exit 1; }
 grep -q "0 bad signature(s)" <<<"$vout" || { echo "verify must find the pool clean: $vout"; exit 1; }
 zlib_sha=$(python3 -c 'import json,sys; d=json.load(sys.stdin); print([p["sha256"] for p in d["packages"] if p["name"]=="zlib"][0])' <<<"$(curl -s "$OMARCHY_API/api/v1/releases/stable?fields=summary&arch=x86_64")")
-curl -s -o /dev/null -X PUT "$OMARCHY_API/api/v1/pool/$zlib_sha/sig?filename=zlib-1:1.3.2-3-x86_64.pkg.tar.zst&arch=x86_64" -H "Authorization: Bearer $OMARCHY_TOKEN" --data-binary "@$E2E/pkgs/xz-5.8.4-1-x86_64.pkg.tar.zst.sig"
+curl -s -o /dev/null -X PUT "$OMARCHY_API/api/v1/pool/$zlib_sha/sig?filename=zlib-1:1.3.2-3-x86_64.pkg.tar.zst&source=packages&arch=x86_64" -H "Authorization: Bearer $OMARCHY_TOKEN" --data-binary "@$E2E/pkgs/xz-5.8.4-1-x86_64.pkg.tar.zst.sig"
 vout=$("$PKG_REPO" verify --ring stable --arch x86_64 --keyring "$E2E/verify-key.asc" --work-dir "$E2E/verify-work" --pool "$OMARCHY_API/pool" --repair 2>&1 || true)
 grep -q "1 bad signature(s)" <<<"$vout" && grep -q "needs replacing" <<<"$vout" || { echo "verify must find the planted signature: $vout"; exit 1; }
-curl -s -o /dev/null -X PUT "$OMARCHY_API/api/v1/pool/$zlib_sha/sig?filename=zlib-1:1.3.2-3-x86_64.pkg.tar.zst&arch=x86_64" -H "Authorization: Bearer $OMARCHY_TOKEN" --data-binary "@$E2E/pkgs/zlib-1:1.3.2-3-x86_64.pkg.tar.zst.sig"
+curl -s -o /dev/null -X PUT "$OMARCHY_API/api/v1/pool/$zlib_sha/sig?filename=zlib-1:1.3.2-3-x86_64.pkg.tar.zst&source=packages&arch=x86_64" -H "Authorization: Bearer $OMARCHY_TOKEN" --data-binary "@$E2E/pkgs/zlib-1:1.3.2-3-x86_64.pkg.tar.zst.sig"
 # A release that only touches aarch64 keeps x86_64's rendered databases: the
 # artifact rows carry over and the response says not to render it again.
 # wrangler dev's proxy drops a request now and then on CI runners ("Network
@@ -179,17 +183,18 @@ for a in x86_64 aarch64; do
   for r in rc stable; do "$PKG_REPO" publish --ring "$r" --source packages --arch "$a" --note "e2e-any $a" "$E2E/any/$a/e2e-any-1-1-any.pkg.tar.xz" >/dev/null; done
 done
 any_x86=$(sha256sum "$E2E/any/x86_64/e2e-any-1-1-any.pkg.tar.xz" | cut -d' ' -f1)
-curl -s -o /dev/null -X PUT "$OMARCHY_API/api/v1/pool/$any_x86/sig?filename=e2e-any-1-1-any.pkg.tar.xz&arch=x86_64" -H "Authorization: Bearer $OMARCHY_TOKEN" --data-binary "@$E2E/any/aarch64/e2e-any-1-1-any.pkg.tar.xz.sig"
+curl -s -o /dev/null -X PUT "$OMARCHY_API/api/v1/pool/$any_x86/sig?filename=e2e-any-1-1-any.pkg.tar.xz&source=packages&arch=x86_64" -H "Authorization: Bearer $OMARCHY_TOKEN" --data-binary "@$E2E/any/aarch64/e2e-any-1-1-any.pkg.tar.xz.sig"
 vout=$("$PKG_REPO" verify --keyring "$E2E/verify-key.asc" --work-dir "$E2E/verify-work" --pool "$OMARCHY_API/pool" --repair 2>&1 || true)
 grep -q "1 bad signature(s)" <<<"$vout" && grep -q "0 pinned bytes the pool does not store (0 re-pinned)" <<<"$vout" || { echo "verify must find one bad signature and re-pin nothing: $vout"; exit 1; }
-curl -s -o /dev/null -X PUT "$OMARCHY_API/api/v1/pool/$any_x86/sig?filename=e2e-any-1-1-any.pkg.tar.xz&arch=x86_64" -H "Authorization: Bearer $OMARCHY_TOKEN" --data-binary "@$E2E/any/x86_64/e2e-any-1-1-any.pkg.tar.xz.sig"
+curl -s -o /dev/null -X PUT "$OMARCHY_API/api/v1/pool/$any_x86/sig?filename=e2e-any-1-1-any.pkg.tar.xz&source=packages&arch=x86_64" -H "Authorization: Bearer $OMARCHY_TOKEN" --data-binary "@$E2E/any/x86_64/e2e-any-1-1-any.pkg.tar.xz.sig"
 
-step "Pool sanity (flat layout: databases beside the packages)"
+step "Pool sanity (one directory per source: databases beside the packages)"
 for f in omarchy-packages-stable.db omarchy-packages-stable.db.sig omarchy-packages-stable.files "zlib-1:1.3.2-3-x86_64.pkg.tar.zst" "zlib-1:1.3.2-3-x86_64.pkg.tar.zst.sig"; do
-  code=$(curl -s -o /dev/null -w '%{http_code}' "$OMARCHY_API/pool/x86_64/$f")
+  code=$(curl -s -o /dev/null -w '%{http_code}' "$OMARCHY_API/pool/packages/x86_64/$f")
   [[ "$code" == 200 ]] || { echo "unexpected $code for $f"; exit 1; }
 done
-[[ "$(curl -s -H 'Range: bytes=0-3' "$OMARCHY_API/pool/x86_64/zlib-1:1.3.2-3-x86_64.pkg.tar.zst" | od -An -tx1 | tr -d ' \n')" == "28b52ffd" ]] || { echo "range request broken"; exit 1; }
+[[ "$(curl -s -H 'Range: bytes=0-3' "$OMARCHY_API/pool/packages/x86_64/zlib-1:1.3.2-3-x86_64.pkg.tar.zst" | od -An -tx1 | tr -d ' \n')" == "28b52ffd" ]] || { echo "range request broken"; exit 1; }
+
 # Read bodies fully before grepping: `curl | grep -q` under pipefail fails
 # with exit 23 when grep closes the pipe early.
 stats_body=$(curl -s "$OMARCHY_API/api/v1/stats")
@@ -358,7 +363,7 @@ rec=$(curl -s "$OMARCHY_API/api/v1/users/e2e?after=approval")   # a fresh key: t
 python3 -c 'import json,sys; r=[g for g in json.load(sys.stdin)["record"] if g["group"]=="community"][0]; assert r["contributed"]["approved"]==0 and r["maintained"]["approvals"]==1 and r["score"]==2, r' <<<"$rec" || { echo "the profile record is off: $(python3 -c 'import json,sys; print(json.load(sys.stdin)["record"])' <<<"$rec")"; exit 1; }
 rpage=$(curl -s "$OMARCHY_API/review"); grep -q "Review" <<<"$rpage" || { echo "review page not served"; exit 1; }
 # A signature for bytes the pool does not serve under that filename is refused.
-[[ "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$OMARCHY_API/api/v1/pool/$(printf 'a%.0s' {1..64})/sig?filename=xz-5.8.4-1-x86_64.pkg.tar.zst&arch=x86_64" -H "authorization: Bearer $OMARCHY_TOKEN" --data-binary "@$E2E/pkgs/xz-5.8.4-1-x86_64.pkg.tar.zst.sig")" == 409 ]] || { echo "a mismatching signature must be refused"; exit 1; }
+[[ "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$OMARCHY_API/api/v1/pool/$(printf 'a%.0s' {1..64})/sig?filename=xz-5.8.4-1-x86_64.pkg.tar.zst&source=packages&arch=x86_64" -H "authorization: Bearer $OMARCHY_TOKEN" --data-binary "@$E2E/pkgs/xz-5.8.4-1-x86_64.pkg.tar.zst.sig")" == 409 ]] || { echo "a mismatching signature must be refused"; exit 1; }
 echo "factory queue, lease, requeue, guard and completion OK"
 
 step "pacman in $IMAGE against the worker mirror"
@@ -369,7 +374,7 @@ Architecture = x86_64
 SigLevel = Required DatabaseRequired
 
 [omarchy-packages-stable]
-Server = http://$HOST_FROM_CONTAINER:$PORT/pool/\$arch
+Server = http://$HOST_FROM_CONTAINER:$PORT/pool/packages/\$arch
 CONF
 cat > "$E2E/check.sh" <<'CHECK'
 set -euo pipefail

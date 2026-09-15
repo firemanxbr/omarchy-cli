@@ -4,13 +4,13 @@
  *
  * pacman never talks to this worker. Packages and the per-ring databases are
  * plain R2 objects served from the bucket's custom domain (POOL_URL):
- *   <arch>/<filename>            <arch>/omarchy-<source>-<ring>.db (.files, .sig)
+ *   <source>/<arch>/<filename>   <source>/<arch>/omarchy-<source>-<ring>.db (.files, .sig)
  *
  * API (JSON; writes need a per-job token — issued when a worker claims a
  * task — or, for the factory's maintainer actions, a maintainer's own token):
- *   PUT  /api/v1/pool/:sha256?filename=            raw archive → R2 (integrity-checked)
- *   PUT  /api/v1/pool/:sha256/sig?filename=        detached signature
- *   POST /api/v1/pool/:sha256/multipart?filename=  large archives: create / parts / complete
+ *   PUT  /api/v1/pool/:sha256?filename=&source=&arch=   raw archive → R2 (integrity-checked), under <source>/<arch>/
+ *   PUT  /api/v1/pool/:sha256/sig?filename=&source=&arch= detached signature
+ *   POST /api/v1/pool/:sha256/multipart?filename=&source=&arch=  large archives: create / parts / complete
  *   POST /api/v1/packages?source=core              manifest JSON → index rows
  *   POST /api/v1/packages/known                    which sha256s are already indexed
  *   GET  /api/v1/packages/:sha256
@@ -36,9 +36,10 @@
  *   GET  /api/v1/status                            service check now: index (D1) and pool (R2)
  *   GET  /api/v1/pool/unreferenced?keep=3          retention: what GC would delete
  *   POST /api/v1/pool/gc?keep=3&limit=200          delete it (objects, then rows)
+ *   POST /api/v1/pool/relayout?phase=copy|purge     the one-time move to <source>/<arch>/ (the relayout job)
  *   GET  /                                         the dashboard: the Pool (users), /factory (contributors), /pipeline (everyone, live),
  *                                                  /docs, and the detail pages /packages /package/:name /security /status /journal /review /user/:login
- *   GET  /pool/<arch>/<file>                       fallback static origin (dev)
+ *   GET  /pool/<source>/<arch>/<file>              fallback static origin (dev)
  *   GET  /setup                                    the one-command setup script (curl … | sudo bash -s -- --ring stable)
  *   GET  /api/v1/pacman.conf?ring=&arch=&with=     the pacman.d include a ring serves right now
  */
@@ -80,6 +81,7 @@ import { handleUser } from "./routes/users";
 import { handleGetEvents, handlePostEvent } from "./routes/events";
 import { handleServiceStatus, handleStats } from "./routes/stats";
 import { handleGc, handleUnreferenced } from "./routes/gc";
+import { handleRelayout } from "./routes/relayout";
 import { overviewHtml } from "./pages/overview";
 import { getStartedHtml } from "./pages/get-started";
 import { howItWorksHtml } from "./pages/how-it-works";
@@ -396,6 +398,7 @@ async function api(method: string, path: string, url: URL, request: Request, env
   if (method === "GET" && path === "/events") return handleGetEvents(url, env);
   if (method === "GET" && path === "/pool/unreferenced") return handleUnreferenced(url, env);
   if (method === "POST" && path === "/pool/gc") return (await authorize(request, env, "gc")) ?? handleGc(url, env);
+  if (method === "POST" && path === "/pool/relayout") return (await authorize(request, env, "relayout")) ?? handleRelayout(url, env);
   if (method === "POST" && path === "/events") return (await authorizeJobOrMaintainer(request, env, "events")) ?? handlePostEvent(request, env);
 
   if ((m = path.match(/^\/pool\/([0-9a-f]{64})$/)) && method === "PUT") {

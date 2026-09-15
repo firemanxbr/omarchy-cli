@@ -37,8 +37,8 @@ interface Pkg { name: string; version: string; arch: string; requires?: string[]
 async function index(source: string, repoArch: string, p: Pkg, token: string): Promise<string> {
   const filename = `${p.name}-${p.version}-${p.arch}.pkg.tar.zst`;
   const bytes = new TextEncoder().encode(`fake ${filename}`);
-  await env.PACKAGES.put(packageKey(repoArch, filename), bytes);
-  const s = sha(`${repoArch}/${filename}`);
+  await env.PACKAGES.put(packageKey(source, repoArch, filename), bytes);
+  const s = sha(`${source}/${repoArch}/${filename}`);
   const r = await call("POST", `/packages?source=${source}&arch=${repoArch}`, {
     schema_version: 1, name: p.name, version: p.version, arch: p.arch, sha256: s, filename,
     size_download: bytes.length, size_installed: bytes.length * 3, description: `${p.name} for tests`,
@@ -91,7 +91,7 @@ describe("POST /packages", () => {
     const filename = "fonts-1-1-any.pkg.tar.zst";
     const bytes = new TextEncoder().encode("the same any package in both directories");
     const manifest = { schema_version: 1, name: "fonts", version: "1-1", arch: "any", sha256: sha("fonts-any"), filename, size_download: bytes.length, size_installed: 1, description: "fonts", provides: ["fonts"], requires: [], files: [] };
-    for (const arch of ["x86_64", "aarch64"]) await env.PACKAGES.put(packageKey(arch, filename), bytes);
+    for (const arch of ["x86_64", "aarch64"]) await env.PACKAGES.put(packageKey("packages", arch, filename), bytes);
     expect((await call("POST", "/packages?source=packages&arch=x86_64", manifest, pool)).status).toBe(201);
     expect((await call("POST", "/packages?source=packages&arch=x86_64", manifest, pool)).json.status).toBe("already-indexed");
     const other = await call("POST", "/packages?source=packages&arch=aarch64", manifest, pool);
@@ -303,6 +303,10 @@ describe("GET /graph", () => {
     const names = (g.json.packages ?? g.json.manifests ?? []).map((p: any) => p.name).sort();
     // curl → xz (declared) and libz.so → zlib (a declared provides), xz → zlib.
     expect(names).toEqual(["curl", "xz", "zlib"]);
+    // Each node says which source built it, and the view says which source a client takes first.
+    expect(g.json.packages.map((p: any) => `${p.name}/${p.source}/${p.repo_arch}`).sort()).toEqual(["curl/extra/x86_64", "xz/core/x86_64", "zlib/core/x86_64"]);
+    expect(g.json.source_order.slice(0, 3)).toEqual(["asahi", "asahi-alarm", "packages"]);
+    expect((await call("GET", "/releases/stable?fields=summary")).json.source_order).toEqual(g.json.source_order);
     const arm = await call("GET", "/graph?ring=stable&arch=aarch64&targets=xz");
     expect((arm.json.packages ?? arm.json.manifests).map((p: any) => `${p.name}/${p.arch}`).sort()).toEqual(["xz/aarch64", "zlib/aarch64"]);
     expect((await call("GET", "/graph?ring=stable&arch=x86_64")).status).toBe(400);
@@ -324,7 +328,7 @@ describe("unchanged architectures", () => {
   it("a release scoped to one architecture carries the parent's artifacts for the other, and says so", async () => {
     // Render x86_64 databases for stable's head: an artifact row.
     const head = (await call("GET", "/releases/stable?fields=summary")).json.release;
-    await env.DB.prepare("INSERT INTO release_artifacts (release_id, repo, arch, kind, r2_key, size) VALUES (?, 'omarchy-core-stable', 'x86_64', 'db', 'x86_64/omarchy-core-stable.db', 10), (?, 'omarchy-core-stable', 'aarch64', 'db', 'aarch64/omarchy-core-stable.db', 10)").bind(head.id, head.id).run();
+    await env.DB.prepare("INSERT INTO release_artifacts (release_id, repo, arch, kind, r2_key, size) VALUES (?, 'omarchy-core-stable', 'x86_64', 'db', 'core/x86_64/omarchy-core-stable.db', 10), (?, 'omarchy-core-stable', 'aarch64', 'db', 'core/aarch64/omarchy-core-stable.db', 10)").bind(head.id, head.id).run();
     // An aarch64-only change: x86_64 is untouched, its artifact row comes along.
     const r = await call("POST", "/releases", { ring: "stable", remove: ["xz"], remove_arch: "aarch64" }, stable);
     expect(r.status).toBe(201);

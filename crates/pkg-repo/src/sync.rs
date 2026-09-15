@@ -262,10 +262,11 @@ pub fn run(api: &Api, opts: &SyncOptions) -> Result<SyncReport, RepoError> {
     Ok(report)
 }
 
-/// What the index already has — by content, and by filename: the pool holds
-/// one object per `<arch>/<filename>`, so an upstream rebuild of the same
-/// version with different bytes (the OPR does this per channel) cannot be
-/// stored; the object already there is pinned instead. Returns the known
+/// What the index already has — by content, and by filename: a source holds
+/// one object per `<source>/<arch>/<filename>`, so an upstream rebuild of the
+/// same version with different bytes (the OPR does this per channel) cannot
+/// be stored; the object already there is pinned instead. Another source's
+/// build of the filename is another object, no collision. Returns the known
 /// sha256s, the sha256s to pin for colliding filenames, and what to import.
 struct Classified<'a> {
     /// sha256s the index already has.
@@ -284,7 +285,8 @@ fn classify_upstream<'a>(
 ) -> Result<Classified<'a>, RepoError> {
     let shas: Vec<String> = upstream.iter().map(|p| p.sha256.clone()).collect();
     let filenames: Vec<String> = upstream.iter().map(|p| p.filename.clone()).collect();
-    let (known, by_filename) = api.known_with_filenames(&shas, &filenames, &opts.arch)?;
+    let (known, by_filename) =
+        api.known_with_filenames(&shas, &filenames, &opts.source, &opts.arch)?;
     let known: HashSet<String> = known.into_iter().collect();
     report.already_indexed = known.len();
     let mut reuse = Vec::new();
@@ -514,9 +516,9 @@ fn import_one(
             })?;
         }
         let manifest = pkg_extract::extract_manifest(&archive)?;
-        api.upload_pool(&pkg.sha256, &pkg.filename, arch, &archive)?;
+        api.upload_pool(&pkg.sha256, &pkg.filename, source, arch, &archive)?;
         if has_sig {
-            api.upload_pool_signature(&pkg.sha256, &pkg.filename, arch, &sig)?;
+            api.upload_pool_signature(&pkg.sha256, &pkg.filename, source, arch, &sig)?;
         }
         api.index_manifest(&manifest, source, arch)?;
         tracing::info!(package = %pkg.filename, bytes = pkg.size_download, "imported");

@@ -26,7 +26,7 @@ const DIAGRAM = String.raw`
   <rect class="box amber" x="380" y="98" width="250" height="84" rx="3"/><text class="t" x="394" y="124">Verify</text><text class="s" x="394" y="146">sha256 from the upstream db</text><text class="s" x="394" y="164">signature by the project's key</text>
   <path class="ln" d="M630 140 L658 140"/>
   <!-- pool + index -->
-  <rect class="box green" x="660" y="34" width="330" height="96" rx="3"/><text class="t" x="674" y="58">Pool · R2</text><text class="s" x="674" y="80">one object per sha256, immutable</text><text class="s" x="674" y="98">the package and its upstream .sig</text><text class="d" x="674" y="118">pool/&lt;arch&gt;/&lt;filename&gt; · never rewritten</text>
+  <rect class="box green" x="660" y="34" width="330" height="96" rx="3"/><text class="t" x="674" y="58">Pool · R2</text><text class="s" x="674" y="80">one object per sha256, immutable</text><text class="s" x="674" y="98">the package and its upstream .sig</text><text class="d" x="674" y="118">pool/&lt;source&gt;/&lt;arch&gt;/&lt;filename&gt; · never rewritten</text>
   <rect class="box blue" x="660" y="150" width="330" height="104" rx="3"/><text class="t" x="674" y="174">Index · D1</text><text class="s" x="674" y="196">manifests, dependencies, provides,</text><text class="s" x="674" y="214">loaded sonames, file lists</text><text class="d" x="674" y="240">releases: append-only pinned selections</text>
   <!-- security -->
   <path class="ln" d="M825 254 L825 268"/>
@@ -46,7 +46,7 @@ const DIAGRAM = String.raw`
   <text class="d" x="660" y="476">the pool's own scheduler decides when; project workers anywhere do the work</text>
   <!-- user -->
   <path class="ln" d="M660 415 L640 415 L640 503 L632 503"/>
-  <rect class="box green" x="330" y="470" width="300" height="66" rx="3"/><text class="t" x="344" y="492">Your machine · pacman</text><text class="s" x="344" y="512">[omarchy-core-stable] → pool/$arch</text><text class="d" x="344" y="528">plain HTTP · static files · signed dbs</text>
+  <rect class="box green" x="330" y="470" width="300" height="66" rx="3"/><text class="t" x="344" y="492">Your machine · pacman</text><text class="s" x="344" y="512">[omarchy-core-stable] → pool/core/$arch</text><text class="d" x="344" y="528">plain HTTP · static files · signed dbs</text>
   <text class="d" x="20" y="494">one Server = line,</text><text class="d" x="20" y="509">both architectures,</text><text class="d" x="20" y="524">the ring you choose</text>
 </svg>`;
 
@@ -102,14 +102,14 @@ Include = /etc/pacman.d/mirrorlist
 [multilib]
 Include = /etc/pacman.d/mirrorlist</pre></div>
       <div class="arch"><div class="archhead"><span class="archname">with the pool</span></div><pre>[omarchy-packages-stable]
-Server = https://pool.firemanxbr.org/$arch
+Server = https://pool.firemanxbr.org/packages/$arch
 [omarchy-core-stable]
-Server = https://pool.firemanxbr.org/$arch
+Server = https://pool.firemanxbr.org/core/$arch
 [omarchy-extra-stable]
-Server = https://pool.firemanxbr.org/$arch
+Server = https://pool.firemanxbr.org/extra/$arch
 [omarchy-multilib-stable]
-Server = https://pool.firemanxbr.org/$arch
-<span class="c"># same host for every repo and both architectures;
+Server = https://pool.firemanxbr.org/multilib/$arch
+<span class="c"># one host, a directory per repo, both architectures;
 # change "stable" to "rc" or "edge" to change rings</span></pre></div>
     </div>
   </section>

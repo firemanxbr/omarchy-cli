@@ -85,7 +85,7 @@ describe("claims and leases", () => {
     expect((await call("POST", `/factory/tasks/${id}/complete`, { sha256: "0".repeat(64), filename: "nope" }, c2.json.token)).status).toBe(409);
     const filename = "tool-1.0-1-aarch64.pkg.tar.zst";
     const bytes = new TextEncoder().encode("fake tool");
-    await env.PACKAGES.put(packageKey("aarch64", filename), bytes);
+    await env.PACKAGES.put(packageKey("factory", "aarch64", filename), bytes);
     const sha = "a".repeat(64);
     const idx = await call("POST", "/packages?source=factory&arch=aarch64", { schema_version: 1, name: "tool", version: "1.0-1", arch: "aarch64", sha256: sha, filename, size_download: bytes.length, size_installed: 1, provides: ["tool"], requires: [] }, c2.json.token);
     expect(idx.status, JSON.stringify(idx.json)).toBe(201);
@@ -217,7 +217,7 @@ describe("a community build, its audit and the review", () => {
     expect(c.json.task.pkgbuild_ref).toBe("9f1c2ab");
     const filename = "mine-1.0-1-aarch64.pkg.tar.zst";
     const bytes = new TextEncoder().encode("the project's build of mine");
-    await env.PACKAGES.put(packageKey("aarch64", filename), bytes);
+    await env.PACKAGES.put(packageKey("factory", "aarch64", filename), bytes);
     const s = "c".repeat(64);
     const indexed = await call("POST", "/packages?source=factory&arch=aarch64", { schema_version: 1, name: "mine", version: "1.0-1", arch: "aarch64", sha256: s, filename, size_download: bytes.length, size_installed: 1, description: "mine", provides: ["mine"], requires: [], files: [] }, c.json.token);
     expect(indexed.status, JSON.stringify(indexed.json)).toBe(201);
@@ -241,8 +241,9 @@ describe("a community build, its audit and the review", () => {
     expect(seal.chain.audit).toEqual({ verdict: null, status: "cancelled" });
     expect(seal.summary).toBe("built by the project on w1, approved by m2, signed by the pool");
     // The attestation: an in-toto Statement about exactly this object, in the pool beside it.
-    expect(seal.attestation.statement).toBe(`${env.POOL_URL}/aarch64/${filename}.provenance.json`);
-    const obj = await env.PACKAGES.get(packageKey("aarch64", `${filename}.provenance.json`));
+    expect(seal.object).toBe(`${env.POOL_URL}/factory/aarch64/${filename}`);
+    expect(seal.attestation.statement).toBe(`${env.POOL_URL}/factory/aarch64/${filename}.provenance.json`);
+    const obj = await env.PACKAGES.get(packageKey("factory", "aarch64", `${filename}.provenance.json`));
     const statement = JSON.parse(await obj!.text());
     expect(statement._type).toBe("https://in-toto.io/Statement/v1");
     expect(statement.subject).toEqual([{ name: filename, digest: { sha256: s } }]);

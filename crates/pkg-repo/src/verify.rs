@@ -117,20 +117,25 @@ pub fn run(api: &Api, opts: &VerifyOptions) -> Result<VerifyReport, RepoError> {
                 }
                 seen.insert(key);
                 report.objects += 1;
-                let stored =
-                    match api.download(&format!("{}/{arch}/{}", opts.pool, p.filename), &pkg) {
-                        Ok(s) => s,
-                        Err(e) => {
-                            report.unfixable += 1;
-                            report
-                                .details
-                                .push(format!("{ring}/{arch} {}: not served ({e})", p.filename));
-                            continue;
-                        }
-                    };
+                let stored = match api.download(
+                    &format!("{}/{}/{arch}/{}", opts.pool, p.source, p.filename),
+                    &pkg,
+                ) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        report.unfixable += 1;
+                        report
+                            .details
+                            .push(format!("{ring}/{arch} {}: not served ({e})", p.filename));
+                        continue;
+                    }
+                };
                 stored_by_object.insert((arch.clone(), p.filename.clone()), stored.clone());
                 let has_sig = api
-                    .download(&format!("{}/{arch}/{}.sig", opts.pool, p.filename), &sig)
+                    .download(
+                        &format!("{}/{}/{arch}/{}.sig", opts.pool, p.source, p.filename),
+                        &sig,
+                    )
                     .is_ok();
                 let sig_ok =
                     has_sig && crate::sign::verify_with_keyring(&pkg, &sig, &opts.keyring).is_ok();
@@ -196,7 +201,7 @@ pub fn run(api: &Api, opts: &VerifyOptions) -> Result<VerifyReport, RepoError> {
                         )? {
                             let tmp = work.join("good.sig");
                             std::fs::write(&tmp, &bytes)?;
-                            api.upload_pool_signature(&stored, &p.filename, arch, &tmp)?;
+                            api.upload_pool_signature(&stored, &p.filename, &p.source, arch, &tmp)?;
                             report.repaired_signatures += 1;
                             report.details.push(format!(
                                 "{ring}/{arch} {}: signature repaired from the {channel} channel",

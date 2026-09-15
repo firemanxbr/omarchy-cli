@@ -119,6 +119,10 @@ export function scopesFor(kind: string, id: number, trust: string, params: Recor
     case "gc":
       s.push("gc");
       break;
+    case "relayout":
+      // Moves every object into its source's directory, then renders every ring.
+      s.push("relayout", "artifacts:*:edge", "artifacts:*:rc", "artifacts:*:stable");
+      break;
     case "enqueue":
       s.push("factory:write");
       break;

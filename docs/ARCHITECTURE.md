@@ -22,8 +22,17 @@ Promoting a release copies and re-uploads most of that data, so a bump takes
 
 ![Publishing layer](diagrams/publishing-layer.svg)
 
-* **Pool** — Cloudflare R2, one object per package keyed by its SHA-256. A package is
-  uploaded exactly once, whether it came from the Arch mirror sync or from an OPR build.
+* **Pool** — Cloudflare R2, one directory per source (`<source>/<arch>/<filename>`,
+  `worker/src/r2.ts`), the way the mirrors lay out `extra/os/x86_64/`. A package is
+  uploaded exactly once, whether it came from the Arch mirror sync or from an OPR
+  build; two projects' builds of one filename with different bytes — Arch's
+  `asusctl-6.5.0-1` and the OPR's, Arch Linux ARM's `libkrunfw` and Asahi's — are two
+  objects in two directories, each served by its own repository section. Within one
+  source a filename is one object: an upstream that rebuilds the same version with
+  different bytes (the OPR does, per channel) keeps the object already stored. The
+  rows of the index carry their key (`packages.r2_key`); the move from the earlier
+  flat layout (`<arch>/<filename>`, one object per filename whichever source built
+  it) was the one-time `relayout` job (`worker/src/routes/relayout.ts`).
 * **Index** — Cloudflare D1. Every package with its full metadata (from `.PKGINFO`
   plus the ELF soname graph extracted by `pkg-extract`) and every release.
 * **Releases** — a release is a pinned selection of package ids for one ring
@@ -46,10 +55,11 @@ Promoting a release copies and re-uploads most of that data, so a bump takes
 * **Generated pacman databases** — for each ring and source the publisher renders
   `omarchy-<source>-<ring>.db` and `.files` in `repo-add` format and uploads them;
   the Worker signs them with its own OpenPGP key (a secret that never leaves
-  Cloudflare, `worker/src/signing.ts`) and stores them **beside the packages** (`<arch>/omarchy-core-stable.db`). pacman
-  reads the bucket's custom domain directly — `Server = https://pool…/$arch` — and
-  the only thing that differs between rings is the repository name. No worker, no
-  redirect on the read path.
+  Cloudflare, `worker/src/signing.ts`) and stores them **beside the packages** (`core/x86_64/omarchy-core-stable.db`). pacman
+  reads the bucket's custom domain directly — each section's `Server = https://pool…/<source>/$arch`,
+  the directory its database is in (the include, `worker/src/routes/setup.ts`, names
+  it from the artifact's key) — and the only thing that differs between rings is the
+  repository name. No worker, no redirect on the read path.
 
 ![Release promotion](diagrams/release-promotion.svg)
 
@@ -272,7 +282,11 @@ The client drives pacman rather than replacing it. What it adds:
   ring. Read-only: pacman runs them; `poc/crates/pkg-hooks` parses and
   matches;
 * mirror discovery and release notifications come from the index, not from
-  `pacman -Sy` polling;
+  `pacman -Sy` polling. A ring holds every source's build of a name; the
+  client takes one per name in the pool's `source_order` (the release and
+  graph views carry it — the include's order, what pacman takes from the
+  first section that has the name) and hands pacman the object's own
+  address, `<pool>/<source>/<arch>/<filename>`;
 * **MCP** (`omarchy-cli mcp`): the same answers as tools for an assistant on
   the machine — `status`, `check`, `info`, `search`, `list`, `security` —
   over stdio (JSON-RPC, one message per line), read-only; installing and

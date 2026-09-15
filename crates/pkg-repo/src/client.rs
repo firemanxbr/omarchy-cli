@@ -304,15 +304,18 @@ impl Api {
 
     /// Subset of `shas` the index already knows for `arch`.
     pub fn known(&self, shas: &[String], arch: &str) -> Result<Vec<String>, RepoError> {
-        Ok(self.known_with_filenames(shas, &[], arch)?.0)
+        Ok(self.known_with_filenames(shas, &[], "", arch)?.0)
     }
 
     /// Which sha256s are indexed for `arch`, and which of `filenames` already
-    /// have an object under `<arch>/<filename>` (filename → its sha256).
+    /// have an object under `<source>/<arch>/<filename>` (filename → its
+    /// sha256): a filename is one object per source, another source's build
+    /// of it is another object.
     pub fn known_with_filenames(
         &self,
         shas: &[String],
         filenames: &[String],
+        source: &str,
         arch: &str,
     ) -> Result<(Vec<String>, std::collections::HashMap<String, String>), RepoError> {
         #[derive(Deserialize)]
@@ -333,7 +336,7 @@ impl Api {
                 let resp = self
                     .http
                     .post(self.url("/packages/known"))
-                    .json(&serde_json::json!({ "sha256": sha_chunk, "filenames": name_chunk, "arch": arch }))
+                    .json(&serde_json::json!({ "sha256": sha_chunk, "filenames": name_chunk, "source": source, "arch": arch }))
                     .send()?;
                 Ok(Self::check(resp)?.json()?)
             })?;
@@ -344,11 +347,12 @@ impl Api {
         Ok((out, by_filename))
     }
 
-    /// Uploads an archive into the pool under `<arch>/<filename>`; multipart when large.
+    /// Uploads an archive into the pool under `<source>/<arch>/<filename>`; multipart when large.
     pub fn upload_pool(
         &self,
         sha256: &str,
         filename: &str,
+        source: &str,
         arch: &str,
         archive: &Path,
     ) -> Result<(), RepoError> {
@@ -359,7 +363,7 @@ impl Api {
                 let resp = self
                     .http
                     .put(self.url(&format!("/pool/{sha256}")))
-                    .query(&[("filename", filename), ("arch", arch)])
+                    .query(&[("filename", filename), ("source", source), ("arch", arch)])
                     .bearer_auth(&self.token)
                     .header("content-length", len)
                     .body(reqwest::blocking::Body::sized(file, len))
@@ -372,7 +376,7 @@ impl Api {
             let resp = self
                 .http
                 .post(self.url(&format!("/pool/{sha256}/multipart")))
-                .query(&[("filename", filename), ("arch", arch)])
+                .query(&[("filename", filename), ("source", source), ("arch", arch)])
                 .bearer_auth(&self.token)
                 .send()?;
             Ok(Self::check(resp)?.json()?)
@@ -432,6 +436,7 @@ impl Api {
         &self,
         sha256: &str,
         filename: &str,
+        source: &str,
         arch: &str,
         sig: &Path,
     ) -> Result<(), RepoError> {
@@ -440,7 +445,7 @@ impl Api {
             let resp = self
                 .http
                 .put(self.url(&format!("/pool/{sha256}/sig")))
-                .query(&[("filename", filename), ("arch", arch)])
+                .query(&[("filename", filename), ("source", source), ("arch", arch)])
                 .bearer_auth(&self.token)
                 .body(bytes.clone())
                 .send()?;
@@ -456,12 +461,18 @@ impl Api {
     }
 
     /// Asks the pool to sign a package object it stores with its own key.
-    pub fn sign_pool(&self, sha256: &str, filename: &str, arch: &str) -> Result<(), RepoError> {
+    pub fn sign_pool(
+        &self,
+        sha256: &str,
+        filename: &str,
+        source: &str,
+        arch: &str,
+    ) -> Result<(), RepoError> {
         with_retry("sign_pool", || {
             let resp = self
                 .http
                 .post(self.url(&format!("/pool/{sha256}/sign")))
-                .query(&[("filename", filename), ("arch", arch)])
+                .query(&[("filename", filename), ("source", source), ("arch", arch)])
                 .bearer_auth(&self.token)
                 .send()?;
             Self::check(resp).map(|_| ())
@@ -637,6 +648,18 @@ impl Api {
             let resp = self
                 .http
                 .get(self.url(&format!("/pool/unreferenced?keep={keep}")))
+                .send()?;
+            Ok(Self::check(resp)?.json()?)
+        })
+    }
+
+    /// One step of the relayout (`phase` copy or purge, routes/relayout.ts): what it moved or deleted, and whether more remains.
+    pub fn relayout(&self, phase: &str, limit: u32) -> Result<serde_json::Value, RepoError> {
+        with_retry("relayout", || {
+            let resp = self
+                .http
+                .post(self.url(&format!("/pool/relayout?phase={phase}&limit={limit}")))
+                .bearer_auth(&self.token)
                 .send()?;
             Ok(Self::check(resp)?.json()?)
         })

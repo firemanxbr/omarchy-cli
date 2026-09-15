@@ -6,7 +6,7 @@ import type { Env } from "../index";
  * development (wrangler dev has no custom domain) and as a fallback origin.
  */
 export async function handleStatic(key: string, request: Request, env: Env): Promise<Response> {
-  if (!/^[A-Za-z0-9_]+\/[A-Za-z0-9@._+:-]+$/.test(key)) return new Response("not found", { status: 404 });
+  if (!/^([a-z0-9-]+\/)?(x86_64|aarch64)\/[A-Za-z0-9@._+:-]+$/.test(key)) return new Response("not found", { status: 404 });
   const object = await env.PACKAGES.get(key, { range: request.headers, onlyIf: request.headers });
   if (object === null) return new Response("not found", { status: 404 });
 

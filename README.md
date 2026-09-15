@@ -25,18 +25,18 @@ curl -O https://pool.firemanxbr.org/omarchy-staging.pub.asc
 sudo pacman-key --add omarchy-staging.pub.asc && sudo pacman-key --lsign-key staging@firemanxbr.org
 
 # 2. /etc/pacman.conf — one host for every repository and both architectures
-[omarchy-core-stable]
-SigLevel = Required DatabaseRequired
-Server = https://pool.firemanxbr.org/$arch
-[omarchy-extra-stable]
-SigLevel = Required DatabaseRequired
-Server = https://pool.firemanxbr.org/$arch
-[omarchy-multilib-stable]
-SigLevel = Required DatabaseRequired
-Server = https://pool.firemanxbr.org/$arch
 [omarchy-packages-stable]
 SigLevel = Required DatabaseRequired
-Server = https://pool.firemanxbr.org/$arch
+Server = https://pool.firemanxbr.org/packages/$arch
+[omarchy-core-stable]
+SigLevel = Required DatabaseRequired
+Server = https://pool.firemanxbr.org/core/$arch
+[omarchy-extra-stable]
+SigLevel = Required DatabaseRequired
+Server = https://pool.firemanxbr.org/extra/$arch
+[omarchy-multilib-stable]
+SigLevel = Required DatabaseRequired
+Server = https://pool.firemanxbr.org/multilib/$arch
 
 # 3.
 sudo pacman -Syu

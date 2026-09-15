@@ -1,5 +1,4 @@
 import { json, RINGS, type Env } from "../index";
-import { packageKey, signatureKey } from "../r2";
 
 /**
  * Retention: a package is protected while a ring serves it, while any of
@@ -40,7 +39,7 @@ async function retention(env: Env, keep: number): Promise<{ protectedReleases: n
 async function unreferenced(env: Env, keep: number, graceDays: number) {
   const { protectedReleases, keptCheckpoints, checkpointSeq } = await retention(env, keep);
   const rows = await env.DB.prepare(
-    `SELECT id, sha256, name, version, arch, repo_arch, filename, size_download, source FROM packages
+    `SELECT id, sha256, name, version, arch, repo_arch, filename, size_download, source, COALESCE(r2_key, repo_arch || '/' || filename) AS r2_key FROM packages
       WHERE id NOT IN (SELECT package_id FROM ring_packages)
         AND id NOT IN (SELECT package_id FROM release_deltas WHERE release_id IN (SELECT value FROM json_each(?1)))
         AND id NOT IN (SELECT package_id FROM release_packages WHERE release_id IN (SELECT value FROM json_each(?2)))
@@ -48,7 +47,7 @@ async function unreferenced(env: Env, keep: number, graceDays: number) {
       ORDER BY id`,
   )
     .bind(JSON.stringify(protectedReleases), JSON.stringify(keptCheckpoints), `-${graceDays} days`)
-    .all<{ id: number; sha256: string; name: string; version: string; arch: string; repo_arch: string; filename: string; size_download: number; source: string }>();
+    .all<{ id: number; sha256: string; name: string; version: string; arch: string; repo_arch: string; filename: string; size_download: number; source: string; r2_key: string }>();
   return { protectedReleases, keptCheckpoints, checkpointSeq, packages: rows.results };
 }
 
@@ -94,13 +93,13 @@ export async function handleGc(url: URL, env: Env): Promise<Response> {
   let bytes = 0;
   let objectsKept = 0;
   for (const p of victims) {
-    // One object per <arch>/<filename>: an upstream rebuild of the same
-    // version with different bytes (the OPR, per channel) can leave two
-    // index rows behind one key. The row goes; the object only when no
-    // other row — served or not — still names it.
-    const shared = await env.DB.prepare("SELECT COUNT(*) AS n FROM packages WHERE filename = ? AND repo_arch = ? AND id != ?").bind(p.filename, p.repo_arch, p.id).first<{ n: number }>();
+    // One object per key: an upstream rebuild of the same version with
+    // different bytes (the OPR, per channel) can leave two index rows
+    // behind one key. The row goes; the object only when no other row —
+    // served or not — still names it (a ghost row names no object).
+    const shared = await env.DB.prepare("SELECT COUNT(*) AS n FROM packages WHERE COALESCE(r2_key, repo_arch || '/' || filename) = ? AND id != ?").bind(p.r2_key, p.id).first<{ n: number }>();
     if (shared?.n) objectsKept++;
-    else await env.PACKAGES.delete([packageKey(p.repo_arch, p.filename), signatureKey(p.repo_arch, p.filename), packageKey(p.repo_arch, `${p.filename}.provenance.json`), packageKey(p.repo_arch, `${p.filename}.provenance.json.sig`)]);
+    else if (!p.r2_key.startsWith("ghost/")) await env.PACKAGES.delete([p.r2_key, `${p.r2_key}.sig`, `${p.r2_key}.provenance.json`, `${p.r2_key}.provenance.json.sig`]);
     await env.DB.batch([
       env.DB.prepare("DELETE FROM package_provides WHERE package_id = ?").bind(p.id),
       env.DB.prepare("DELETE FROM package_requires WHERE package_id = ?").bind(p.id),

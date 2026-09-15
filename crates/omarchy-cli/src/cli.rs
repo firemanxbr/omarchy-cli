@@ -8,7 +8,7 @@ use pkg_check::{Action, Plan, Severity};
 use pkg_hooks::{HookOperation, Matched, TransactionPackage};
 use pkg_manifest::{vercmp, PackageManifest};
 
-use crate::api::Api;
+use crate::api::{one_per_name, Api, IndexedManifest};
 use crate::config::Config;
 use crate::state::{self, Pinned};
 
@@ -134,7 +134,7 @@ pub fn run(cli: Cli) -> Result<i32> {
     match cli.command {
         Command::Status => status(&config, &api, json),
         Command::Check { targets } => {
-            let (plan, _) = plan_targets(&config, &api, &targets)?;
+            let (plan, _, _) = plan_targets(&config, &api, &targets)?;
             let hooks = hook_preview(&config, &api, &plan);
             print_plan(&plan, &hooks, json);
             Ok(if plan.is_safe() { 0 } else { EXIT_BLOCKED })
@@ -144,10 +144,10 @@ pub fn run(cli: Cli) -> Result<i32> {
             dry_run,
             noconfirm,
         } => {
-            let (plan, _) = plan_targets(&config, &api, &targets)?;
+            let (plan, _, sources) = plan_targets(&config, &api, &targets)?;
             let hooks = hook_preview(&config, &api, &plan);
             print_plan(&plan, &hooks, json);
-            apply(&config, &plan, dry_run, noconfirm, None)
+            apply(&config, &plan, &sources, dry_run, noconfirm, None)
         }
         Command::Upgrade {
             dry_run,
@@ -170,10 +170,15 @@ pub fn run(cli: Cli) -> Result<i32> {
             } else {
                 None
             };
-            let candidates: Vec<PackageManifest> = view
+            let served: Vec<IndexedManifest> = view
                 .packages
                 .into_iter()
                 .filter(|p| same_arch(&config, p.repo_arch.as_deref()))
+                .collect();
+            let served = one_per_name(served, &view.source_order);
+            let sources = sources_of(&served);
+            let candidates: Vec<PackageManifest> = served
+                .into_iter()
                 .map(|p| p.manifest)
                 .filter(|m| only.as_ref().is_none_or(|set| set.contains(&m.name)))
                 .filter(|m| {
@@ -191,7 +196,7 @@ pub fn run(cli: Cli) -> Result<i32> {
                 seq: view.release.seq,
                 at: now(),
             };
-            apply(&config, &plan, dry_run, noconfirm, Some(pin))
+            apply(&config, &plan, &sources, dry_run, noconfirm, Some(pin))
         }
         Command::Search { query } => search(&config, &api, &query, json),
         Command::Security => security(&config, &api, json),
@@ -243,19 +248,25 @@ fn search(config: &Config, api: &Api, query: &str, json: bool) -> Result<i32> {
 /// A package's manifest as the ring publishes it, plus the release it came from.
 pub fn info_value(config: &Config, api: &Api, package: &str) -> Result<serde_json::Value> {
     let view = api.release(&config.ring, &config.arch)?;
-    let Some(m) = view
+    let served: Vec<IndexedManifest> = view
         .packages
-        .iter()
+        .into_iter()
         .filter(|p| same_arch(config, p.repo_arch.as_deref()))
-        .map(|p| &p.manifest)
-        .find(|m| m.name == package)
+        .collect();
+    let Some(p) = one_per_name(served, &view.source_order)
+        .into_iter()
+        .find(|p| p.manifest.name == package)
     else {
         bail!("{package} is not in {}#{}", config.ring, view.release.seq);
     };
+    let m = &p.manifest;
     let mut v = serde_json::to_value(m)?;
     v["release"] =
         serde_json::json!({ "ring": config.ring, "id": view.release.id, "seq": view.release.seq });
-    v["mirror"] = serde_json::Value::String(config.package_url(&m.filename));
+    v["source"] = serde_json::Value::String(p.source.clone().unwrap_or_default());
+    v["mirror"] = serde_json::Value::String(
+        config.package_url(p.source.as_deref().unwrap_or("packages"), &m.filename),
+    );
     // The seal is worth a second request; a pool without it is still a pool.
     v["seal"] = api.provenance(&m.sha256).unwrap_or(serde_json::Value::Null);
     Ok(v)
@@ -334,15 +345,18 @@ fn provenance(
 
 fn info(config: &Config, api: &Api, package: &str, json: bool) -> Result<i32> {
     let view = api.release(&config.ring, &config.arch)?;
-    let Some(m) = view
+    let served: Vec<IndexedManifest> = view
         .packages
-        .iter()
+        .into_iter()
         .filter(|p| same_arch(config, p.repo_arch.as_deref()))
-        .map(|p| &p.manifest)
-        .find(|m| m.name == package)
+        .collect();
+    let Some(p) = one_per_name(served, &view.source_order)
+        .into_iter()
+        .find(|p| p.manifest.name == package)
     else {
         bail!("{package} is not in {}#{}", config.ring, view.release.seq);
     };
+    let m = &p.manifest;
     if json {
         println!(
             "{}",
@@ -370,7 +384,11 @@ fn info(config: &Config, api: &Api, package: &str, json: bool) -> Result<i32> {
         .map(ToString::to_string)
         .collect();
     println!("ABI needs    : {}", abi.join("  "));
-    println!("Mirror       : {}", config.package_url(&m.filename));
+    println!("Source       : {}", p.source.as_deref().unwrap_or(""));
+    println!(
+        "Mirror       : {}",
+        config.package_url(p.source.as_deref().unwrap_or("packages"), &m.filename)
+    );
     if let Some(line) = api.provenance(&m.sha256).ok().as_ref().and_then(seal_line) {
         println!("Provenance   : {line}");
     }
@@ -640,7 +658,9 @@ fn status(config: &Config, api: &Api, json: bool) -> Result<i32> {
     Ok(0)
 }
 
-fn plan_targets(config: &Config, api: &Api, targets: &[String]) -> Result<(Plan, u64)> {
+/// The plan for `targets`, the release it is against, and the source of
+/// every candidate (what names its directory on the pool).
+fn plan_targets(config: &Config, api: &Api, targets: &[String]) -> Result<(Plan, u64, Sources)> {
     let graph = api.graph(&config.ring, &config.arch, targets)?;
     if !graph.missing_targets.is_empty() {
         bail!(
@@ -655,11 +675,24 @@ fn plan_targets(config: &Config, api: &Api, targets: &[String]) -> Result<(Plan,
     let local = LocalDb::load(&config.root)
         .with_context(|| format!("reading {}", LocalDb::db_path(&config.root).display()))?;
     let abi = SystemAbi::new(&config.root);
-    let candidates: Vec<PackageManifest> = graph.packages.into_iter().map(|p| p.manifest).collect();
+    let served = one_per_name(graph.packages, &graph.source_order);
+    let sources = sources_of(&served);
+    let candidates: Vec<PackageManifest> = served.into_iter().map(|p| p.manifest).collect();
     Ok((
         pkg_check::check(&candidates, &local, &abi),
         graph.release_id,
+        sources,
     ))
+}
+
+/// sha256 → source: which directory of the pool holds each candidate's object.
+type Sources = std::collections::HashMap<String, String>;
+
+fn sources_of(served: &[IndexedManifest]) -> Sources {
+    served
+        .iter()
+        .filter_map(|p| Some((p.manifest.sha256.clone(), p.source.clone()?)))
+        .collect()
 }
 
 /// A libalpm hook the plan would make pacman run, and why.
@@ -755,7 +788,7 @@ pub fn plan_value(plan: &Plan, hooks: &[HookPreview]) -> serde_json::Value {
 
 /// The safety check of an out-of-band install, for the MCP `check` tool.
 pub fn check_value(config: &Config, api: &Api, targets: &[String]) -> Result<serde_json::Value> {
-    let (plan, _) = plan_targets(config, api, targets)?;
+    let (plan, _, _) = plan_targets(config, api, targets)?;
     let hooks = hook_preview(config, api, &plan);
     Ok(plan_value(&plan, &hooks))
 }
@@ -823,6 +856,7 @@ fn print_plan(plan: &Plan, hooks: &[HookPreview], json: bool) {
 fn apply(
     config: &Config,
     plan: &Plan,
+    sources: &Sources,
     dry_run: bool,
     noconfirm: bool,
     pin: Option<Pinned>,
@@ -830,10 +864,19 @@ fn apply(
     if !plan.is_safe() {
         return Ok(EXIT_BLOCKED);
     }
-    let urls: Vec<String> = plan
+    let urls = plan
         .to_install()
-        .map(|p| config.package_url(&p.filename))
-        .collect();
+        .map(|p| {
+            let source = sources.get(&p.sha256).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "the pool did not say which source built {} {}; a pool from before the one-directory-per-source layout — update it, or this client",
+                    p.name,
+                    p.version
+                )
+            })?;
+            Ok(config.package_url(source, &p.filename))
+        })
+        .collect::<Result<Vec<String>>>()?;
     if urls.is_empty() {
         if let Some(pin) = pin {
             state::save(&config.root, &pin)?;

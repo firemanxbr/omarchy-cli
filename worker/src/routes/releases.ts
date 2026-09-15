@@ -1,6 +1,7 @@
 import { signingEnabled, detachedSignature } from "../signing";
 import { isRing, json, type Env, type Ring } from "../index";
 import { artifactKey, isRepoArch, REPO_ARCHES, SHORT } from "../r2";
+import { REPO_ORDER, sourceOfRepo } from "../meta";
 import { releaseManifests, releaseSummary, releaseSources, ringHead, ringMembers, releaseMembers, ensureCheckpoint, CHECKPOINT_EVERY, type ManifestDetail, type ReleaseRow } from "../db";
 
 interface CreateRelease {
@@ -303,6 +304,10 @@ export async function handleGetRelease(ring: string, url: URL, env: Env): Promis
     release,
     ...(await releaseSummary(env, release.id)),
     artifacts: artifacts.results,
+    // A ring holds every source's build of a name; a client that installs
+    // by itself takes the first in this order, as pacman takes the first
+    // repository of the include that has the name.
+    source_order: REPO_ORDER,
     page: { arch, offset: after ? null : offset, after: afterParam ?? null, limit: limit || null, returned: packages.length, total, next: last ? `${last.name}/${last.repo_arch}/${last.source}` : null },
     packages,
   });
@@ -357,6 +362,9 @@ export async function handlePutArtifact(
   const arch = url.searchParams.get("arch") ?? "x86_64";
   if (!/^[a-z0-9-]+$/.test(repo)) return json({ error: "repo is required (e.g. omarchy-core-stable)" }, 400);
   if (!isRepoArch(arch)) return json({ error: "arch must be x86_64 or aarch64" }, 400);
+  // A database lives in the directory of the source it lists: omarchy-<source>-<ring>.
+  const source = sourceOfRepo(repo);
+  if (!source) return json({ error: "repo must be omarchy-<source>-<ring>" }, 400);
   if (!request.body) return json({ error: "empty body" }, 400);
   const release = await env.DB.prepare("SELECT id FROM releases WHERE id = ?").bind(releaseId).first();
   if (!release) return json({ error: "release not found" }, 404);
@@ -369,12 +377,12 @@ export async function handlePutArtifact(
   }
 
   const bytes = await request.arrayBuffer();
-  const key = artifactKey(arch, repo, kind);
+  const key = artifactKey(source, arch, repo, kind);
   await env.PACKAGES.put(key, bytes, { httpMetadata: { contentType: "application/octet-stream", cacheControl: SHORT } });
   const keys = [key];
   if ((kind === "db" || kind === "files") && signingEnabled(env)) {
     const sig = await detachedSignature(env, new Uint8Array(bytes));
-    const sigKey = artifactKey(arch, repo, `${kind}.sig`);
+    const sigKey = artifactKey(source, arch, repo, `${kind}.sig`);
     await env.PACKAGES.put(sigKey, sig, { httpMetadata: { contentType: "application/octet-stream", cacheControl: SHORT } });
     await env.DB.prepare(
       `INSERT INTO release_artifacts (release_id, repo, arch, kind, r2_key, size) VALUES (?, ?, ?, ?, ?, ?)

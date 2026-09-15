@@ -22,8 +22,10 @@ pub struct Release {
 /// are absorbed here so the manifest itself stays exact.
 #[derive(Debug, Clone, Deserialize)]
 pub struct IndexedManifest {
-    #[serde(default, rename = "source")]
-    _source: Option<String>,
+    /// The upstream repository that built it (core, extra, packages — the
+    /// OPR —, asahi, …): the directory its object is in on the pool.
+    #[serde(default)]
+    pub source: Option<String>,
     /// Architecture of the upstream repository the package came from.
     #[serde(default)]
     pub repo_arch: Option<String>,
@@ -31,10 +33,39 @@ pub struct IndexedManifest {
     pub manifest: PackageManifest,
 }
 
+/// One build per name. A ring holds every source's build of a name (one
+/// row per source), and a machine takes the first in the pool's order —
+/// the order of the include's sections, what pacman takes from the first
+/// repository that has the name. A source the order does not know comes
+/// after the ones it does; ties go by source name, so the choice is stable.
+pub fn one_per_name(packages: Vec<IndexedManifest>, order: &[String]) -> Vec<IndexedManifest> {
+    let rank = |s: Option<&str>| {
+        order
+            .iter()
+            .position(|o| Some(o.as_str()) == s)
+            .unwrap_or(order.len())
+    };
+    let mut best: std::collections::BTreeMap<String, IndexedManifest> =
+        std::collections::BTreeMap::new();
+    for p in packages {
+        let wins = best.get(&p.manifest.name).is_none_or(|cur| {
+            (rank(p.source.as_deref()), p.source.as_deref())
+                < (rank(cur.source.as_deref()), cur.source.as_deref())
+        });
+        if wins {
+            best.insert(p.manifest.name.clone(), p);
+        }
+    }
+    best.into_values().collect()
+}
+
 #[derive(Debug, Deserialize)]
 pub struct ReleaseView {
     pub release: Release,
     pub packages: Vec<IndexedManifest>,
+    /// The pool's order between sources (`one_per_name`).
+    #[serde(default)]
+    pub source_order: Vec<String>,
     /// The page this view came from: `next` names the last row when there
     /// is more (`after=`, keyset paging), null on the last page.
     #[serde(default)]
@@ -72,6 +103,8 @@ pub struct ReleaseSummaryView {
 pub struct Graph {
     pub release_id: u64,
     pub packages: Vec<IndexedManifest>,
+    #[serde(default)]
+    pub source_order: Vec<String>,
     pub missing_targets: Vec<String>,
     pub truncated: bool,
 }
@@ -228,4 +261,68 @@ fn urlencode(s: &str) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn indexed(name: &str, source: Option<&str>) -> IndexedManifest {
+        let manifest: PackageManifest = serde_json::from_value(serde_json::json!({
+            "schema_version": 1, "name": name, "version": "1-1", "arch": "aarch64",
+            "sha256": format!("{:0>64}", source.unwrap_or("none").len()), "filename": format!("{name}-1-1-aarch64.pkg.tar.zst"),
+            "size_download": 1, "size_installed": 1, "provides": [name], "requires": [],
+            "pkginfo": { "base": name, "builddate": 0 },
+        }))
+        .unwrap();
+        IndexedManifest {
+            source: source.map(str::to_owned),
+            repo_arch: Some("aarch64".into()),
+            manifest,
+        }
+    }
+
+    #[test]
+    fn one_build_per_name_in_the_pools_order() {
+        let order: Vec<String> = ["asahi", "asahi-alarm", "packages", "core", "extra"]
+            .iter()
+            .map(|s| (*s).to_owned())
+            .collect();
+        let served = vec![
+            indexed("mesa", Some("extra")),
+            indexed("mesa", Some("asahi-alarm")),
+            indexed("localsend", Some("packages")),
+            indexed("localsend", Some("asahi")),
+            indexed("zlib", Some("core")),
+            indexed("tool", Some("chaotic")), // not in the order: after every listed source
+            indexed("tool", Some("extra")),
+            indexed("ghost", None),
+        ];
+        let picked: Vec<(String, Option<String>)> = one_per_name(served, &order)
+            .into_iter()
+            .map(|p| (p.manifest.name, p.source))
+            .collect();
+        assert_eq!(
+            picked,
+            vec![
+                ("ghost".into(), None),
+                ("localsend".into(), Some("asahi".into())),
+                ("mesa".into(), Some("asahi-alarm".into())),
+                ("tool".into(), Some("extra".into())),
+                ("zlib".into(), Some("core".into())),
+            ]
+        );
+        // Without an order (an older pool), the choice is still one and stable: by source name.
+        let picked: Vec<Option<String>> = one_per_name(
+            vec![
+                indexed("mesa", Some("extra")),
+                indexed("mesa", Some("asahi-alarm")),
+            ],
+            &[],
+        )
+        .into_iter()
+        .map(|p| p.source)
+        .collect();
+        assert_eq!(picked, vec![Some("asahi-alarm".into())]);
+    }
 }

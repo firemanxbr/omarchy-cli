@@ -77,7 +77,7 @@ pub fn agent_label() -> Option<String> {
 pub fn default_kinds() -> Vec<String> {
     let mut kinds: Vec<String> = [
         "build", "sync", "render", "promote", "health", "security", "enqueue", "rollback", "gc",
-        "verify",
+        "verify", "relayout",
     ]
     .iter()
     .map(|k| (*k).to_owned())
@@ -499,6 +499,7 @@ fn execute(opts: &WorkOptions, task: &Task, token: &Arc<Mutex<String>>) -> Resul
         "build" => build_job(opts, &job, task),
         "audit" => audit_job(opts, &job, task),
         "verify" => verify_job(opts, &job, task),
+        "relayout" => relayout_job(opts, &job),
         other => Err(anyhow!("this worker does not run '{other}' jobs")),
     }
 }
@@ -868,6 +869,73 @@ fn rollback_job(opts: &WorkOptions, job: &Api, task: &Task) -> Result<Outcome> {
 /// Does what the pool serves verify? Every OPR object of every ring and
 /// architecture, downloaded and checked against Omarchy's keyring; what is
 /// wrong is repaired (`verify.rs`) and the rings re-pinned are rendered.
+/// The one-time move of every object into its source's directory
+/// (`<source>/<arch>/<filename>`, routes/relayout.ts): copy until nothing
+/// remains, render every ring so its databases sit in the same directories
+/// (the include then names them), and purge the flat directories last. The
+/// pool does the copying; this loops, a page at a time, and renders.
+fn relayout_job(opts: &WorkOptions, job: &Api) -> Result<Outcome> {
+    let started = Instant::now();
+    let (mut moved, mut ghosts, mut missing) = (0u64, 0u64, 0u64);
+    let mut errors: Vec<String> = Vec::new();
+    loop {
+        let r = job.relayout("copy", 40)?;
+        let step = r["moved"].as_u64().unwrap_or(0) + r["ghosts"].as_u64().unwrap_or(0);
+        moved += r["moved"].as_u64().unwrap_or(0);
+        ghosts += r["ghosts"].as_u64().unwrap_or(0);
+        missing += r["missing"].as_u64().unwrap_or(0);
+        if let Some(e) = r["errors"].as_array() {
+            errors.extend(e.iter().filter_map(|v| v.as_str().map(str::to_owned)));
+        }
+        let remaining = r["remaining"].as_u64().unwrap_or(0);
+        tracing::info!(moved, ghosts, missing, remaining, "relayout: copying");
+        if remaining == 0 {
+            break;
+        }
+        if step == 0 {
+            // Nothing moved in a whole page: what is left cannot be copied
+            // (an object missing from the pool, a storage error) — the
+            // flat directory stays, the include keeps naming it, and the
+            // rows say which.
+            return Err(anyhow!(
+                "relayout stalled with {remaining} object(s) left: {missing} missing, {} error(s){}",
+                errors.len(),
+                errors.first().map(|e| format!(" — {e}")).unwrap_or_default()
+            ));
+        }
+    }
+    let mut rendered = Vec::new();
+    for ring in ["edge", "rc", "stable"] {
+        for arch in ["x86_64", "aarch64"] {
+            let repos = ops::render(job, ring, arch, opts.sign.as_deref())
+                .with_context(|| format!("rendering {ring}/{arch} after the move"))?;
+            rendered.extend(repos.into_iter().map(|r| format!("{ring}/{arch}/{r}")));
+        }
+    }
+    let mut deleted = 0u64;
+    loop {
+        let r = job.relayout("purge", 40)?;
+        deleted += r["deleted"].as_u64().unwrap_or(0);
+        if !r["truncated"].as_bool().unwrap_or(false) {
+            break;
+        }
+    }
+    let summary = format!(
+        "relayout: {moved} object(s) moved into their source's directory, {ghosts} ghost row(s) marked, {} database(s) rendered, {deleted} old key(s) purged",
+        rendered.len()
+    );
+    job.post_event(&serde_json::json!({
+        "kind": "relayout", "status": if errors.is_empty() && missing == 0 { "ok" } else { "warn" },
+        "summary": summary,
+        "duration_ms": u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+        "payload": { "moved": moved, "ghosts": ghosts, "missing": missing, "errors": errors, "rendered": rendered, "purged": deleted },
+    }))?;
+    Ok(Outcome {
+        summary,
+        result: serde_json::json!({ "moved": moved, "ghosts": ghosts, "missing": missing, "errors": errors, "rendered": rendered, "purged": deleted }),
+    })
+}
+
 fn verify_job(opts: &WorkOptions, job: &Api, task: &Task) -> Result<Outcome> {
     let keys = keyrings(opts)?;
     let ring = s(&task.params, "ring");
