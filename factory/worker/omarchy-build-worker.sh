@@ -23,9 +23,10 @@
 #   WORKER_ID              the registered worker id (shown with the token)
 #   WORKER_LABELS          JSON shown on the Factory page, e.g. {"where":"laptop"}
 #   WORKER_SHARED          1 = build anyone's community packages (donated compute); default: the owner's only
-#   ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, XAI_API_KEY
+#   ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, XAI_API_KEY, CLAUDE_CODE_OAUTH_TOKEN
 #                          the worker owner's agent key, if any (one is enough): drafts and corrects PKGBUILDs
-#                          here, on this machine (factory/bin/agent.py; FACTORY_PROVIDER / FACTORY_MODEL choose)
+#                          here, on this machine (factory/bin/agent.py; FACTORY_PROVIDER / FACTORY_MODEL choose);
+#                          the last one is a Claude subscription, through Claude Code in print mode
 #   IDLE_EXIT              exit after this many seconds without work (0 = never; default 0)
 #   MAX_TASKS              exit after this many tasks (0 = unlimited; default 0)
 set -euo pipefail
@@ -39,7 +40,7 @@ log() { printf '[%s] %s\n' "$(date -u +%H:%M:%S)" "$*" >&2; }
 # so the Factory page can show it; the key itself never leaves this machine.
 agent_label() {
   local p k m
-  for p in anthropic:ANTHROPIC_API_KEY:claude-sonnet-5 openai:OPENAI_API_KEY:gpt-5 gemini:GEMINI_API_KEY:gemini-3.6-flash xai:XAI_API_KEY:grok-4; do
+  for p in anthropic:ANTHROPIC_API_KEY:claude-sonnet-5 claude-code:CLAUDE_CODE_OAUTH_TOKEN:claude-sonnet-5 openai:OPENAI_API_KEY:gpt-5 gemini:GEMINI_API_KEY:gemini-3.6-flash xai:XAI_API_KEY:grok-4; do
     k="${p#*:}"; k="${k%%:*}"; m="${p##*:}"
     [[ -n "${FACTORY_PROVIDER:-}" && "${FACTORY_PROVIDER}" != "${p%%:*}" ]] && continue
     [[ -n "${!k:-}" ]] && { echo "${p%%:*}/${FACTORY_MODEL:-$m}"; return; }

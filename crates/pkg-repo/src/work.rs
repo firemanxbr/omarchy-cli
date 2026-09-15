@@ -31,12 +31,26 @@ const POLL: Duration = Duration::from_secs(30);
 
 /// The agent providers `factory/bin/agent.py` knows, in the order it picks
 /// them when several keys are set: (name, key variable, default model).
-const AGENTS: [(&str, &str, &str); 4] = [
+const AGENTS: [(&str, &str, &str); 5] = [
     ("anthropic", "ANTHROPIC_API_KEY", "claude-sonnet-5"),
+    ("claude-code", "CLAUDE_CODE_OAUTH_TOKEN", "claude-sonnet-5"),
     ("openai", "OPENAI_API_KEY", "gpt-5"),
     ("gemini", "GEMINI_API_KEY", "gemini-3.6-flash"),
     ("xai", "XAI_API_KEY", "grok-4"),
 ];
+
+/// A `FACTORY_MODEL` that plainly belongs to another provider is ignored for
+/// the default, as agent.py does (a switch of provider with the old model
+/// left in the file): the label says what will actually run.
+fn model_fits(provider: &str, model: &str) -> bool {
+    let family = match provider {
+        "anthropic" | "claude-code" => "claude",
+        "gemini" => "gemini",
+        "xai" => "grok",
+        _ => return true,
+    };
+    model.to_ascii_lowercase().starts_with(family)
+}
 
 /// The agent this worker runs, as `<provider>/<model>` — what the claim
 /// reports so the Factory page can show it; the key itself stays here.
@@ -52,7 +66,7 @@ pub fn agent_label() -> Option<String> {
         .find(|(name, key, _)| wanted.as_deref().is_none_or(|w| w == *name) && set(key))?;
     let model = std::env::var("FACTORY_MODEL")
         .ok()
-        .filter(|m| !m.is_empty())
+        .filter(|m| !m.is_empty() && model_fits(name, m))
         .unwrap_or_else(|| (*default_model).to_owned());
     Some(format!("{name}/{model}"))
 }
@@ -944,7 +958,7 @@ fn build_job(opts: &WorkOptions, job: &Api, task: &Task) -> Result<Outcome> {
 fn audit_job(opts: &WorkOptions, job: &Api, task: &Task) -> Result<Outcome> {
     anyhow::ensure!(
         agent_label().is_some(),
-        "no agent key on this worker (ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY or XAI_API_KEY); start it without the audit kind"
+        "no agent key on this worker (ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN, OPENAI_API_KEY, GEMINI_API_KEY or XAI_API_KEY); start it without the audit kind"
     );
     let staged = task
         .params

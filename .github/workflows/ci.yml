@@ -56,3 +56,6 @@ jobs:
       - name: Governance file and CODEOWNERS agree
         working-directory: .
         run: factory/bin/check-governance
+      - name: The agent's claude-code provider, against a fake claude
+        working-directory: .
+        run: python3 tests/agent-claude-code.py

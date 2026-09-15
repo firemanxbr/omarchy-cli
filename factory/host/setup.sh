@@ -105,6 +105,12 @@ GITHUB_TOKEN=
 #ANTHROPIC_API_KEY=
 #OPENAI_API_KEY=
 #XAI_API_KEY=
+# Or a Claude subscription instead of a key: `claude setup-token` on a
+# machine where Claude Code is logged in prints the token; the worker
+# installs Claude Code at start and runs it in print mode (no tools). Set
+# FACTORY_PROVIDER=claude-code when a key sits in this file too. Your
+# subscription, your rate limits, your terms with Anthropic.
+#CLAUDE_CODE_OAUTH_TOKEN=
 AGENT
 fi
 chown "$user:$user" "$f"; chmod 600 "$f"

@@ -27,6 +27,12 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       XAI_API_KEY: ${XAI_API_KEY:-}
+      # Or a Claude subscription instead of a key: the token `claude setup-token`
+      # prints on your machine. The worker installs Claude Code at start and
+      # runs it in print mode (docs: /docs/workers#claude-code). Your
+      # subscription, your terms, your rate limits.
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      FACTORY_PROVIDER: ${FACTORY_PROVIDER:-}
       FACTORY_MODEL: ${FACTORY_MODEL:-}
       # GitHub's API: the release, the files of every package it builds. Without
       # a token: 60 requests an hour from your address. A fine-grained token

@@ -9,7 +9,8 @@
 #                      built right here, the result into the contributor's
 #                      staging workspace (WORKER_SHARED=1 builds anyone's,
 #                      an agent key — ANTHROPIC_API_KEY, OPENAI_API_KEY,
-#                      GEMINI_API_KEY or XAI_API_KEY — brings the owner's agent).
+#                      GEMINI_API_KEY or XAI_API_KEY, or CLAUDE_CODE_OAUTH_TOKEN for
+#                      a Claude subscription — brings the owner's agent).
 #   project trust    → the project's worker: the pool's jobs and the rebuild
 #                      of approved packages, each in a fresh sibling
 #                      container through the runtime's socket mounted at
@@ -60,7 +61,22 @@ esac
 if [[ "$arch" != "$host_arch" && "$mode" != project ]]; then
   echo "omarchy-worker: $id is registered for $arch but this machine is $host_arch" >&2; exit 2
 fi
-agent=""; for k in ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY XAI_API_KEY; do [[ -n "${!k:-}" ]] && agent=1; done
+agent=""; for k in ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN OPENAI_API_KEY GEMINI_API_KEY XAI_API_KEY; do [[ -n "${!k:-}" ]] && agent=1; done
+# A Claude subscription as the agent (CLAUDE_CODE_OAUTH_TOKEN, from `claude
+# setup-token` on the owner's machine): factory/bin/agent.py runs Claude
+# Code in print mode, so the binary must be here. The image does not ship
+# it (it is Anthropic's, under their terms); the official installer fetches
+# the release for this architecture, checksum verified, into this
+# container's home at first start. ~200 MB, once per container.
+if [[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" && -z "${CLAUDE_CODE_BIN:-}" ]] && ! command -v claude >/dev/null 2>&1 && [[ ! -x "$HOME/.local/bin/claude" ]]; then
+  echo "omarchy-worker: CLAUDE_CODE_OAUTH_TOKEN is set; installing Claude Code (claude.ai/install.sh) for the audits and drafts" >&2
+  if curl -fsSL https://claude.ai/install.sh | bash >/dev/null 2>&1 && [[ -x "$HOME/.local/bin/claude" ]]; then
+    echo "omarchy-worker: Claude Code $("$HOME/.local/bin/claude" --version 2>/dev/null | head -n1) installed" >&2
+  else
+    echo "omarchy-worker: Claude Code did not install; audits and drafts will fail until it does (CLAUDE_CODE_BIN can point at a mounted binary)" >&2
+  fi
+fi
+export PATH="$HOME/.local/bin:$PATH"
 labels="$(jq -cn --argjson l "${WORKER_LABELS:-"{}"}" --arg r "$role" 'if $r == "" then $l else $l + {role: $r} end')"
 export WORKER_LABELS="$labels"
 
@@ -79,7 +95,7 @@ case "$mode" in
         exec pkg-repo work --arch "$arch" --labels "$labels" --kind sync --kind render --kind promote --kind rollback --kind health --kind security --kind enqueue --kind gc --kind verify "$@"
         ;;
       review)
-        [[ -n "$agent" ]] || echo "omarchy-worker: $id has no agent key — approved rebuilds run, audits wait for a review worker with one (GEMINI_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY or XAI_API_KEY)" >&2
+        [[ -n "$agent" ]] || echo "omarchy-worker: $id has no agent key — approved rebuilds run, audits wait for a review worker with one (ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN, OPENAI_API_KEY, GEMINI_API_KEY or XAI_API_KEY)" >&2
         echo "omarchy-worker: $id — review worker ($arch): approved rebuilds${agent:+ and audits of staged builds}, no pool jobs" >&2
         exec pkg-repo work --arch "$arch" --labels "$labels" --kind build ${agent:+--kind audit} "$@"
         ;;
