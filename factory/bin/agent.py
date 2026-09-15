@@ -175,3 +175,35 @@ def claude_code(binary, model, system, user, timeout):
     usage = out.get("modelUsage") or {}
     author = max(usage, key=lambda m: (usage[m] or {}).get("outputTokens", 0), default=None)
     return text, (author or model)
+
+
+def probe(timeout=90):
+    """Does the agent answer? One tiny completion, the cheapest the provider
+    sells: (ok, detail). A key that is set is not an agent that works — no
+    credit, a revoked token, a dead endpoint, a model that no longer exists —
+    and a worker whose agent does not answer is not ready for a build or an
+    audit (docs/GOVERNANCE.md, *Workers*). Run by the worker at start and
+    every thirty minutes: `agent.py --probe` prints one JSON line and exits
+    0 when the agent replied."""
+    found = provider()
+    if not found:
+        return False, {"error": "no agent key set"}
+    name, p = found
+    started = time.time()
+    try:
+        text, model = complete("You are a liveness probe. Answer with the single word OK and nothing else.", "OK?", max_tokens=8, timeout=timeout)
+    except SystemExit as e:
+        return False, {"provider": name, "error": str(e)[:300], "ms": int((time.time() - started) * 1000)}
+    except Exception as e:  # noqa: BLE001 — whatever the provider threw is the finding
+        return False, {"provider": name, "error": f"{type(e).__name__}: {str(e)[:300]}", "ms": int((time.time() - started) * 1000)}
+    ok = bool((text or "").strip())
+    return ok, {"provider": name, "model": model, "ms": int((time.time() - started) * 1000), **({} if ok else {"error": "empty answer"})}
+
+
+if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "--probe":
+        ok, detail = probe()
+        print(json.dumps({"ok": ok, **detail}))
+        sys.exit(0 if ok else 1)
+    print("usage: agent.py --probe  (the library is imported by draft-pkgbuild and audit-pkgbuild)", file=sys.stderr)
+    sys.exit(2)

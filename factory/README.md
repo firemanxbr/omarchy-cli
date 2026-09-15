@@ -131,7 +131,7 @@ curl -s -X POST $API/factory/packages -H "authorization: Bearer $OMC" -H 'conten
 #    optional: "name", "arches"; for a project not on GitHub: "source" (the release tarball) and "version"
 #    → {"package":…,"request":{"id":12,"record":"https://pool.firemanxbr.org/factory/<name>/12/request.json",…}}
 
-# 3. Register a worker. It builds your packages; WORKER_SHARED=1 at start makes it build anyone's.
+# 3. Register a worker. It builds your packages, and only yours (donating compute is a maintainer's call).
 curl -s -X POST $API/factory/workers -H "authorization: Bearer $OMC" -H 'content-type: application/json' \
   -d '{"name":"laptop","arch":"aarch64"}'
 #    → {"worker":"you-laptop-ab12","token":"omw_…"}   shown once
@@ -144,7 +144,7 @@ curl -s -X POST $API/factory/packages/project/build -H "authorization: Bearer $O
 #    60 requests an hour from your address; a fine-grained token with no permissions is enough.
 #    the agent key (ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY or XAI_API_KEY — or CLAUDE_CODE_OAUTH_TOKEN,
 #    a Claude subscription through Claude Code) is *yours*, on your machine: the pool never holds one.
-#    WORKER_SHARED=1 donates the worker to other contributors' packages too.
+#    A worker is ready only when its agent answers the probe (agent.py --probe): no agent, no build.
 OMARCHY_WORKER_TOKEN=omw_… GITHUB_TOKEN="$(gh auth token)" ANTHROPIC_API_KEY=sk-… \
   podman compose -f factory/image/compose.yml up -d        # or docker compose; a stop waits for the build (3 h)
 #    or, one task by hand (--stop-timeout: a stop lets the build finish instead of killing it):

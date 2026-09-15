@@ -24,5 +24,6 @@ describe("package requests", () => {
   it("reads url, pkgdesc and license from a staged PKGBUILD (the backfill's source of truth)", () => {
     expect(pkgbuildFields("pkgname=felix\npkgdesc='tui file manager'\nurl=\"https://github.com/kyoheiu/felix\"\nlicense=('MIT')\n")).toEqual({ url: "https://github.com/kyoheiu/felix", pkgdesc: "tui file manager", license: "MIT" });
     expect(pkgbuildFields("pkgname=x\n")).toEqual({ url: null, pkgdesc: null, license: null });
+    expect(pkgbuildFields('pkgdesc="The popular web browser by Google (Stable Channel)"\nurl=https://brave.com/origin/download\nlicense=(\'custom:chrome\')\n')).toEqual({ url: "https://brave.com/origin/download", pkgdesc: "The popular web browser by Google (Stable Channel)", license: "custom:chrome" });
   });
 });

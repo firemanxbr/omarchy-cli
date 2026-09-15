@@ -140,6 +140,96 @@ pub struct Outcome {
     pub result: serde_json::Value,
 }
 
+/// The agent's answer to the probe, as the claim reports it.
+#[derive(Debug, Clone, Default)]
+struct AgentProbe {
+    status: String,
+    error: String,
+    checked_at: Option<std::time::Instant>,
+    checked_iso: String,
+}
+
+/// Does the agent answer? `factory/bin/agent.py --probe` in the pool's
+/// checkout: one tiny completion. A key set is not an agent that works — a
+/// worker whose agent does not answer is not ready for an audit or a build
+/// (docs/GOVERNANCE.md, *Workers*); the brain reads this with every claim.
+fn probe_agent(opts: &WorkOptions) -> AgentProbe {
+    let mut p = AgentProbe {
+        checked_at: Some(std::time::Instant::now()),
+        checked_iso: chrono_now(),
+        ..AgentProbe::default()
+    };
+    let script = match repo_dir(opts) {
+        Ok(dir) => dir.join("factory/bin/agent.py"),
+        Err(e) => {
+            "error".clone_into(&mut p.status);
+            p.error = format!("no checkout to probe from: {e:#}");
+            return p;
+        }
+    };
+    let out = Command::new("timeout")
+        .args(["120", "python3"])
+        .arg(&script)
+        .arg("--probe")
+        .output();
+    match out {
+        Ok(o) if o.status.success() => {
+            "ok".clone_into(&mut p.status);
+            let ms = serde_json::from_slice::<serde_json::Value>(&o.stdout)
+                .ok()
+                .and_then(|v| v.get("ms").and_then(serde_json::Value::as_u64))
+                .unwrap_or(0);
+            eprintln!("agent: ok ({ms} ms)");
+        }
+        Ok(o) => {
+            "error".clone_into(&mut p.status);
+            p.error = serde_json::from_slice::<serde_json::Value>(&o.stdout)
+                .ok()
+                .and_then(|v| v.get("error").and_then(|e| e.as_str().map(str::to_owned)))
+                .unwrap_or_else(|| {
+                    String::from_utf8_lossy(&o.stderr)
+                        .trim()
+                        .chars()
+                        .take(300)
+                        .collect()
+                });
+            eprintln!("agent: NOT ready — {}", p.error);
+        }
+        Err(e) => {
+            "error".clone_into(&mut p.status);
+            p.error = format!("probe did not run: {e}");
+            eprintln!("agent: NOT ready — {}", p.error);
+        }
+    }
+    p
+}
+
+fn chrono_now() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    // ISO 8601 without a date crate: civil-from-days (Howard Hinnant).
+    let days = i64::try_from(secs / 86400).unwrap_or(0);
+    let (hour, minute, second) = ((secs % 86400) / 3600, (secs % 3600) / 60, secs % 60);
+    let shifted = days + 719_468;
+    let era = shifted.div_euclid(146_097);
+    let day_of_era = shifted.rem_euclid(146_097);
+    let year_of_era =
+        (day_of_era - day_of_era / 1460 + day_of_era / 36524 - day_of_era / 146_096) / 365;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_index = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * month_index + 2) / 5 + 1;
+    let month = if month_index < 10 {
+        month_index + 3
+    } else {
+        month_index - 9
+    };
+    let year = year_of_era + era * 400 + i64::from(month <= 2);
+    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}Z")
+}
+
+const AGENT_PROBE_EVERY: Duration = Duration::from_secs(30 * 60);
+
 /// # Panics
 /// When the heartbeat thread's mutex is poisoned, which needs a panic in that thread first.
 pub fn run(opts: &WorkOptions) -> Result<()> {
@@ -174,14 +264,23 @@ pub fn run(opts: &WorkOptions) -> Result<()> {
     let is_draining = || draining.load(std::sync::atomic::Ordering::Relaxed);
     let mut idle = 0u64;
     let mut done = 0u32;
+    let mut probe = AgentProbe::default();
     loop {
         if is_draining() {
             eprintln!("draining: {done} task(s) done, none claimed since the stop signal; exiting");
             return Ok(());
         }
+        if agent.is_some()
+            && probe
+                .checked_at
+                .is_none_or(|t| t.elapsed() >= AGENT_PROBE_EVERY)
+        {
+            probe = probe_agent(opts);
+        }
         let body = serde_json::json!({
             "arch": opts.arch, "hostname": hostname, "version": version, "labels": opts.labels, "kinds": opts.kinds, "shared": opts.shared,
             "agent": agent.clone().unwrap_or_default(),
+            "agent_status": probe.status, "agent_error": probe.error, "agent_checked_at": probe.checked_iso,
         });
         let claimed = match claimer.post_json_as(&opts.worker_token, "/factory/claim", &body) {
             Ok(Some(v)) => serde_json::from_value::<Claimed>(v).context("claim response")?,
@@ -1362,4 +1461,34 @@ fn security_job(opts: &WorkOptions, job: &Api, token: &Arc<Mutex<String>>) -> Re
         result: serde_json::json!({ "matches_vulnerable": report.matches_vulnerable, "matches_fixed": report.matches_fixed, "kev": report.kev,
             "fast_tracked": tracked, "rolled_back": rolled_back }),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::chrono_now;
+
+    #[test]
+    fn the_probe_time_is_iso_8601_utc() {
+        let now = chrono_now();
+        assert_eq!(now.len(), 20, "{now}");
+        assert!(now.ends_with('Z') && now.starts_with("20"), "{now}");
+        // The civil-from-days arithmetic, against a date everyone knows.
+        let epoch_plus = 1_700_000_000u64; // 2023-11-14T22:13:20Z
+        let days = i64::try_from(epoch_plus / 86400).unwrap();
+        let shifted = days + 719_468;
+        let era = shifted.div_euclid(146_097);
+        let day_of_era = shifted.rem_euclid(146_097);
+        let year_of_era =
+            (day_of_era - day_of_era / 1460 + day_of_era / 36524 - day_of_era / 146_096) / 365;
+        let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+        let month_index = (5 * day_of_year + 2) / 153;
+        let day = day_of_year - (153 * month_index + 2) / 5 + 1;
+        let month = if month_index < 10 {
+            month_index + 3
+        } else {
+            month_index - 9
+        };
+        let year = year_of_era + era * 400 + i64::from(month <= 2);
+        assert_eq!((year, month, day), (2023, 11, 14));
+    }
 }

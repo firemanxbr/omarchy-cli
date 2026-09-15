@@ -167,19 +167,48 @@ export async function handleCancelTask(id: number, env: Env): Promise<Response> 
 
 // ---------- workers ----------
 
-async function touchWorker(env: Env, w: { worker: string; arch: string; hostname?: string; labels?: unknown; version?: string; mode?: string; agent?: string | null }, currentTask: number | null): Promise<void> {
+/** What the worker said about its agent with this claim: the probe's answer (factory/bin/agent.py --probe). */
+interface AgentReport { status: "ok" | "error" | null; error: string | null; checked_at: string | null }
+
+function agentReport(b: { agent_status?: unknown; agent_error?: unknown; agent_checked_at?: unknown }): AgentReport | undefined {
+  if (b.agent_status === undefined) return undefined; // an older client: keeps what it last said
+  const status = b.agent_status === "ok" ? "ok" : b.agent_status === "error" ? "error" : null;
+  return { status, error: status === "error" && typeof b.agent_error === "string" ? b.agent_error.slice(0, 300) : null, checked_at: typeof b.agent_checked_at === "string" && b.agent_checked_at ? b.agent_checked_at : null };
+}
+
+async function touchWorker(env: Env, w: { worker: string; arch: string; hostname?: string; labels?: unknown; version?: string; mode?: string; agent?: string | null; kinds?: string[]; probe?: AgentReport }, currentTask: number | null): Promise<void> {
   // The agent is what the worker says it runs ("<provider>/<model>"): a
   // worker that reports none ("" or null) clears it, one that says nothing
-  // (an older client) keeps what it last reported.
-  const agent = w.agent === undefined ? undefined : typeof w.agent === "string" && /^[a-z0-9]+\/[A-Za-z0-9._:-]{1,60}$/.test(w.agent) ? w.agent : null;
+  // (an older client) keeps what it last reported. The probe's answer
+  // travels the same way.
+  // "claude-code/claude-sonnet-5" has a hyphen in the provider: the older
+  // pattern refused it, and every Studio worker showed no agent (2026-09-15).
+  const agent = w.agent === undefined ? undefined : typeof w.agent === "string" && /^[a-z0-9-]+\/[A-Za-z0-9._:-]{1,60}$/.test(w.agent) ? w.agent : null;
   await env.DB.prepare(
-    `INSERT INTO build_workers (id, arch, hostname, labels, version, last_seen, current_task, agent) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO build_workers (id, arch, hostname, labels, version, last_seen, current_task, agent, kinds, agent_status, agent_error, agent_checked_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (id) DO UPDATE SET arch = excluded.arch, hostname = COALESCE(excluded.hostname, hostname), labels = COALESCE(excluded.labels, labels),
        version = COALESCE(excluded.version, version), last_seen = excluded.last_seen, current_task = excluded.current_task, mode = COALESCE(?, mode),
-       agent = CASE WHEN ? THEN excluded.agent ELSE agent END`,
+       agent = CASE WHEN ? THEN excluded.agent ELSE agent END, kinds = COALESCE(excluded.kinds, kinds),
+       agent_status = CASE WHEN ? THEN excluded.agent_status ELSE agent_status END, agent_error = CASE WHEN ? THEN excluded.agent_error ELSE agent_error END,
+       agent_checked_at = CASE WHEN ? THEN excluded.agent_checked_at ELSE agent_checked_at END`,
   )
-    .bind(w.worker, w.arch, w.hostname ?? null, w.labels ? JSON.stringify(w.labels) : null, w.version ?? null, now(), currentTask, agent ?? null, w.mode ?? null, agent === undefined ? 0 : 1)
+    .bind(
+      w.worker, w.arch, w.hostname ?? null, w.labels ? JSON.stringify(w.labels) : null, w.version ?? null, now(), currentTask, agent ?? null,
+      w.kinds ? JSON.stringify(w.kinds) : null, w.probe?.status ?? null, w.probe?.error ?? null, w.probe?.checked_at ?? null,
+      w.mode ?? null, agent === undefined ? 0 : 1, w.probe === undefined ? 0 : 1, w.probe === undefined ? 0 : 1, w.probe === undefined ? 0 : 1,
+    )
     .run();
+}
+
+/** The work that needs an agent that answers: a draft (the PKGBUILD is the agent's) and an audit (the second agent). */
+export const AGENT_SCOPE = "(kind = 'audit' OR (kind = 'build' AND pkgbuild_ref LIKE 'draft:%'))";
+
+/** A worker is ready for what it declares when it is alive and, if that includes agent work, its agent answered last time. */
+export function workerReady(w: { last_seen: string; kinds: string | null; agent: string | null; agent_status: string | null; trust: string }, aliveSince: number): boolean {
+  if (Date.parse(w.last_seen) <= aliveSince) return false;
+  const kinds: string[] = w.kinds ? (JSON.parse(w.kinds) as string[]) : w.trust === "project" ? [] : ["build"];
+  const needsAgent = kinds.includes("audit") || (kinds.includes("build") && w.trust !== "project");
+  return !needsAgent || w.agent_status === "ok";
 }
 
 const ALL_KINDS = ["build", "sync", "promote", "rollback", "render", "health", "security", "metrics", "gc", "enqueue", "audit", "verify"];
@@ -187,9 +216,10 @@ const ALL_KINDS = ["build", "sync", "promote", "rollback", "render", "health", "
 const ANY_ARCH_KINDS = "'metrics', 'gc', 'security', 'promote', 'audit', 'verify'";
 
 export async function handleClaim(request: Request, env: Env, actor: Actor): Promise<Response> {
-  const b = (await request.json()) as { arch?: string; hostname?: string; labels?: unknown; version?: string; kinds?: unknown; shared?: unknown; agent?: unknown };
+  const b = (await request.json()) as { arch?: string; hostname?: string; labels?: unknown; version?: string; kinds?: unknown; shared?: unknown; agent?: unknown; agent_status?: unknown; agent_error?: unknown; agent_checked_at?: unknown };
   if (!b.arch || !isRepoArch(b.arch)) return json({ error: "arch (x86_64|aarch64) is required" }, 400);
   if (actor.kind === "job") return json({ error: "a job token cannot claim; use the worker token" }, 403);
+  const probe = agentReport(b);
   // A worker is its registration: id, owner, trust and what it may build.
   const workerId = actor.w.id;
   if (actor.w.arch !== b.arch) return json({ error: `this worker is registered for ${actor.w.arch}` }, 400);
@@ -204,9 +234,17 @@ export async function handleClaim(request: Request, env: Env, actor: Actor): Pro
   // by accident. Community results never reach the pool either way.
   const wanted = (Array.isArray(b.kinds) ? b.kinds.filter((k): k is string => typeof k === "string" && ALL_KINDS.includes(k)) : trust === "project" ? ALL_KINDS : ["build"]);
   const kinds = trust === "project" ? wanted : ["build"];
-  const shared = trust === "community" && b.shared === true;
+  // Donating a worker to everyone's builds is a maintainer's call: a
+  // contributor's worker builds its owner's packages, --shared or not
+  // (docs/GOVERNANCE.md, *Workers, compute and agents*).
+  const owner = actor.w.owner ? await env.DB.prepare("SELECT role FROM contributors WHERE login = ?").bind(actor.w.owner).first<{ role: string }>() : null;
+  const shared = trust === "community" && b.shared === true && owner?.role === "maintainer";
   let scope = `kind IN (SELECT value FROM json_each(?))`;
   const binds: unknown[] = [JSON.stringify(kinds)];
+  // Agent work goes only to a worker whose agent answered the probe: a
+  // draft or an audit on a worker with no agent, or a failing one, is a
+  // failed task an hour later.
+  if (probe?.status !== "ok") scope += ` AND NOT ${AGENT_SCOPE}`;
   if (trust === "project") {
     scope += ` AND (kind != 'build' OR trust = 'project')`;
   } else {
@@ -230,7 +268,7 @@ export async function handleClaim(request: Request, env: Env, actor: Actor): Pro
   )
     .bind(workerId, plusMinutes(LEASE_MINUTES), now(), b.arch, ...binds)
     .first<TaskRow>();
-  await touchWorker(env, { worker: workerId, arch: b.arch, hostname: b.hostname, labels: b.labels, version: b.version, mode: trust === "community" ? (shared ? "shared" : "dedicated") : undefined, agent: b.agent === undefined ? undefined : typeof b.agent === "string" ? b.agent : null }, task?.id ?? null);
+  await touchWorker(env, { worker: workerId, arch: b.arch, hostname: b.hostname, labels: b.labels, version: b.version, mode: trust === "community" ? (shared ? "shared" : "dedicated") : undefined, agent: b.agent === undefined ? undefined : typeof b.agent === "string" ? b.agent : null, kinds, probe }, task?.id ?? null);
   if (!task) return new Response(null, { status: 204 });
   if (task.trust === "community" && task.kind === "build") {
     await env.DB.prepare("UPDATE factory_packages SET status = 'building', detail = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE name = ?").bind(`building on ${workerId} (${task.arch})`, task.name).run();
@@ -441,7 +479,7 @@ export async function handleFactory(env: Env, url?: URL): Promise<Response> {
     "SELECT * FROM build_workers WHERE revoked_at IS NULL ORDER BY (last_seen > ?) DESC, last_seen DESC LIMIT 200",
   )
     .bind(new Date(Date.now() - WORKER_ALIVE_MINUTES * 60000).toISOString())
-    .all<{ last_seen: string; labels: string | null; owner: string | null; trust: string; packages: string | null }>();
+    .all<{ last_seen: string; labels: string | null; owner: string | null; trust: string; packages: string | null; kinds: string | null; agent: string | null; agent_status: string | null }>();
   const tasks = await env.DB.prepare("SELECT * FROM build_tasks ORDER BY CASE status WHEN 'leased' THEN 0 WHEN 'queued' THEN 1 ELSE 2 END, id DESC LIMIT ?").bind(limit).all<TaskRow>();
   const alive = Date.now() - WORKER_ALIVE_MINUTES * 60000;
   return json(
@@ -455,6 +493,9 @@ export async function handleFactory(env: Env, url?: URL): Promise<Response> {
         labels: w.labels ? JSON.parse(w.labels) : null,
         packages: w.packages ? JSON.parse(w.packages) : null,
         alive: Date.parse(w.last_seen) > alive,
+        // Ready for what it declares: alive, and its agent answered when the work needs one (workerReady).
+        ready: workerReady(w, alive),
+        kinds: w.kinds ? JSON.parse(w.kinds) : null,
         // omarchy: runs for the project (trusted; owner NULL is an old hosted registration) · community: a contributor's
         side: w.trust === "project" || w.owner === null ? "omarchy" : "community",
       })),

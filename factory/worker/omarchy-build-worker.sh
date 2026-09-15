@@ -48,6 +48,30 @@ agent_label() {
   echo ""
 }
 
+# Does the agent answer? A key set is not an agent that works: the probe
+# (factory/bin/agent.py --probe, one tiny completion) runs at start, every
+# AGENT_PROBE_MINUTES (30) and after a build the agent failed in; its answer
+# goes with every claim, and the brain hands agent work — a draft, an audit
+# — only to a worker whose agent is ok (docs/GOVERNANCE.md, *Workers*).
+AGENT_STATUS=""; AGENT_ERROR=""; AGENT_CHECKED=0
+agent_probe() {
+  [[ -n "$(agent_label)" ]] || { AGENT_STATUS=""; AGENT_ERROR=""; return; }
+  local out
+  if out="$(timeout 120 python3 /build/pool/factory/bin/agent.py --probe 2>/dev/null)"; then
+    AGENT_STATUS=ok; AGENT_ERROR=""
+    log "agent $(agent_label): ok ($(jq -r '.ms' <<<"$out" 2>/dev/null || echo ?) ms)"
+  else
+    AGENT_STATUS=error; AGENT_ERROR="$(jq -r '.error // "no answer"' <<<"$out" 2>/dev/null || echo "no answer")"
+    log "agent $(agent_label): NOT ready — ${AGENT_ERROR:0:200}"
+  fi
+  AGENT_CHECKED=$(date +%s)
+}
+agent_probe_if_due() {
+  local every=$(( ${AGENT_PROBE_MINUTES:-30} * 60 ))
+  (( $(date +%s) - AGENT_CHECKED >= every )) && agent_probe
+  return 0
+}
+
 # ---------------------------------------------------------------- inside ---
 # Runs as root in a fresh Arch container with /task mounted: /task/meta.sh
 # (name, group, ref, arch, pool), /task/out for the result. Logs to stdout.
@@ -243,10 +267,12 @@ container_worker() {
   DRAIN=0; trap 'DRAIN=1' TERM INT
   prepare_container
   add_pool_repos "$ARCH" "$OMARCHY_POOL"
+  agent_probe
   local idle=0 out code body task id name group ref version
   while :; do
     if [[ "$DRAIN" == 1 ]]; then log "draining: nothing claimed since the stop signal; exiting"; exit 0; fi
-    out="$(api POST /factory/claim "$(jq -n --arg a "$ARCH" --arg h "$(hostname -s 2>/dev/null || echo ?)" --arg v "container" --arg g "$(agent_label)" --argjson l "${WORKER_LABELS:-"{}"}" --argjson s "$( [[ "${WORKER_SHARED:-0}" == 1 ]] && echo true || echo false)" '{arch:$a,hostname:$h,version:$v,labels:$l,shared:$s,agent:$g}')")" \
+    agent_probe_if_due
+    out="$(api POST /factory/claim "$(jq -n --arg a "$ARCH" --arg h "$(hostname -s 2>/dev/null || echo ?)" --arg v "container" --arg g "$(agent_label)" --arg as "$AGENT_STATUS" --arg ae "$AGENT_ERROR" --arg ac "$( (( AGENT_CHECKED > 0 )) && date -u -d "@$AGENT_CHECKED" +%Y-%m-%dT%H:%M:%SZ || echo "")" --argjson l "${WORKER_LABELS:-"{}"}" --argjson s "$( [[ "${WORKER_SHARED:-0}" == 1 ]] && echo true || echo false)" '{arch:$a,hostname:$h,version:$v,labels:$l,shared:$s,agent:$g,agent_status:$as,agent_error:$ae,agent_checked_at:$ac}')")" \
       || { log "claim failed: ${out##*$'\n'}"; sleep 60; continue; }
     code="${out##*$'\n'}"; body="${out%$'\n'*}"
     if [[ "$code" == "204" ]]; then

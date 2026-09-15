@@ -144,10 +144,23 @@ extended to packages — a sole maintainer's own packages wait.
   maintainer's decision on the registration) runs the pool's jobs and the
   rebuild of approved packages in fresh sibling containers. A maintainer
   who also contributes registers a second, untrusted worker.
-- A registered worker builds **its owner's packages**. Donating it to
-  anyone's is decided where it runs — `WORKER_SHARED=1` on the container,
-  `--shared` on `pkg-repo work` — never at registration, so nobody's laptop
-  ends up busy with strangers' packages by accident.
+- A registered worker builds **its owner's packages** and nothing else.
+  Donating compute to everyone's builds is a maintainer's call: the
+  project's shared community workers are the ones maintainers run
+  (`WORKER_SHARED=1` on the container, `--shared` on `pkg-repo work`); a
+  contributor's worker is never shared, whatever flag it starts with — the
+  pool ignores it. Nobody's laptop ends up busy with strangers' packages,
+  and no stranger's machine ends up building for everyone.
+- **Ready is not online.** A worker is ready for the work it declares
+  when it is alive *and* what that work needs answers: a build or an
+  audit needs an agent that replies. A key set is not an agent that
+  works — no credit, a revoked token, a dead endpoint, a retired model —
+  so the worker probes its agent (`factory/bin/agent.py --probe`, one tiny
+  completion) at start and every thirty minutes, and says so with every
+  claim. The pool hands a draft or an audit only to a worker whose agent
+  answered, and the People page shows each worker's agent and whether it
+  answers. The pool's own jobs (sync, promote, health, security, gc) need
+  no agent and are not gated by one.
 - **Agent keys stay with the worker's owner.** A worker that drafts or
   corrects PKGBUILDs with an agent (community trust), or audits staged
   builds for the maintainers (project trust), gets the owner's key in its
@@ -159,9 +172,11 @@ extended to packages — a sole maintainer's own packages wait.
   travels. The pool holds no agent key and GitHub runs no agent — nothing
   of the pipeline runs there; what an agent produces is evidence like any
   other build, reviewed by a maintainer before it reaches anyone.
-- **Package requests** (a GitHub issue) become a task for a *shared*
-  community worker whose owner runs an agent. No such worker, no draft: the
-  request waits, visibly, on the Factory page.
+- **Package requests** are made on the dashboard, on the record; the
+  build a contributor asks for goes to the project's shared community
+  workers (the project's agent) or to the contributor's own worker (their
+  agent). No ready worker, no draft: the request waits, visibly, on the
+  Factory page.
 
 ## Bumps and packages nobody builds
 

@@ -26,8 +26,8 @@ const BODY = String.raw`
 
   <section id="workers">
     <div class="h2row"><h2>Workers</h2><a class="more-link" href="/docs/workers">Run one →</a></div>
-    <p class="sub">The machines that build: the project's (trusted by a maintainer) and contributors' own. <em>Online</em> means a heartbeat in the last ten minutes.</p>
-    <div class="table-wrap"><table id="workers-table"><thead><tr><th>Worker</th><th>Arch</th><th>Side</th><th>Owner</th><th>Agent</th><th>Status</th><th>Last seen</th><th>Done / failed</th></tr></thead><tbody></tbody></table></div>
+    <p class="sub">The machines that build: the project's (trusted by a maintainer) and contributors' own. <em>Ready</em> means a heartbeat in the last ten minutes and, for a worker that builds or audits, an agent that answered its last probe — a key set is not an agent that works.</p>
+    <div class="table-wrap"><table id="workers-table"><thead><tr><th>Worker</th><th>Arch</th><th>Side</th><th>Owner</th><th>Agent</th><th>Ready</th><th>Now</th><th>Last seen</th><th>Done / failed</th></tr></thead><tbody></tbody></table></div>
   </section>
 `;
 
@@ -46,11 +46,11 @@ const SCRIPT = String.raw`
     var contrib = {};
     pkgs.forEach(function (p) { if (p.owner && !maint[p.owner]) { var c = contrib[p.owner] = contrib[p.owner] || { packages: 0, landed: 0, workers: 0 }; c.packages++; if (p.status === "approved" || p.status === "published") c.landed++; } });
     workers.forEach(function (w) { if (w.owner && !maint[w.owner]) { var c = contrib[w.owner] = contrib[w.owner] || { packages: 0, landed: 0, workers: 0 }; c.workers++; } });
-    var online = workers.filter(function (w) { return w.alive; });
+    var online = workers.filter(function (w) { return w.alive; }), ready = workers.filter(function (w) { return w.ready; });
     setTiles("#tiles", [
       ["Maintainers", num(Object.keys(maint).length), groups.length + " group" + (groups.length === 1 ? "" : "s")],
-      ["Contributors", num(Object.keys(contrib).length), num(pkgs.length) + " packages registered"],
-      ["Workers online", num(online.length), num(workers.length) + " registered · " + num(online.filter(function (w) { return w.side === "omarchy"; }).length) + " the project's"],
+      ["Contributors", num(Object.keys(contrib).length), num(pkgs.length) + " packages requested"],
+      ["Workers ready", num(ready.length), num(online.length) + " online · " + num(workers.length) + " registered · " + num(ready.filter(function (w) { return w.side === "omarchy"; }).length) + " the project's", ready.length < online.length ? "warn" : ""],
       ["Community packages", num(pkgs.filter(function (p) { return p.status === "approved" || p.status === "published"; }).length), "approved by a maintainer, built by the project"]
     ]);
     $("#maintainers-list").innerHTML = Object.keys(maint).sort().map(function (m) { return personChip(m, "maintainer", esc(maint[m].join(", "))); }).join("") || '<span class="muted">none yet</span>';
@@ -60,15 +60,23 @@ const SCRIPT = String.raw`
       if (x.workers) bits.push(x.workers + " worker" + (x.workers === 1 ? "" : "s"));
       return personChip(c, "contributor", esc(bits.join(" · ")));
     }).join("") || '<span class="muted">be the first — <a href="/factory">bring a package</a></span>';
+    // Ready means: alive, and — for a worker that builds or audits — an
+    // agent that answered the last probe. A key set is not an agent that
+    // works; a worker whose agent is down is shown, and gets no agent work.
     var tb = $("#workers-table tbody");
     tb.innerHTML = workers.map(function (w) {
       var where = w.labels && w.labels.where ? ' <span class="dim">· ' + esc(String(w.labels.where)) + '</span>' : '';
+      var kinds = w.kinds || [], needsAgent = kinds.indexOf("audit") >= 0 || (kinds.indexOf("build") >= 0 && w.side !== "omarchy");
+      var agent = !w.agent ? '<span class="dim">none</span>' : '<span class="mono" style="font-size:12px">' + esc(w.agent) + '</span>' +
+        (w.agent_status === "ok" ? ' <span class="pill ok" title="answered the probe ' + esc(w.agent_checked_at ? ago(w.agent_checked_at) : "") + '">answers</span>' :
+         w.agent_status === "error" ? ' <span class="pill error" title="' + esc(w.agent_error || "") + '">not answering</span>' : ' <span class="pill none">not probed</span>');
+      var readyCell = !w.alive ? '<span class="pill none">offline</span>' : w.ready ? '<span class="pill ok">ready</span>' : '<span class="pill error" title="' + esc(w.agent_error || (needsAgent ? "builds and audits need an agent that answers" : "")) + '">not ready</span>';
+      var now = !w.alive ? '<span class="dim">—</span>' : w.current_task ? '<span class="pill warn">building #' + esc(String(w.current_task)) + '</span>' : '<span class="dim">idle · ' + esc(kinds.length ? kinds.join(", ") : (w.side === "omarchy" ? "jobs" : "builds")) + '</span>';
       return '<tr><td><span class="mono">' + esc(w.id) + '</span>' + where + '</td><td>' + esc(w.arch) + '</td><td>' + (w.side === "omarchy" ? '<span class="pill ok">project</span>' : '<span class="pill none">community</span>') + '</td>' +
         '<td>' + (w.owner ? '<a href="/user/' + encodeURIComponent(w.owner) + '">' + esc(w.owner) + '</a>' : '<span class="dim">—</span>') + '</td>' +
-        '<td>' + (w.agent ? '<span class="mono" style="font-size:12px">' + esc(w.agent) + '</span>' : '<span class="dim">none</span>') + '</td>' +
-        '<td>' + (w.alive ? (w.current_task ? '<span class="pill warn">building #' + esc(String(w.current_task)) + '</span>' : '<span class="pill ok">online</span>') : '<span class="pill none">offline</span>') + '</td>' +
+        '<td>' + agent + '</td><td>' + readyCell + '</td><td>' + now + '</td>' +
         '<td class="dim">' + ago(w.last_seen) + '</td><td class="num">' + num(w.builds_done || 0) + ' / ' + num(w.builds_failed || 0) + '</td></tr>';
-    }).join("") || '<tr><td colspan="8" class="muted">no worker registered yet</td></tr>';
+    }).join("") || '<tr><td colspan="9" class="muted">no worker registered yet</td></tr>';
   });
 `;
 

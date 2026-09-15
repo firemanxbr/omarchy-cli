@@ -12,7 +12,7 @@ import { env, createExecutionContext, waitOnExecutionContext } from "cloudflare:
 import { beforeAll, describe, expect, it } from "vitest";
 import worker from "../src/index";
 import { sha256Hex } from "../src/routes/contributors";
-import { requeueExpiredLeases } from "../src/routes/factory";
+import { requeueExpiredLeases, workerReady } from "../src/routes/factory";
 import { packageKey } from "../src/r2";
 
 const API = "http://pool.test/api/v1";
@@ -111,8 +111,19 @@ describe("a community build, its audit and the review", () => {
     await env.DB.prepare(`INSERT INTO build_tasks (name, "group", arch, version, pkgbuild_ref, reason, priority, publish, trust, owner, kind) VALUES ('mine', 'community', 'aarch64', '1.0-1', 'draft:https://github.com/alice/mine@latest', 'contributor', 100, 0, 'community', 'alice', 'build')`).run();
     // Project workers never build a contributor's package.
     expect((await call("POST", "/factory/claim", { arch: "aarch64" }, "omw_w1")).status).toBe(204);
-    const c = await call("POST", "/factory/claim", { arch: "aarch64", agent: "" }, "omw_w3");
+    // A draft is the agent's work: a worker with no agent, or one whose probe failed, gets nothing; one whose agent answered gets it.
+    expect((await call("POST", "/factory/claim", { arch: "aarch64", agent: "" }, "omw_w3")).status).toBe(204);
+    expect((await call("POST", "/factory/claim", { arch: "aarch64", agent: "openai/gpt-5", agent_status: "error", agent_error: "HTTP 402: insufficient credit" }, "omw_w3")).status).toBe(204);
+    // (GET /factory is edge-cached for ten seconds: the row is the check.)
+    const w3row = async () => (await env.DB.prepare("SELECT last_seen, kinds, trust, agent, agent_status, agent_error FROM build_workers WHERE id = 'w3'").first<{ last_seen: string; kinds: string | null; trust: string; agent: string | null; agent_status: string | null; agent_error: string | null }>())!;
+    let w3 = await w3row();
+    expect(w3).toMatchObject({ agent: "openai/gpt-5", agent_status: "error", agent_error: "HTTP 402: insufficient credit", kinds: '["build"]' });
+    expect(workerReady(w3, Date.now() - 600000)).toBe(false);
+    const c = await call("POST", "/factory/claim", { arch: "aarch64", agent: "openai/gpt-5", agent_status: "ok", agent_checked_at: "2026-09-15T12:00:00Z" }, "omw_w3");
     expect(c.status).toBe(200);
+    w3 = await w3row();
+    expect(w3).toMatchObject({ agent_status: "ok", agent_error: null });
+    expect(workerReady(w3, Date.now() - 600000)).toBe(true);
     task = c.json.task.id;
     jobToken = c.json.token;
     expect(c.json.upload).toBe(`/api/v1/factory/tasks/${task}/artifacts/<filename>`);
@@ -138,7 +149,11 @@ describe("a community build, its audit and the review", () => {
 
   it("only a project worker declaring the kind takes the audit, and it may write the report only", async () => {
     expect((await call("POST", "/factory/claim", { arch: "aarch64", kinds: ["audit"] }, "omw_w3")).status).toBe(204);
-    const c = await call("POST", "/factory/claim", { arch: "aarch64", kinds: ["audit"] }, "omw_w1");
+    // The second agent must answer too: a project worker whose agent is down is not handed the audit.
+    expect((await call("POST", "/factory/claim", { arch: "aarch64", kinds: ["audit"], agent: "claude-code/claude-sonnet-5", agent_status: "error", agent_error: "claude-code: no answer in 90 s" }, "omw_w1")).status).toBe(204);
+    const c = await call("POST", "/factory/claim", { arch: "aarch64", kinds: ["audit"], agent: "claude-code/claude-sonnet-5", agent_status: "ok" }, "omw_w1");
+    // The label with a hyphen in the provider is kept (it was refused until 2026-09-15: every Studio worker showed no agent).
+    expect(await env.DB.prepare("SELECT agent, agent_status FROM build_workers WHERE id = 'w1'").first()).toEqual({ agent: "claude-code/claude-sonnet-5", agent_status: "ok" });
     expect(c.status).toBe(200);
     expect(c.json.task.kind).toBe("audit");
     expect(c.json.task.params.task).toBe(task);
@@ -154,7 +169,7 @@ describe("a community build, its audit and the review", () => {
   it("a newer build of the same package supersedes the staged one before it", async () => {
     // alice's worker builds mine again (a fix): the earlier staged row is cancelled with its pending audit, and the review queue shows one.
     await env.DB.prepare(`INSERT INTO build_tasks (name, "group", arch, version, pkgbuild_ref, reason, priority, publish, trust, owner, kind) VALUES ('mine', 'community', 'aarch64', '1.0-2', 'draft:https://github.com/alice/mine@latest', 'contributor', 100, 0, 'community', 'alice', 'build')`).run();
-    const c = await call("POST", "/factory/claim", { arch: "aarch64", agent: "" }, "omw_w3");
+    const c = await call("POST", "/factory/claim", { arch: "aarch64", agent: "openai/gpt-5", agent_status: "ok" }, "omw_w3");
     expect(c.status).toBe(200);
     const again = c.json.task.id;
     for (const f of ["PKGBUILD", "build.log", "PKGINFO", "mine-1.0-2-aarch64.pkg.tar.zst"]) await call("PUT", `/factory/tasks/${again}/artifacts/${f}`, undefined, c.json.token, `evidence ${f}`);
