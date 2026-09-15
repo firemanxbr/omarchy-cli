@@ -9,7 +9,8 @@
 #   1. trusts the key that signs the pool's databases (once);
 #   2. writes /etc/pacman.d/omarchy-pool.conf — the repositories the ring serves right now;
 #   3. adds one line to /etc/pacman.conf, above [core]:  Include = /etc/pacman.d/omarchy-pool.conf  (once);
-#   4. refreshes the databases (pacman -Sy) and tells you to run: sudo pacman -Syu
+#   4. refreshes the databases (pacman -Sy) and tells you to run the upgrade: omarchy update on an
+#      Omarchy install (its pre-transaction hook refuses a bare pacman -Syu), sudo pacman -Syu elsewhere
 # Your own repositories stay where they are: what is above [core] keeps priority, what is below is the fallback.
 set -euo pipefail
 API="__API__/api/v1"; POOL="__POOL__"
@@ -70,4 +71,6 @@ fi
 pacman -Sy
 echo
 echo "omarchy-pool: ring $RING for $ARCH — $(grep -c '^\[omarchy-' "$INC") repositories in $INC."
-echo "Now run:  sudo pacman -Syu"
+# Omarchy wraps the upgrade (snapshot, keyrings, migrations, restart checks) and its
+# pacman hook refuses a bare -Syu: say the command this machine will accept.
+if command -v omarchy >/dev/null 2>&1; then echo "Now run:  omarchy update"; else echo "Now run:  sudo pacman -Syu"; fi

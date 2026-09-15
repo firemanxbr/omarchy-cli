@@ -39,7 +39,7 @@ SigLevel = Required DatabaseRequired
 Server = https://pool.firemanxbr.org/multilib/$arch
 
 # 3.
-sudo pacman -Syu
+omarchy update          # or, off Omarchy: sudo pacman -Syu
 ```
 
 Change `stable` to `rc` or `edge` to change rings. The optional
