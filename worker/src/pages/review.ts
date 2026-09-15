@@ -7,6 +7,7 @@
  */
 import { page } from "./layout";
 import type { RunningVersion } from "../meta";
+import { CATEGORIES } from "../categories";
 
 const BODY = String.raw`
   <div class="hero compact">
@@ -18,7 +19,7 @@ const BODY = String.raw`
 
   <section>
     <h2>Staged builds</h2>
-    <p class="sub">Two kinds of row. A <b>contributor's build</b> is evidence: read it, then have <b>the project build it</b> — its agent, a worker it trusts, its own recipe from what it learned — or reject it. <b>The project's build</b> is what users get: approve it into <code>edge</code>, or reject it.</p>
+    <p class="sub">Two kinds of row. A <b>contributor's build</b> is evidence: read it, then have <b>the project build it</b> — its agent, a worker it trusts, its own recipe from what it learned — or reject it. <b>The project's build</b> is what users get: approve it into <code>edge</code>, or reject it. The <b>category</b> under the name is the project's agent's proposal from the audit — settle it here; it says where a person finds the package, never who may approve it.</p>
     <div class="table-wrap"><table id="staged"><thead><tr><th>#</th><th>Package</th><th>Arch</th><th>Project</th><th>Version · licence</th><th>Build</th><th>Evidence</th><th>Gate</th><th>Audit</th><th>Decision</th></tr></thead><tbody></tbody></table></div>
     <p class="sub">The audit column is the second agent (<a href="/docs/governance">Governance</a>): a project worker whose owner set an agent key reads the PKGBUILD, the log and the <code>.PKGINFO</code> and writes a report — supply chain, security, packaging practice, licence. It is evidence for you, never a decision: <span class="pill ok">ok</span> nothing worth a change · <span class="pill warn">warn</span> approve with the findings in mind · <span class="pill error">block</span> do not approve as is. <em>Waiting</em> means no project worker with a key has picked it up yet.</p>
   </section>
@@ -45,7 +46,7 @@ const BODY = String.raw`
 `;
 
 const SCRIPT = String.raw`
-  var API = "/api/v1/factory", token = null, login = null, signedIn = false;
+  var API = "/api/v1/factory", token = null, login = null, signedIn = false, CATEGORIES = ${JSON.stringify(CATEGORIES)};
   try { token = localStorage.getItem("omc_token"); login = localStorage.getItem("omc_login"); } catch (e) {}
   // The sign-in cookie authenticates same-origin calls by itself; a token
   // from the fallback form travels as a bearer header instead.
@@ -83,6 +84,11 @@ const SCRIPT = String.raw`
       }, { empty: 'no package blocked' });
     }).catch(function () {});
   }
+  // The category (docs/GOVERNANCE.md, *Categories*): a pill for readers, a select for a maintainer — the change is recorded at once.
+  function category(t) {
+    if (!(token || signedIn)) return t.category ? '<span class="pill none">' + esc(t.category) + '</span>' : '<span class="dim">no category yet</span>';
+    return '<select class="cat" data-category="' + esc(t.name) + '" title="the category a person finds it under">' + (t.category ? '' : '<option value="" selected>category…</option>') + CATEGORIES.map(function (c) { return '<option' + (c === t.category ? ' selected' : '') + '>' + c + '</option>'; }).join("") + '</select>';
+  }
   // The second agent's column: its verdict and one line, the report behind it.
   // The gate: the worker's own checks on the build (factory/README.md *The gate*), pass with its warnings named, or none for a build older than the gate.
   function gate(t) {
@@ -115,7 +121,7 @@ const SCRIPT = String.raw`
           : pb && (pb.status === "queued" || pb.status === "leased") ? '<span class="muted">the project is building it (#' + pb.id + ')</span> <button type="button" data-reject="' + t.id + '">Reject</button>'
           : pb && pb.status === "staged" ? '<span class="muted">the project\'s build #' + pb.id + ' is below</span> <button type="button" data-reject="' + t.id + '">Reject</button>'
           : (pb && pb.status === "failed" ? '<span class="pill error" title="' + esc(pb.error || "") + '">project build #' + pb.id + ' failed</span> ' : '') + '<button type="button" data-build="' + t.id + '">Build by the project</button> <button type="button" data-reject="' + t.id + '">Reject</button>';
-        return '<tr' + (project ? ' class="project-row"' : '') + '><td>' + t.id + '</td><td><b>' + esc(t.name) + '</b>' + (t.version ? ' <span class="mono muted">' + esc(t.version) + '</span>' : '') + '</td><td>' + esc(t.arch) + '</td>' +
+        return '<tr' + (project ? ' class="project-row"' : '') + '><td>' + t.id + '</td><td><b>' + esc(t.name) + '</b>' + (t.version ? ' <span class="mono muted">' + esc(t.version) + '</span>' : '') + '<br>' + category(t) + '</td><td>' + esc(t.arch) + '</td>' +
           '<td>' + (t.url ? '<a href="' + esc(t.url) + '">' + esc(t.url.replace(/^https?:\/\/(www\.)?(github\.com\/)?/, "")) + '</a>' : '—') + '</td><td>' + esc([det.latest_tag, det.license].filter(Boolean).join(" · ")) + '</td>' +
           '<td>' + who + '</td>' +
           '<td><a class="run" href="' + t.evidence.pkgbuild + '">PKGBUILD</a> <a class="run" href="' + t.evidence.log + '">log</a> <a class="run" href="' + t.evidence.pkginfo + '">PKGINFO</a> <span class="mono muted">' + esc((t.result_sha256 || "").slice(0, 12)) + '</span></td>' +
@@ -141,6 +147,10 @@ const SCRIPT = String.raw`
       endSkeleton();
     }).catch(function () { endSkeleton(); });
   }
+  document.addEventListener("change", function (ev) {
+    var s = ev.target.closest ? ev.target.closest("select[data-category]") : null; if (!s || !s.value) return;
+    busy(fetch(API + "/packages/" + encodeURIComponent(s.getAttribute("data-category")) + "/category", { method: "POST", headers: headers(), body: JSON.stringify({ category: s.value }) })).then(function (r) { return r.json(); }).then(function (d) { if (d.error) { alert(d.error); load(); } });
+  });
   document.addEventListener("click", function (ev) {
     var u = ev.target.closest ? ev.target.closest("button[data-unblock]") : null;
     if (u) return block(u.getAttribute("data-unblock"), u.getAttribute("data-what"), true);

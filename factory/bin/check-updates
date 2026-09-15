@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # For every PKGBUILD under factory/pkgbuilds, asks upstream for its latest
 # release and prints one line per package that is behind:
-#   <group>/<name> <current pkgver> <latest>
+#   <name> <current pkgver> <latest>
 # Upstream is the GitHub project in `url=` (releases, else tags); anything
 # else is skipped with a note on stderr. Versions compare with sort -V; a
 # leading "v" on the tag is dropped, "-" becomes "_" as pacman requires.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 auth=(); [[ -n "${GITHUB_TOKEN:-}" ]] && auth=(-H "authorization: Bearer $GITHUB_TOKEN")
-for pkgbuild in factory/pkgbuilds/*/*/PKGBUILD; do
-  dir="$(dirname "$pkgbuild")"; group="$(basename "$(dirname "$dir")")"; name="$(basename "$dir")"
+for pkgbuild in factory/pkgbuilds/*/PKGBUILD; do
+  dir="$(dirname "$pkgbuild")"; name="$(basename "$dir")"
   eval "$(factory/bin/pkgbuild-meta "$pkgbuild")"
   current="${META_VERSION#*:}"; current="${current%-*}"
   url="$(bash -c 'source "$1" >/dev/null 2>&1; printf "%s" "${url:-}"' _ "$pkgbuild")"
@@ -18,10 +18,10 @@ for pkgbuild in factory/pkgbuilds/*/*/PKGBUILD; do
     latest="$(curl -sS ${auth[@]+"${auth[@]}"} "https://api.github.com/repos/$repo/releases/latest" | jq -r '.tag_name // empty')"
     [[ -n "$latest" ]] || latest="$(curl -sS ${auth[@]+"${auth[@]}"} "https://api.github.com/repos/$repo/tags?per_page=1" | jq -r '.[0].name // empty')"
   else
-    echo "$group/$name: no GitHub upstream in url= ($url); not checked" >&2; continue
+    echo "$name: no GitHub upstream in url= ($url); not checked" >&2; continue
   fi
-  [[ -n "$latest" ]] || { echo "$group/$name: upstream $repo has no release or tag" >&2; continue; }
+  [[ -n "$latest" ]] || { echo "$name: upstream $repo has no release or tag" >&2; continue; }
   latest="${latest#v}"; latest="${latest//-/_}"
   [[ "$latest" != "$current" && "$(printf '%s\n%s\n' "$current" "$latest" | sort -V | tail -n1)" == "$latest" ]] || continue
-  echo "$group/$name $current $latest"
+  echo "$name $current $latest"
 done

@@ -80,7 +80,7 @@ the package page, `omarchy-cli info`, a pacman hook).
 |---|---|
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | design, API, pipeline, security |
 | [docs/RUNBOOK.md](docs/RUNBOOK.md) | operating it: jobs, promotions, keys, costs, the kill switch, the scheduler, known limits |
-| [docs/GOVERNANCE.md](docs/GOVERNANCE.md) | contributors and maintainers, groups, how a pull request is the only way to become a maintainer |
+| [docs/GOVERNANCE.md](docs/GOVERNANCE.md) | contributors and maintainers, categories, how a pull request is the only way to become a maintainer |
 | [SECURITY.md](SECURITY.md) | the trust model: who holds what, per-job tokens, the key that never leaves the pool |
 | [docs/TESTING.md](docs/TESTING.md) | how every piece is verified, locally and in CI |
 | [docs/MIGRATION.md](docs/MIGRATION.md) | moving the whole thing to another Cloudflare account and GitHub organisation |

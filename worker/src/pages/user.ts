@@ -23,14 +23,14 @@ const BODY = String.raw`
 
   <section id="record-section" hidden>
     <h2>Track record</h2>
-    <p class="sub">Per group, from the record the pool keeps anyway — what this person brought that a maintainer let in, what they built, what they decided. One number per group, with a formula anyone can check (<a href="/docs/governance">Governance</a>): it says where the work was done, not who someone is.</p>
-    <div class="table-wrap"><table id="record"><thead><tr><th>Group</th><th>Contributed</th><th>Maintained</th><th>Score</th></tr></thead><tbody></tbody></table></div>
+    <p class="sub">From the record the pool keeps anyway — what this person brought that a maintainer let in, what they built, what they decided. One number, with a formula anyone can check (<a href="/docs/governance">Governance</a>): it says where the work was done, not who someone is.</p>
+    <div class="table-wrap"><table id="record"><thead><tr><th>Contributed</th><th>Maintained</th><th>Score</th></tr></thead><tbody></tbody></table></div>
   </section>
 
   <section>
     <h2>Packages</h2>
-    <p class="sub">Registered by this contributor: the name is theirs, their worker builds it, a maintainer of the group reviews it.</p>
-    <div class="table-wrap"><table id="packages"><thead><tr><th>Package</th><th>Group</th><th>Project</th><th>Arches</th><th>Stage</th><th>Detail</th></tr></thead><tbody></tbody></table></div>
+    <p class="sub">Registered by this contributor: the name is theirs, their worker builds it, a maintainer reviews it.</p>
+    <div class="table-wrap"><table id="packages"><thead><tr><th>Package</th><th>Category</th><th>Project</th><th>Arches</th><th>Stage</th><th>Detail</th></tr></thead><tbody></tbody></table></div>
   </section>
 
   <section id="approvals-section" hidden>
@@ -68,7 +68,7 @@ const SCRIPT = String.raw`
     $("#avatar").textContent = d.login.slice(0, 2); if (d.role === "maintainer") $("#avatar").classList.add("m");
     $("#line").innerHTML = '<span class="pill ' + (d.role === "maintainer" ? "rec" : "ok") + '">' + esc(d.role) + '</span>' +
       (d.blocked ? '<span class="pill error" title="by ' + esc(d.blocked.by || "") + ', ' + esc(d.blocked.at || "") + '">blocked: ' + esc(d.blocked.reason || "") + '</span>' : '') +
-      (d.groups.length ? d.groups.map(function (g) { return '<a class="pill none" href="/docs/governance" style="text-decoration:none">' + esc(g.name) + '</a>'; }).join("") : '') +
+      (d.maintainer_since ? '<span class="pill none" title="listed in factory/MAINTAINERS.toml">since ' + esc(ago(d.maintainer_since)) + '</span>' : '') +
       '<span>since ' + esc(String(d.since).slice(0, 10)) + '</span><span class="dim">·</span><span>last seen ' + ago(d.last_seen) + '</span><span class="dim">·</span><a href="' + esc(d.github) + '" style="color:var(--muted);text-decoration:none">github.com/' + esc(d.login) + ' ↗</a>';
     var c = d.build_counts;
     var tiles = [
@@ -86,26 +86,26 @@ const SCRIPT = String.raw`
     var mx = Math.max.apply(null, counts) || 1;
     $("#activity").innerHTML = counts.map(function (v, i) { return '<i style="height:' + Math.max(4, 100 * v / mx) + '%" data-tip="' + new Date(weeks[i]).toISOString().slice(0, 10) + ' · ' + v + (v === 1 ? " contribution" : " contributions") + '"></i>'; }).join("");
     $("#activity-note").textContent = total ? num(total) + " in the last 16 weeks — every one is a row below" : "nothing on the record in the last 16 weeks yet";
-    var score = (d.record || []).reduce(function (n, r) { return n + Number(r.score || 0); }, 0);
-    $("#score").textContent = num(score);
-    $("#score-f").innerHTML = ((d.record || []).length ? (d.record || []).map(function (r) { return esc(r.group) + " " + num(r.score); }).join(" · ") + "<br>" : "no group yet<br>") + "from what the pool recorded: what you brought that a maintainer let in, what you built, what you decided — it says where the work was done, not who someone is";
-    if ((d.record || []).length) {
+    var rec = d.record || { contributed: {}, maintained: {}, score: 0 }, has = Object.keys(rec.contributed).some(function (k) { return rec.contributed[k]; }) || Object.keys(rec.maintained).some(function (k) { return rec.maintained[k]; });
+    $("#score").textContent = num(rec.score || 0);
+    $("#score-f").innerHTML = "from what the pool recorded: what you brought that a maintainer let in, what you built, what you decided — it says where the work was done, not who someone is";
+    if (has) {
       $("#record-section").hidden = false;
-      pager("#record", d.record, function (r) {
+      pager("#record", [rec], function (r) {
         var c = r.contributed, m = r.maintained;
         var contributed = [c.approved ? num(c.approved) + " let in" : "", c.staged ? num(c.staged) + " staged" : "", c.bumps ? num(c.bumps) + " bump" + (c.bumps === 1 ? "" : "s") : "", c.donated ? num(c.donated) + " for others" : "", c.rejected ? num(c.rejected) + " rejected" : ""].filter(Boolean).join(" · ") || "—";
         var maintained = [m.approvals ? num(m.approvals) + " approval" + (m.approvals === 1 ? "" : "s") : "", m.rejections ? num(m.rejections) + " rejection" + (m.rejections === 1 ? "" : "s") : "", m.rebuilds_failed ? num(m.rebuilds_failed) + " rebuild" + (m.rebuilds_failed === 1 ? "" : "s") + " failed" : ""].filter(Boolean).join(" · ") || "—";
-        return '<tr><td><a href="/docs/governance"><b>' + esc(r.group) + '</b></a></td><td>' + contributed + '</td><td>' + maintained + '</td><td class="num">' + num(r.score) + '</td></tr>';
+        return '<tr><td>' + contributed + '</td><td>' + maintained + '</td><td class="num">' + num(r.score) + '</td></tr>';
       });
     }
     pager("#packages", d.packages, function (p) {
       var arches = []; try { arches = JSON.parse(p.arches || "[]"); } catch (e) {}
-      return '<tr><td><a href="/package/' + encodeURIComponent(p.name) + '"><b>' + esc(p.name) + '</b></a></td><td>' + esc(p.group) + '</td><td>' + (p.url ? '<a href="' + esc(p.url) + '">' + esc(p.url.replace(/^https?:\/\/(www\.)?github\.com\//, "")) + '</a>' : '') + '</td><td>' + esc(arches.join(", ")) + '</td><td>' + pill(p.status) + '</td><td>' + esc(p.detail || "") + '</td></tr>';
+      return '<tr><td><a href="/package/' + encodeURIComponent(p.name) + '"><b>' + esc(p.name) + '</b></a></td><td>' + (p.category ? '<span class="pill none">' + esc(p.category) + '</span>' : '<span class="dim">—</span>') + '</td><td>' + (p.url ? '<a href="' + esc(p.url) + '">' + esc(p.url.replace(/^https?:\/\/(www\.)?github\.com\//, "")) + '</a>' : '') + '</td><td>' + esc(arches.join(", ")) + '</td><td>' + pill(p.status) + '</td><td>' + esc(p.detail || "") + '</td></tr>';
     }, { empty: "no package registered" });
     if (d.approvals.length || d.role === "maintainer") {
       $("#approvals-section").hidden = false;
       pager("#approvals", d.approvals, function (a) {
-        return '<tr><td class="when">' + ago(a.created_at) + '</td><td><a href="/package/' + encodeURIComponent(a.name) + '">' + esc(a.name) + '</a> <span class="mono muted">' + esc(a.version || "") + '</span> <span class="src">' + esc(a.group) + '</span></td><td>' + esc(a.arch) + '</td><td>' + pill(a.decision) + '</td><td>' + esc(a.note || "") + '</td></tr>';
+        return '<tr><td class="when">' + ago(a.created_at) + '</td><td><a href="/package/' + encodeURIComponent(a.name) + '">' + esc(a.name) + '</a> <span class="mono muted">' + esc(a.version || "") + '</span></td><td>' + esc(a.arch) + '</td><td>' + pill(a.decision) + '</td><td>' + esc(a.note || "") + '</td></tr>';
       }, { empty: "no decision yet" });
     }
     pager("#builds", d.builds, function (t) {

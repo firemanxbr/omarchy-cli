@@ -13,8 +13,8 @@ const BODY = String.raw`
   <div class="tiles" id="tiles"></div>
 
   <section id="maintainers">
-    <div class="h2row"><h2>Maintainers</h2><span class="hint">named in <code>factory/MAINTAINERS.toml</code>, per group</span></div>
-    <p class="sub">They approve what contributors stage, trust workers, and review the recipes in their groups. The green icon is theirs everywhere on the dashboard.</p>
+    <div class="h2row"><h2>Maintainers</h2><span class="hint">named in <code>factory/MAINTAINERS.toml</code></span></div>
+    <p class="sub">They have the project build what contributors stage, approve its builds, trust workers, settle categories and review the project's recipes. The green icon is theirs everywhere on the dashboard.</p>
     <div class="people" id="maintainers-list"><span class="muted">loading…</span></div>
   </section>
 
@@ -34,28 +34,28 @@ const BODY = String.raw`
 const SCRIPT = String.raw`
   skeletonTiles("#tiles", 4);
   Promise.all([
-    busy(fetch("/api/v1/factory/groups")).then(function (r) { return r.json(); }).catch(function () { return { groups: [] }; }),
+    busy(fetch("/api/v1/factory/maintainers")).then(function (r) { return r.json(); }).catch(function () { return { maintainers: [] }; }),
     busy(fetch("/api/v1/factory/packages")).then(function (r) { return r.json(); }).catch(function () { return { packages: [] }; }),
     busy(fetch("/api/v1/factory")).then(function (r) { return r.json(); }).catch(function () { return { workers: [] }; }),
     busy(fetch("/api/v1/factory/blocks")).then(function (r) { return r.json(); }).catch(function () { return { contributors: [] }; })
   ]).then(function (res) {
-    var groups = res[0].groups || [], pkgs = res[1].packages || [], workers = res[2].workers || [], blocked = {};
+    var listed = res[0].maintainers || [], pkgs = res[1].packages || [], workers = res[2].workers || [], blocked = {};
     (res[3].contributors || []).forEach(function (b) { blocked[b.login] = b.blocked_reason || ""; });
-    // Maintainers: per login, the groups they maintain.
+    // Maintainers: per login, since when.
     var maint = {};
-    groups.forEach(function (g) { (g.maintainers || []).forEach(function (m) { (maint[m] = maint[m] || []).push(g.name); }); });
+    listed.forEach(function (m) { maint[m.login] = m.since; });
     // Contributors: per login, packages registered and workers run — a maintainer is listed once, above.
     var contrib = {};
     pkgs.forEach(function (p) { if (p.owner && !maint[p.owner]) { var c = contrib[p.owner] = contrib[p.owner] || { packages: 0, landed: 0, workers: 0 }; c.packages++; if (p.status === "approved" || p.status === "published") c.landed++; } });
     workers.forEach(function (w) { if (w.owner && !maint[w.owner]) { var c = contrib[w.owner] = contrib[w.owner] || { packages: 0, landed: 0, workers: 0 }; c.workers++; } });
     var online = workers.filter(function (w) { return w.alive; }), ready = workers.filter(function (w) { return w.ready; });
     setTiles("#tiles", [
-      ["Maintainers", num(Object.keys(maint).length), groups.length + " group" + (groups.length === 1 ? "" : "s")],
+      ["Maintainers", num(Object.keys(maint).length), "every one reviews everything"],
       ["Contributors", num(Object.keys(contrib).length), num(pkgs.length) + " packages requested"],
       ["Workers ready", num(ready.length), num(online.length) + " online · " + num(workers.length) + " registered · " + num(ready.filter(function (w) { return w.side === "omarchy"; }).length) + " the project's", ready.length < online.length ? "warn" : ""],
       ["Community packages", num(pkgs.filter(function (p) { return p.status === "approved" || p.status === "published"; }).length), "approved by a maintainer, built by the project"]
     ]);
-    $("#maintainers-list").innerHTML = Object.keys(maint).sort().map(function (m) { return personChip(m, "maintainer", esc(maint[m].join(", "))); }).join("") || '<span class="muted">none yet</span>';
+    $("#maintainers-list").innerHTML = Object.keys(maint).sort().map(function (m) { return personChip(m, "maintainer", "since " + esc(ago(maint[m]))); }).join("") || '<span class="muted">none yet</span>';
     $("#contributors-list").innerHTML = Object.keys(contrib).sort().map(function (c) {
       var x = contrib[c], bits = [];
       if (x.packages) bits.push(x.packages + " package" + (x.packages === 1 ? "" : "s") + (x.landed ? " · " + x.landed + " landed" : ""));

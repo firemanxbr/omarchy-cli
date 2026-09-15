@@ -79,8 +79,8 @@ PKGBUILD reviewed and merged ──▶ pool: package_requests / build_tasks (D1)
    `audit.json` / `audit.md` to the evidence. The Review page shows the
    verdict (`ok`, `warn`, `block`); nothing acts on it, the maintainer does.
 6. **A maintainer has the project build it — never their own package.** On
-   the Review page, a maintainer of the group (`factory/MAINTAINERS.toml`)
-   reads the evidence and presses *Build by the project* (or rejects with
+   the Review page, a maintainer (`factory/MAINTAINERS.toml`) reads the
+   evidence and presses *Build by the project* (or rejects with
    a note). A review worker takes the task (`review:<task>`): the project's
    agent gets the request and the contributor's PKGBUILD, log, gate and
    audit as the lesson — `draft-pkgbuild --evidence` — and writes the
@@ -202,8 +202,8 @@ key a template covers Rust, Go, CMake, Meson, autotools and release
 binaries) — and uploads the package, the PKGBUILD, `PKGINFO` and the build
 log to `staging/<you>/<package>/<task>/`. The task is then **staged**: the
 Factory page lists it, the log and the PKGBUILD are public, the package is
-for maintainers. Nothing you build reaches users: a maintainer of the
-group reads it on the [Review](../../../../review) page and has the
+for maintainers. Nothing you build reaches users: a maintainer reads it
+on the [Review](../../../../review) page and has the
 project build it again — the project's agent, a worker the project
 trusts, its own recipe written with your PKGBUILD, log, gate and audit as
 the lesson — then approves *that* build into `edge` as source `factory`,
@@ -240,11 +240,13 @@ Who approves, and how one becomes a maintainer, is
 
 A **dry run** builds and measures but never publishes or renders: a
 maintainer queues it with `publish:false` —
-`curl -X POST $API/factory/enqueue -H "authorization: Bearer omc_…" -d '{"name":"chromium","group":"sizing","pkgbuild_ref":"<commit>","version":"…","arches":["aarch64"],"reason":"sizing","publish":false,"override":true}'`
+`curl -X POST $API/factory/enqueue -H "authorization: Bearer omc_…" -d '{"name":"chromium","pkgbuild_ref":"<commit>","version":"…","arches":["aarch64"],"reason":"sizing","publish":false,"override":true}'`
 (`override` when an upstream source ships the name). The worker keeps the
 result under its work directory; the Factory page shows the task with a
-*dry run* pill and how long it took. `factory/pkgbuilds/sizing/` holds
-recipes kept only for this (chromium, from Arch Linux ARM).
+*dry run* pill and how long it took. `factory/sizing/` holds recipes kept
+only for this (chromium, from Arch Linux ARM): the worker looks there when
+`factory/pkgbuilds/<name>/` has none, and the `enqueue` job never queues
+them.
 
 ## Run a worker
 
@@ -316,7 +318,7 @@ The factory touches the pool through four things, all versioned in the API:
 | The factory uses | Meaning |
 |---|---|
 | `GET /api/v1/package/:name` | who ships a name already (the guard) |
-| `POST /api/v1/factory/{requests,enqueue}` · `/requests/:id/{approve,reject}` · `/tasks/:id/cancel` (a maintainer's token, or the enqueue job's) · `/tasks/:id/{build,approve,reject}` (a maintainer, never the owner) · `/{contributors,packages}/:x/{block,unblock}` (a maintainer; lifting by another) · `POST /factory/jobs` (a maintainer queues a pool job) · `GET /factory/built`, `/factory/groups`, `/factory/review`, `/factory/blocks` | maintainers and the enqueue job |
+| `POST /api/v1/factory/{requests,enqueue}` · `/requests/:id/{approve,reject}` · `/tasks/:id/cancel` (a maintainer's token, or the enqueue job's) · `/tasks/:id/{build,approve,reject}` (a maintainer, never the owner) · `/{contributors,packages}/:x/{block,unblock}` (a maintainer; lifting by another) · `POST /factory/jobs` (a maintainer queues a pool job) · `GET /factory/built`, `/factory/maintainers`, `/factory/review`, `/factory/blocks` | maintainers and the enqueue job |
 | `POST /api/v1/factory/claim` (a registered worker's token) · `/tasks/:id/{heartbeat,complete,fail}` (the claim's job token) | the worker protocol |
 | `POST /api/v1/factory/register` · `/factory/packages[/:name/build]` · `/factory/workers` (contributor token) · `PUT /factory/tasks/:id/artifacts/:file` (worker token) · `GET /factory/packages`, `/factory/me` | contributors: registry, own workers, staging uploads |
 | `pkg-repo publish --source factory --ring edge --arch …` · `pkg-repo render` | how a result enters the pool: as a source like any other |
@@ -333,7 +335,7 @@ pointing the repository name in the worker script, `reconcile.rs`,
 
 ```
 POST /factory/claim                 {arch, hostname?, labels?, version?, kinds?, shared?}   Authorization: Bearer omw_… (the registration)
-  200 {task:{id,name,group,arch,version,pkgbuild_ref,reason,attempts,…}, token: "omj.…", token_expires_at, lease_minutes, repo, pkgbuild_path, upload}
+  200 {task:{id,name,arch,version,pkgbuild_ref,reason,attempts,…}, token: "omj.…", token_expires_at, lease_minutes, repo, pkgbuild_path, upload}
   204 nothing queued for this worker
 POST /factory/tasks/:id/heartbeat                                 (the job token) → lease extended 30 min, a fresh token
 POST /factory/tasks/:id/complete    {sha256, filename, version?, duration_ms?, log_tail?} · jobs: {result, summary}
@@ -354,12 +356,13 @@ factory/
   README.md                       this file
   worker/omarchy-build-worker.sh  the build half: `--inside` (called by pkg-repo work in a fresh container),
                                   `--container` (the contributor's one-task-per-container mode)
-  MAINTAINERS.toml                the governance file: groups and their maintainers (docs/GOVERNANCE.md)
+  MAINTAINERS.toml                the governance file: the maintainers, one list (docs/GOVERNANCE.md)
   bin/check-governance            validates it and generates .github/CODEOWNERS from it
   image/Containerfile             the one worker image (Arch, both architectures, signed, built by the release workflow); image/entrypoint.sh
                                   reads the registration and runs the contributor's or the project's half; image/compose.yml runs it
   bin/pkgbuild-meta               PKGBUILD → arches and version, without executing it as you
-  pkgbuilds/<group>/<name>/       reviewed PKGBUILDs; CODEOWNERS per group
+  pkgbuilds/<name>/               the project's reviewed recipes, owned by every maintainer (CODEOWNERS)
+  sizing/<name>/                  recipes kept for dry runs only (never queued)
 .github/workflows/factory-update.yml    daily: pull requests bumping the project's own recipes (reviewed, never auto-merged)
   bin/agent.py                    the owner's agent, whichever provider: Anthropic, OpenAI, Gemini, xAI (by the key set)
   bin/draft-pkgbuild              project URL → PKGBUILD (the agent, or a template), checksums left to updpkgsums
@@ -367,5 +370,5 @@ factory/
   bin/audit-pkgbuild              the second agent: staged PKGBUILD + log + .PKGINFO → audit.json / audit.md
   prompts/audit.md                what the auditor looks for, and the report's shape
   bin/check-updates               which PKGBUILDs are behind their GitHub upstream
-.github/CODEOWNERS                      who approves which group
+.github/CODEOWNERS                      every maintainer owns the governance file and the recipes
 ```

@@ -95,7 +95,7 @@ Migrations live in `worker/migrations/`.
 | `GET /api/v1/security?ring=&arch=` · `PUT /security/advisories` · `PUT /security/matches` | open advisories on what a ring serves (per package: confidence, severity, KEV/EPSS, rings already serving a clean version, how many packages depend on it or load one of its libraries); the writes are the Security workflow's |
 | `GET /api/v1/search?q=` · `/package/:name[/files]` | search within a ring; a package's versions per ring, manifest, forward edges (declared dependencies and loaded sonames resolved to providers) and reverse edges (declared, or by loading one of its libraries) — the package page and, later, CVE propagation |
 | `GET /api/v1/pool/unreferenced` · `POST /api/v1/pool/gc` | retention: what the last N releases do not reference |
-| `GET /api/v1/factory` · `POST /factory/{requests,enqueue,claim,jobs}` · `/factory/tasks/:id/{heartbeat,complete,fail,cancel,approve,reject}` · `/factory/tasks/:id/artifacts/<file>` · `/factory/{register,packages,workers,workers/self,groups,review,approvals,trust,me}` · `GET /api/v1/users/:login` · `GET /api/v1/cost` | the factory's brain: package requests, build tasks with leases, the workers pulling them, contributors and their packages, maintainers' approvals, jobs queued by hand, the daily cost estimate ([factory/README.md](../factory/README.md), [GOVERNANCE.md](GOVERNANCE.md)) |
+| `GET /api/v1/factory` · `POST /factory/{requests,enqueue,claim,jobs}` · `/factory/tasks/:id/{heartbeat,complete,fail,cancel,approve,reject}` · `/factory/tasks/:id/artifacts/<file>` · `/factory/{register,packages,workers,workers/self,maintainers,review,approvals,trust,me}` · `GET /api/v1/users/:login` · `GET /api/v1/cost` | the factory's brain: package requests, build tasks with leases, the workers pulling them, contributors and their packages, maintainers' approvals, jobs queued by hand, the daily cost estimate ([factory/README.md](../factory/README.md), [GOVERNANCE.md](GOVERNANCE.md)) |
 | `POST /api/v1/events` · `GET /api/v1/events` · `GET /api/v1/stats` | activity log and the dashboard's data |
 | `GET /` | the dashboard — three doors, one per audience: `/` the Pool (Omarchy users: rings, the three steps of pacman, coverage; no account), `/factory` the Factory (contributors: how a package gets in, registering, workers, builds), `/pipeline` the Pipeline (everyone: the journal as it happens, review throughput, and the operations maintainers act on). `/docs` is one interactive hub over the chapters; `/packages`, `/package/:name`, `/security`, `/status`, `/journal`, `/review`, `/user/:login` are the detail pages, one link away. Every page is a string with a `<script>` that reads the API; the diagrams are inline SVG drawn in `worker/src/pages/diagrams.ts`, the charts in `charts.ts` |
 
@@ -134,8 +134,8 @@ host (RUNBOOK, *The Studio host*).
 
 Every step posts an event; https://omarchy-pool.firemanxbr.org renders them.
 One workflow remains on GitHub besides CI and the release: `factory-update.yml`
-(pull requests bumping the project's own recipes, reviewed by their group's
-maintainers). No worker runs on GitHub: the project's six run on its own
+(pull requests bumping the project's own recipes, reviewed by a
+maintainer). No worker runs on GitHub: the project's six run on its own
 host (RUNBOOK, *The Studio host*).
 Operations, trust model and the kill switch are in [RUNBOOK.md](RUNBOOK.md).
 

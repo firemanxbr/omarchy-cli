@@ -74,16 +74,16 @@ npx wrangler d1 migrations apply omarchy-repo --local --persist-to "$WRANGLER_ST
 # omw_e2e_w1 and omw_e2e_w2.
 W1_HASH=$(printf %s omw_e2e_w1 | sha256sum | cut -d' ' -f1); W2_HASH=$(printf %s omw_e2e_w2 | sha256sum | cut -d' ' -f1); W3_HASH=$(printf %s omw_e2e_w3 | sha256sum | cut -d' ' -f1)
 # …and the governance the brain would have applied from factory/MAINTAINERS.toml:
-# one group, whose maintainer is the contributor 'e2e' (token omc_e2e).
+# one maintainer, the contributor 'e2e' (token omc_e2e).
 C_HASH=$(printf %s omc_e2e | sha256sum | cut -d' ' -f1)
 npx wrangler d1 execute omarchy-repo --local --persist-to "$WRANGLER_STATE" --command \
   "INSERT INTO build_workers (id, arch, owner, token_hash, mode, trust, trusted_by, last_seen) VALUES
      ('w1', 'aarch64', 'e2e', '$W1_HASH', 'shared', 'project', 'e2e', '2000-01-01T00:00:00Z'),
      ('w2', 'aarch64', 'e2e', '$W2_HASH', 'shared', 'project', 'e2e', '2000-01-01T00:00:00Z'),
      ('w3', 'aarch64', 'e2e-contributor', '$W3_HASH', 'dedicated', 'community', NULL, '2000-01-01T00:00:00Z');
-   INSERT INTO factory_groups (name, description, maintainers) VALUES ('community', 'everything else', '[\"e2e\"]');
-   INSERT INTO contributors (login, token_hash, session_hash, role, areas) VALUES ('e2e', '$C_HASH', '$(printf %s oms_e2e | sha256sum | cut -d' ' -f1)', 'maintainer', '[\"community\"]'),
-     ('e2e-contributor', '$(printf %s omc_e2e_contributor | sha256sum | cut -d' ' -f1)', NULL, 'contributor', '[]')" >/dev/null
+   INSERT INTO factory_maintainers (login) VALUES ('e2e');
+   INSERT INTO contributors (login, token_hash, session_hash, role) VALUES ('e2e', '$C_HASH', '$(printf %s oms_e2e | sha256sum | cut -d' ' -f1)', 'maintainer'),
+     ('e2e-contributor', '$(printf %s omc_e2e_contributor | sha256sum | cut -d' ' -f1)', NULL, 'contributor')" >/dev/null
 npx wrangler dev --ip 0.0.0.0 --port "$PORT" --persist-to "$WRANGLER_STATE" \
   --env-file "$E2E/.dev.vars" --var "POOL_URL:http://$HOST_FROM_CONTAINER:$PORT/pool" > "$E2E/wrangler.log" 2>&1 &
 WRANGLER_PID=$!
@@ -239,10 +239,10 @@ step "Factory: enqueue, claim with a lease, fail → requeue, complete after pub
 w1=(-H "authorization: Bearer omw_e2e_w1" -H "content-type: application/json")
 w2=(-H "authorization: Bearer omw_e2e_w2" -H "content-type: application/json")
 # The guard: xz is served by 'packages' for x86_64 → refused there; aarch64 has nobody → queued.
-enq=$(curl -s -X POST "$OMARCHY_API/api/v1/factory/enqueue" "${auth[@]}" -d '{"name":"xz","group":"community","pkgbuild_ref":"deadbeef","reason":"pkgbuild-changed","arches":["x86_64","aarch64"]}')
+enq=$(curl -s -X POST "$OMARCHY_API/api/v1/factory/enqueue" "${auth[@]}" -d '{"name":"xz","pkgbuild_ref":"deadbeef","reason":"pkgbuild-changed","arches":["x86_64","aarch64"]}')
 grep -q '"arches":\["aarch64"\]' <<<"$enq" || { echo "enqueue did not skip the upstream-served arch: $enq"; exit 1; }
 grep -q '"source":"packages"' <<<"$enq" || { echo "enqueue did not name who ships it: $enq"; exit 1; }
-refused=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/enqueue" "${auth[@]}" -d '{"name":"xz","group":"community","pkgbuild_ref":"deadbeef","reason":"x","arches":["x86_64"]}')
+refused=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/enqueue" "${auth[@]}" -d '{"name":"xz","pkgbuild_ref":"deadbeef","reason":"x","arches":["x86_64"]}')
 [[ "$refused" == 409 ]] || { echo "expected 409 for a name upstream ships, got $refused"; exit 1; }
 tid=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["tasks"][0])' <<<"$enq")
 [[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/claim" "${auth[@]}" -d '{"arch":"aarch64"}')" == 403 ]] || { echo "a job token must not claim"; exit 1; }
@@ -278,9 +278,9 @@ reg=$(curl -s "$OMARCHY_API/api/v1/factory/packages"); grep -q '"packages"' <<<"
 # Community tasks are their owner's first: a donated (--shared) worker sees
 # someone else's only from shared_after on; without --shared, never.
 (cd "$ROOT/worker" && npx wrangler d1 execute omarchy-repo --local --persist-to "$WRANGLER_STATE" --command \
-  "INSERT INTO build_tasks (name, \"group\", arch, pkgbuild_ref, reason, priority, publish, trust, owner, kind, shared_after) VALUES
-     ('later', 'community', 'aarch64', 'draft:https://github.com/x/later@latest', 'bump to v2', 100, 0, 'community', 'someone-else', 'build', strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+14 days')),
-     ('nowish', 'community', 'aarch64', 'draft:https://github.com/x/nowish@latest', 'package-request #1', 100, 0, 'community', 'someone-else', 'build', NULL)" >/dev/null)
+  "INSERT INTO build_tasks (name, arch, pkgbuild_ref, reason, priority, publish, trust, owner, kind, shared_after) VALUES
+     ('later', 'aarch64', 'draft:https://github.com/x/later@latest', 'bump to v2', 100, 0, 'community', 'someone-else', 'build', strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+14 days')),
+     ('nowish', 'aarch64', 'draft:https://github.com/x/nowish@latest', 'package-request #1', 100, 0, 'community', 'someone-else', 'build', NULL)" >/dev/null)
 w3=(-H "authorization: Bearer omw_e2e_w3" -H "content-type: application/json")
 [[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/claim" "${w3[@]}" -d '{"arch":"aarch64","agent":"openai/gpt-5","agent_status":"ok"}')" == 204 ]] || { echo "a worker not started --shared must only see its owner's tasks"; exit 1; }
 # Donating a worker is a maintainer's call: a contributor's --shared is ignored; a maintainer's is honoured.
@@ -319,7 +319,7 @@ aud=$(curl -s -X POST "$OMARCHY_API/api/v1/factory/tasks/$au_id/complete" "${auj
 review=$(curl -s "$OMARCHY_API/api/v1/factory/review")
 python3 -c 'import json,sys; d=json.load(sys.stdin); a=[t for t in d["staged"] if t["id"]=='"$c3_id"'][0]["audit"]; assert a["status"]=="done" and a["verdict"]=="warn" and a["findings"]==1 and a["high"]==1, a' <<<"$review" || { echo "review does not show the audit verdict: $(head -c 400 <<<"$review")"; exit 1; }
 [[ "$(curl -s "$OMARCHY_API/api/v1/factory/tasks/$c3_id/artifacts/audit.md")" == "# Audit: warn" ]] || { echo "the audit report is public evidence"; exit 1; }
-groups=$(curl -s "$OMARCHY_API/api/v1/factory/groups"); grep -q '"maintainers":\["e2e"\]' <<<"$groups" || { echo "groups not served from the governance table: $groups"; exit 1; }
+mlist=$(curl -s "$OMARCHY_API/api/v1/factory/maintainers"); grep -q '"login":"e2e"' <<<"$mlist" || { echo "maintainers not served from the governance table: $mlist"; exit 1; }
 me=$(curl -s "$OMARCHY_API/api/v1/factory/me" -H "authorization: Bearer omc_e2e"); grep -q '"role":"maintainer"' <<<"$me" || { echo "the seeded maintainer is not one: $me"; exit 1; }
 gpage=$(curl -s "$OMARCHY_API/docs/governance"); grep -q "Becoming a maintainer" <<<"$gpage" || { echo "governance page not served"; exit 1; }
 # The browser session (cookie omc=oms_…) signs the dashboard in; signing out invalidates it on the server, not only in the browser.
@@ -343,17 +343,17 @@ grep -q '"task":' <<<"$qj" || { echo "a maintainer could not queue a job: $qj"; 
 rb=$(curl -s -X POST "$OMARCHY_API/api/v1/factory/jobs" "${mauth[@]}" -d '{"kind":"rollback","params":{"ring":"stable","to":"1"}}'); grep -q '"kind":"rollback"' <<<"$rb" || { echo "a maintainer could not queue a rollback: $rb"; exit 1; }
 [[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/events" "${mauth[@]}" -d '{"kind":"note","status":"ok","summary":"a maintainer wrote this"}')" == 201 ]] || { echo "a maintainer must be able to write a journal note"; exit 1; }
 [[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/pool/gc" "${mauth[@]}")" == 401 ]] || { echo "a maintainer token must not write to the pool directly (jobs do)"; exit 1; }
-# Nobody approves their own package — and the group's only maintainer is no exception (docs/GOVERNANCE.md).
+# Nobody approves their own package — and the only maintainer is no exception (docs/GOVERNANCE.md).
 (cd "$ROOT/worker" && npx wrangler d1 execute omarchy-repo --local --persist-to "$WRANGLER_STATE" --command \
-  "INSERT INTO build_tasks (name, \"group\", arch, version, pkgbuild_ref, reason, priority, publish, trust, owner, kind, status, staged_prefix) VALUES
-     ('mine', 'community', 'aarch64', '1.0-1', 'draft:https://github.com/e2e/mine@latest', 'contributor', 100, 0, 'community', 'e2e', 'build', 'staged', 'staging/e2e/mine/1/');
-   UPDATE factory_groups SET maintainers = '[\"e2e\",\"other\"]' WHERE name = 'community'" >/dev/null)
+  "INSERT INTO build_tasks (name, arch, version, pkgbuild_ref, reason, priority, publish, trust, owner, kind, status, staged_prefix) VALUES
+     ('mine', 'aarch64', '1.0-1', 'draft:https://github.com/e2e/mine@latest', 'contributor', 100, 0, 'community', 'e2e', 'build', 'staged', 'staging/e2e/mine/1/');
+   INSERT INTO factory_maintainers (login) VALUES ('other')" >/dev/null)
 mine=$(curl -s "$OMARCHY_API/api/v1/factory/review" | python3 -c 'import json,sys; print([t["id"] for t in json.load(sys.stdin)["staged"] if t["name"]=="mine"][0])')
 # A contributor's build is evidence: approving it is refused before anything else. The owner rule shows on "build":
 # a maintainer never has the project build their own package — with another maintainer around or as the sole one.
 [[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/tasks/$mine/approve" "${mauth[@]}" -d '{}')" == 409 ]] || { echo "a contributor's build must never be approvable"; exit 1; }
 [[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/tasks/$mine/build" "${mauth[@]}" -d '{}')" == 403 ]] || { echo "a maintainer must not have the project build their own package when another maintainer exists"; exit 1; }
-(cd "$ROOT/worker" && npx wrangler d1 execute omarchy-repo --local --persist-to "$WRANGLER_STATE" --command "UPDATE factory_groups SET maintainers = '[\"e2e\"]' WHERE name = 'community'" >/dev/null)
+(cd "$ROOT/worker" && npx wrangler d1 execute omarchy-repo --local --persist-to "$WRANGLER_STATE" --command "DELETE FROM factory_maintainers WHERE login = 'other'" >/dev/null)
 [[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/tasks/$mine/build" "${mauth[@]}" -d '{}')" == 403 ]] || { echo "the sole maintainer must not have the project build their own package either"; exit 1; }
 # Somebody else's package: a contributor's build is never approved — it is evidence. A maintainer has the project
 # build it (review:<task>, the project's own recipe, its agent, a worker it trusts); the approval comes on that build.
@@ -366,7 +366,7 @@ ptask=$(jq -r .task <<<"$pb")
 [[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/tasks/$mine/build" "${mauth[@]}" -d '{}')" == 409 ]] || { echo "one project build at a time per staged build"; exit 1; }
 # Nothing was approved yet: the profile's record says so.
 rec=$(curl -s "$OMARCHY_API/api/v1/users/e2e?after=review")   # a fresh key: the profile is edge-cached for a minute
-python3 -c 'import json,sys; rs=[g for g in json.load(sys.stdin)["record"] if g["group"]=="community"]; assert not rs or rs[0]["maintained"]["approvals"]==0, rs' <<<"$rec" || { echo "the profile record is off: $(python3 -c 'import json,sys; print(json.load(sys.stdin)["record"])' <<<"$rec")"; exit 1; }
+python3 -c 'import json,sys; r=json.load(sys.stdin)["record"]; assert r["maintained"]["approvals"]==0, r' <<<"$rec" || { echo "the profile record is off: $(python3 -c 'import json,sys; print(json.load(sys.stdin)["record"])' <<<"$rec")"; exit 1; }
 rpage=$(curl -s "$OMARCHY_API/review"); grep -q "Review" <<<"$rpage" || { echo "review page not served"; exit 1; }
 # A signature for bytes the pool does not serve under that filename is refused.
 [[ "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$OMARCHY_API/api/v1/pool/$(printf 'a%.0s' {1..64})/sig?filename=xz-5.8.4-1-x86_64.pkg.tar.zst&source=packages&arch=x86_64" -H "authorization: Bearer $OMARCHY_TOKEN" --data-binary "@$E2E/pkgs/xz-5.8.4-1-x86_64.pkg.tar.zst.sig")" == 409 ]] || { echo "a mismatching signature must be refused"; exit 1; }

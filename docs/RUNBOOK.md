@@ -237,9 +237,9 @@ says so.
 ## Maintainers: reviewing contributed builds
 
 The **Review** page lists staged builds (a contributor's package built on
-their worker, with PKGBUILD, log and PKGINFO). A maintainer of the package's
-group — a login listed under that group in `factory/MAINTAINERS.toml`, signed
-in with GitHub — approves or rejects:
+their worker, with PKGBUILD, log and PKGINFO). A maintainer — a login
+listed in `factory/MAINTAINERS.toml`, signed in with GitHub — has the
+project build it, then approves or rejects the project's build:
 
 - **Approve** records the decision (`approvals`, with your login and note)
   and queues a **project build** of the staged PKGBUILD (`pkgbuild_ref =
@@ -267,13 +267,15 @@ the API same-origin. Without the app, the Factory page still accepts a
 GitHub token used once.
 
 Roles come from the repository, not from an API: `factory/MAINTAINERS.toml`
-names the groups and their maintainers, the brain reads `main` every ten
-minutes (`worker/src/governance.ts`) and sets each contributor's role and
-areas from it — every change a `role` line in the journal. Changing the file
+lists the maintainers (one list, no areas), the brain reads `main` every
+ten minutes (`worker/src/governance.ts`) and sets each contributor's role
+from it — every change a `role` line in the journal. Changing the file
 is a pull request another maintainer approves (`.github/CODEOWNERS` is
 generated from it by `factory/bin/check-governance --write`; CI checks they
-agree). See [GOVERNANCE.md](GOVERNANCE.md). `GET /api/v1/factory/groups` and
-`/factory/approvals` are the public record.
+agree). See [GOVERNANCE.md](GOVERNANCE.md). `GET /api/v1/factory/maintainers`
+and `/factory/approvals` are the public record. What a package is about is
+its *category*, proposed by the project's agent at audit and settled by a
+maintainer (`POST /factory/packages/<name>/category`).
 
 ## Adding a repository
 
@@ -375,18 +377,17 @@ re-pinned the 5 objects (rc#18, stable#8) and every OPR object verified.
 What no upstream ships is built from `factory/pkgbuilds` by workers that pull
 tasks from the pool ([factory/README.md](../factory/README.md)). Day to day:
 
-- **Add a package**: sign in and register it on the Factory page, run
-  your worker, and a maintainer of the group reviews the staged build
-  (docs/GOVERNANCE.md). A *Package request* issue does the same for someone
-  without a worker: the brain reads open issues every ten minutes and queues
-  a community build with a drafted PKGBUILD (`draft:<url>@latest`) for the
-  issue's author; a *shared* worker whose owner runs an agent takes it, and
-  the request shows on the Factory page until then. The project's own
-  recipes live in `factory/pkgbuilds/<group>/`: a pull request the group's
-  maintainers review; the merge queues the build (the hourly `enqueue` job,
-  or `pkg-repo job enqueue` right away).
+- **Add a package**: sign in and request it on `/request` (the project's
+  URL, a description, the licence, the checklist — written once to the
+  public record), press *Build*, and a maintainer reviews the staged build
+  (docs/GOVERNANCE.md). Without a worker of your own, a *shared* community
+  worker whose owner runs an agent takes the drafted build
+  (`draft:<url>@latest`); the request shows on the Factory page until then.
+  The project's own recipes live flat in `factory/pkgbuilds/<name>/`: a
+  pull request a maintainer reviews; the merge queues the build (the hourly
+  `enqueue` job, or `pkg-repo job enqueue` right away).
 - **Rebuild**: `curl -X POST $API/factory/enqueue` with a maintainer's token
-  (`{"name","group","pkgbuild_ref":"<commit>","version","arches"}`;
+  (`{"name","pkgbuild_ref":"<commit>","version","arches"}`;
   `override` builds even a name upstream ships), or approve a staged build
   again on the Review page.
 - **A failed task**: the Factory page shows the error and the log tail
@@ -448,10 +449,9 @@ tasks from the pool ([factory/README.md](../factory/README.md)). Day to day:
     `bump` journal line): no more bumps until its owner builds again, or a
     maintainer removes the registration (`DELETE /factory/packages/<name>`)
     so someone else can take it;
-  - a recipe in `factory/pkgbuilds/<group>/`: `factory-update.yml` (daily,
+  - a recipe in `factory/pkgbuilds/<name>/`: `factory-update.yml` (daily,
     05:45 UTC from the scheduler) bumps `pkgver`, refreshes checksums and
-    opens one pull request per package for a maintainer of the group to
-    review — never auto-merged; the merge queues the build. It relies on the
+    opens one pull request per package for a maintainer to review — never auto-merged; the merge queues the build. It relies on the
     repository setting *Actions may create pull requests*. Packages without
     a GitHub `url=` (vi) are bumped by hand.
 - **Contributors' builds** land in the `omarchy-factory-staging` bucket

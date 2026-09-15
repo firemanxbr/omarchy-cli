@@ -29,7 +29,7 @@ function upstreamOf(source: string, repoArch: string): { project: string; keyrin
 }
 
 interface PackageRow { id: number; sha256: string; name: string; version: string; arch: string; repo_arch: string; filename: string; source: string; has_signature: number; created_at: string; r2_key: string }
-interface TaskRow { id: number; name: string; group: string; arch: string; version: string | null; pkgbuild_ref: string; owner: string | null; trust: string; started_at: string | null; finished_at: string | null; duration_ms: number | null; attempts: number; result: string | null }
+interface TaskRow { id: number; name: string; arch: string; version: string | null; pkgbuild_ref: string; owner: string | null; trust: string; started_at: string | null; finished_at: string | null; duration_ms: number | null; attempts: number; result: string | null }
 
 async function builderOf(env: Env, task: number): Promise<{ worker: string | null; agent: string | null }> {
   const ev = await env.DB.prepare("SELECT payload FROM events WHERE kind = 'build' AND status = 'ok' AND json_extract(payload, '$.task') = ? ORDER BY id DESC LIMIT 1").bind(task).first<{ payload: string }>();
@@ -109,9 +109,9 @@ export async function factoryChain(env: Env, sha256: string): Promise<Record<str
   }
   if (!staged && !review) {
     recipe.repository = REPO_URL;
-    recipe.path = `factory/pkgbuilds/${build.group}/${build.name}/PKGBUILD`;
+    recipe.path = `factory/pkgbuilds/${build.name}/PKGBUILD`;
     recipe.commit = ref;
-    recipe.pkgbuild = `${REPO_URL}/blob/${ref}/factory/pkgbuilds/${build.group}/${build.name}/PKGBUILD`;
+    recipe.pkgbuild = `${REPO_URL}/blob/${ref}/factory/pkgbuilds/${build.name}/PKGBUILD`;
   }
   return {
     builder: { worker: builder.worker, trust: "project" },
@@ -121,7 +121,8 @@ export async function factoryChain(env: Env, sha256: string): Promise<Record<str
     source_build: sourceBuild,
     audit,
     approval: approval ? { by: approval.by, at: approval.created_at, note: approval.note, of_task: approval.task_id } : null,
-    group: build.group,
+    // The category a maintainer settled (categories.ts) — what the package is about, for people; never who reviewed it.
+    category: (await env.DB.prepare("SELECT category FROM factory_packages WHERE name = ?").bind(build.name).first<{ category: string | null }>())?.category ?? null,
     pool: { release: version(env).version, repository: REPO_URL },
   };
 }

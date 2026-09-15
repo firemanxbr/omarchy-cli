@@ -248,13 +248,14 @@ const PACKAGE_SCRIPT = String.raw`
       m.pkginfo && m.pkginfo.packager && p.source !== "factory" ? "packaged by " + esc(m.pkginfo.packager.replace(/<.*>/, "").trim()) : ""
     ].filter(Boolean).map(function (x) { return "<span>" + x + "</span>"; }).join('<span class="sep">·</span>');
     // Who stands behind it: upstream's packager, or — for what the factory
-    // built — the contributor who brought it, the group's maintainers and
+    // built — the contributor who brought it, its category, the maintainers and
     // the maintainer who approved it, each with a public page.
     var mt = d.maintenance || {}, f = mt.factory, person = function (l) { return '<a href="/user/' + encodeURIComponent(l) + '">' + esc(l) + '</a>'; };
     if (f) {
       var parts = [];
       if (f.owner) parts.push("brought by " + person(f.owner));
-      if (f.maintainers && f.maintainers.length) parts.push("maintained by " + f.maintainers.map(person).join(", ") + (f.group ? ' (<a href="/docs/governance">' + esc(f.group) + '</a>)' : ''));
+      if (f.category) parts.push('<span class="pill none">' + esc(f.category) + '</span>');
+      if (f.maintainers && f.maintainers.length) parts.push("maintained by " + f.maintainers.map(person).join(", "));
       if (f.approved_by) parts.push("approved by " + person(f.approved_by) + (f.approved_version ? " at " + esc(f.approved_version) : "") + " " + ago(f.approved_at));
       $("#maint").innerHTML = parts.join(" · ") + ' · <span class="muted">built and signed by the project; the contributor\'s build was the evidence</span>';
     } else if (mt.packager) {
@@ -293,7 +294,7 @@ const PACKAGE_SCRIPT = String.raw`
     if (f) {
       var sb = c.source_build || {};
       cards.push(f.owner ? card(avatar(f.owner, "contributor", "lg"), "contributor", esc(f.owner), "brought the recipe" + (sb.worker ? " · built it on " + esc(sb.worker) : ""), "/user/" + encodeURIComponent(f.owner)) : card('<span class="avatar lg">?</span>', "contributor", "unknown", "registered before the record kept owners"));
-      cards.push(f.approved_by ? card(avatar(f.approved_by, "maintainer", "lg"), "maintainer", esc(f.approved_by), "rebuilt it from the recipe on a trusted worker, approved it " + ago(f.approved_at), "/user/" + encodeURIComponent(f.approved_by)) : '<div class="whoc wait"><span class="avatar lg" style="border-color:var(--amber);color:var(--amber)">?</span><div><div class="k">maintainer</div><b>waiting for review</b><span>a maintainer of ' + esc(f.group || "the group") + ' decides' + (f.maintainers && f.maintainers.length ? ": " + f.maintainers.map(esc).join(", ") : "") + '</span></div></div>');
+      cards.push(f.approved_by ? card(avatar(f.approved_by, "maintainer", "lg"), "maintainer", esc(f.approved_by), "rebuilt it from the recipe on a trusted worker, approved it " + ago(f.approved_at), "/user/" + encodeURIComponent(f.approved_by)) : '<div class="whoc wait"><span class="avatar lg" style="border-color:var(--amber);color:var(--amber)">?</span><div><div class="k">maintainer</div><b>waiting for review</b><span>a maintainer decides' + (f.maintainers && f.maintainers.length ? ": " + f.maintainers.map(esc).join(", ") : "") + '</span></div></div>');
       var au = c.audit;
       cards.push(card('<span class="avatar lg" style="border-color:var(--lilac);color:var(--lilac)">ai</span>', "agents", (sb.agent ? "drafted" : "no draft") + " · " + (au && au.verdict ? "audit " + esc(au.verdict) : au && au.status ? "audit " + esc(au.status) : "no audit"), (sb.agent ? "PKGBUILD drafted on the contributor\'s worker with " + esc(sb.agent) + "; " : "") + (au && au.agent ? "audit written on the review worker with " + esc(au.agent) + " — " : "") + "evidence, never a decision"));
     } else {

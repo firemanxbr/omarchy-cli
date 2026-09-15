@@ -1,26 +1,22 @@
-# Who maintains what in the Omarchy pool's factory.
+# Who maintains the Omarchy pool's factory.
 #
-# This file is the governance record. Every login listed under a group is a
-# maintainer of that group: they approve the builds staged for it, they
-# trust workers, and they review changes to factory/pkgbuilds/<group>/.
-# Everyone else who signs in is a contributor. There is no other role and
-# no other way to become a maintainer.
+# This file is the governance record. Every login listed here is a
+# maintainer: they have the project build what contributors stage, approve
+# the project's builds into the rings, trust workers, block what must not
+# come in, settle each package's category and review changes to
+# factory/pkgbuilds/. Everyone else who signs in is a contributor. There is
+# no other role, no areas, and no other way to become a maintainer.
 #
-# Changing this file — a new maintainer, a new group, a departure — is a
-# decision people make, in a pull request that at least one *other*
-# maintainer approves (CODEOWNERS + branch protection; never auto-merged).
-# The pool reads main every ten minutes and applies it.
+# Changing this file — a new maintainer, a departure — is a decision people
+# make, in a pull request that at least one *other* maintainer approves
+# (CODEOWNERS + branch protection; never auto-merged). The pool reads main
+# every ten minutes and applies it.
 #
-# Nobody is above this file: no owner, no superuser. The project
-# belongs to its maintainers and contributors.
+# Nobody is above this file: no owner, no superuser. The project belongs to
+# its maintainers and contributors. This is a community pool — nothing in
+# it is official Omarchy.
 #
-# Bootstrap: while there is a single maintainer, that maintainer merges
-# the first promotion alone; GitHub records the bypassed review.
+# Bootstrap: while there is a single maintainer, that maintainer merges the
+# first promotion alone; GitHub records the bypassed review.
 
-[groups.omarchy]
-description = "What Omarchy ships or depends on: the desktop, its tools and their dependencies"
-maintainers = ["firemanxbr"]
-
-[groups.community]
-description = "Everything else contributors bring to the pool"
 maintainers = ["firemanxbr"]

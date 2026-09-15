@@ -1,10 +1,10 @@
 name: Factory update
 
-# The project's own PKGBUILDs (factory/pkgbuilds/<group>/) follow their
+# The project's own PKGBUILDs (factory/pkgbuilds/<name>/) follow their
 # upstreams by pull request: this checks each one's GitHub releases, bumps
 # pkgver (pkgrel back to 1), refreshes the checksums in an Arch container
-# and opens one pull request per package. A maintainer of the group reviews
-# it (CODEOWNERS; main requires that review) — nothing is auto-merged — and
+# and opens one pull request per package. A maintainer reviews it
+# (CODEOWNERS; main requires that review) — nothing is auto-merged — and
 # the merge queues the build (the hourly `enqueue` job). Runs daily from
 # the pool's scheduler. Packages contributors registered are bumped
 # differently: on their own workers, as evidence (docs/GOVERNANCE.md).
@@ -15,7 +15,7 @@ on:
   workflow_dispatch:
     inputs:
       package:
-        description: "group/name to check — empty checks everything"
+        description: "package name to check — empty checks everything"
         required: false
   schedule:
     - cron: "45 5 * * *"
@@ -50,7 +50,7 @@ jobs:
           git config user.name "omarchy-pool factory"
           git config user.email "factory@omarchy-pool.invalid"
           while read -r pkg current latest; do
-            dir="factory/pkgbuilds/$pkg"; name="${pkg#*/}"; branch="factory/bump-$name-$latest"
+            dir="factory/pkgbuilds/$pkg"; name="$pkg"; branch="factory/bump-$name-$latest"
             if gh pr list --head "$branch" --state open --json number -q 'length' | grep -qv '^0$'; then echo "$pkg $latest: pull request already open"; continue; fi
             git checkout -q -B "$branch" origin/main
             sed -i -E "s/^pkgver=.*/pkgver=$latest/; s/^pkgrel=.*/pkgrel=1/" "$dir/PKGBUILD"
@@ -61,7 +61,7 @@ jobs:
             git add "$dir" && git commit -q -m "factory: $name $current → $latest" -m "Automatic bump of an approved package after an upstream release." || { echo "$pkg: nothing changed"; continue; }
             git push -q -f origin "$branch"
             url="$(gh pr create --base main --head "$branch" --title "factory: $name $current → $latest" \
-              --body "Upstream released **$latest** (this PKGBUILD had $current). pkgver bumped, pkgrel reset, checksums refreshed with updpkgsums. Opened by the Factory update workflow for a maintainer of the group to review; the merge queues the build.")"
+              --body "Upstream released **$latest** (this PKGBUILD had $current). pkgver bumped, pkgrel reset, checksums refreshed with updpkgsums. Opened by the Factory update workflow for a maintainer to review; the merge queues the build.")"
             echo "$pkg: $url"
             # A pull request opened with the workflow token does not start
             # pull_request workflows by itself; run the required checks on the branch.
