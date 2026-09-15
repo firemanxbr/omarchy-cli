@@ -140,7 +140,7 @@ __CHARTS__
       }, { empty: 'no package requested yet' });
       pager("#my-workers", (d.workers || []), function (w) {
         var alive = w.last_seen && (Date.now() - Date.parse(w.last_seen)) < 600000;
-        return '<tr><td class="mono">' + esc(w.id) + (w.revoked_at ? ' <span class="pill none">revoked</span>' : alive ? ' <span class="pill ok">alive</span>' : '') + '</td><td>' + esc(w.arch) + '</td><td>' + esc(w.mode) + (w.packages && w.packages.length ? ' <span class="muted">' + esc(w.packages.join(", ")) + '</span>' : '') + '</td><td>' + agentCell(w) + '</td><td>' + ago(w.last_seen) + '</td>' +
+        return '<tr><td>' + workerName(w) + (w.revoked_at ? ' <span class="pill none">revoked</span>' : alive ? ' <span class="pill ok">alive</span>' : '') + '</td><td>' + esc(w.arch) + '</td><td>' + esc(w.mode) + (w.packages && w.packages.length ? ' <span class="muted">' + esc(w.packages.join(", ")) + '</span>' : '') + '</td><td>' + agentCell(w) + '</td><td>' + ago(w.last_seen) + '</td>' +
           '<td>' + (w.current_task ? '#' + w.current_task : '<span class="muted">idle</span>') + '</td><td>' + num(w.builds_done) + ' / ' + num(w.builds_failed) + '</td><td>' + (w.revoked_at ? '' : '<button type="button" data-revoke="' + esc(w.id) + '">Revoke</button>') + '</td></tr>';
       }, { empty: 'no worker yet — register one above' });
       pager("#my-tasks", (d.tasks || []), function (t) {
