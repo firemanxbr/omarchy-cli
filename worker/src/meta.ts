@@ -39,6 +39,9 @@ export const EXPECTED_SOURCES: { source: string; arch: string; upstream: string;
   { source: "extra", arch: "aarch64", upstream: "os.archlinuxarm.org", title: "Arch Linux ARM extra" },
   { source: "alarm", arch: "aarch64", upstream: "os.archlinuxarm.org", title: "Arch Linux ARM alarm" },
   { source: "packages", arch: "aarch64", upstream: "pkgs.omarchy.org", title: "Omarchy (OPR), the ring's channel" },
+  { source: "asahi", arch: "aarch64", upstream: "github.com/maralcbr/omarchy-pkgs", title: "Omarchy for Apple Silicon: the fork's newest stable snapshot" },
+  { source: "asahi-alarm", arch: "aarch64", upstream: "github.com/asahi-alarm/asahi-alarm", title: "Asahi Linux for Arch Linux ARM: kernel, graphics, firmware" },
+  { source: "aur", arch: "aarch64", upstream: "os.archlinuxarm.org", optional: true, title: "Arch Linux ARM's prebuilt AUR selection (only names no other source provides)" },
   { source: "factory", arch: "x86_64", upstream: "the factory", title: "Built by the factory from reviewed PKGBUILDs (factory/pkgbuilds)" },
   { source: "factory", arch: "aarch64", upstream: "the factory", title: "Built by the factory from reviewed PKGBUILDs (factory/pkgbuilds)" },
 ];

@@ -47,3 +47,15 @@ echo "$OUT/omarchy.gpg: $(stat -c%s "$OUT/omarchy.gpg" 2>/dev/null || stat -f%z 
 extract_keyring "https://builds.garudalinux.org/repos/chaotic-aur/x86_64" \
   "$(latest https://builds.garudalinux.org/repos/chaotic-aur/x86_64 chaotic-aur chaotic-keyring)" \
   usr/share/pacman/keyrings/chaotic.gpg "$OUT/chaotic.gpg"
+
+# Asahi Linux on Arch Linux ARM: the asahi-alarm repository ships its keyring package.
+extract_keyring "https://github.com/asahi-alarm/asahi-alarm/releases/download/aarch64" \
+  "$(latest https://github.com/asahi-alarm/asahi-alarm/releases/download/aarch64 asahi-alarm asahi-alarm-keyring)" \
+  usr/share/pacman/keyrings/asahi-alarm.gpg "$OUT/asahi-alarm.gpg"
+
+# Omarchy for Apple Silicon (maralcbr/omarchy-pkgs): packages and database are
+# signed by "Omarchy ARM Repository", a key no package ships; the public key
+# is kept in this repository (tests/keys/omarchy-asahi.asc, fingerprint
+# C81AC3E2A99556F9B21D5FEA3DD49BC9F8360BDC, signing subkey …7AC186E4).
+gpg --batch --yes --dearmor -o "$OUT/omarchy-asahi.gpg" "$(dirname "${BASH_SOURCE[0]}")/keys/omarchy-asahi.asc"
+echo "$OUT/omarchy-asahi.gpg: $(stat -c%s "$OUT/omarchy-asahi.gpg" 2>/dev/null || stat -f%z "$OUT/omarchy-asahi.gpg") bytes (tests/keys/omarchy-asahi.asc)"

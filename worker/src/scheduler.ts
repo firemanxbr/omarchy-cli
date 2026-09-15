@@ -54,6 +54,15 @@ export const SYNC_SOURCES: { source: string; arch: string; ring: string; base_ur
   { source: "alarm", arch: "aarch64", ring: "edge", base_url: "http://os.archlinuxarm.org/aarch64/alarm", db_name: "alarm", keyring: "archlinuxarm" },
   { source: "extra", arch: "aarch64", ring: "edge", base_url: "http://os.archlinuxarm.org/aarch64/extra", db_name: "extra", keyring: "archlinuxarm" },
   { source: "packages", arch: "aarch64", ring: "edge", base_url: "https://pkgs.omarchy.org/edge/aarch64", db_name: "omarchy", keyring: "omarchy" },
+  // Omarchy for Apple Silicon: maralcbr's fork publishes its repository as a
+  // GitHub release per snapshot (asahi-packages-stable-<commit>); the sync
+  // resolves the newest one at run time. asahi-alarm (the Asahi kernel and
+  // graphics stack for Arch Linux ARM) is one rolling release. Both sit above
+  // the OPR and Arch's own in the include (setup.ts) — on a Mac they win.
+  { source: "asahi", arch: "aarch64", ring: "edge", base_url: "github-release://maralcbr/omarchy-pkgs/asahi-packages-stable-", db_name: "omarchy", keyring: "omarchy-asahi" },
+  { source: "asahi-alarm", arch: "aarch64", ring: "edge", base_url: "https://github.com/asahi-alarm/asahi-alarm/releases/download/aarch64", db_name: "asahi-alarm", keyring: "asahi-alarm" },
+  // Arch Linux ARM's prebuilt AUR selection, optional like chaotic on x86_64: only names no other source provides.
+  { source: "aur", arch: "aarch64", ring: "edge", base_url: "http://os.archlinuxarm.org/aarch64/aur", db_name: "aur", keyring: "archlinuxarm", defer_to: "asahi,asahi-alarm,packages,factory,core,extra,alarm" },
 ];
 
 export const RULES: Rule[] = [
