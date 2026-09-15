@@ -80,16 +80,35 @@ services:
   # libldap fail to map a segment. Off by default here: x86_64 build tasks
   # wait for an x86_64 worker (any x86_64 machine with docker and these two
   # services' env files). COMPOSE_PROFILES=emulated in .env turns them on.
+  # Claude Code's binary dies under qemu (it is a Bun executable), so the
+  # emulated worker has no agent of its own: `agent-proxy` runs the agent
+  # natively beside it (the aarch64 image, OMARCHY_WORKER_ROLE=agent, the
+  # same subscription token) and the worker speaks to it over the compose
+  # network in the Anthropic Messages shape agent.py already knows —
+  # FACTORY_PROVIDER=anthropic, ANTHROPIC_BASE_URL=http://agent-proxy:8790.
+  # The key is a placeholder the proxy never reads; nothing is published.
+  agent-proxy:
+    profiles: [emulated]
+    image: ghcr.io/firemanxbr/omarchy-worker:aarch64
+    restart: unless-stopped
+    env_file: [etc/agent.env]
+    environment:
+      OMARCHY_WORKER_ROLE: agent
+    logging: *logging
   community-x86_64:
     profiles: [emulated]
     image: ghcr.io/firemanxbr/omarchy-worker:x86_64
     platform: linux/amd64
     restart: unless-stopped
     stop_grace_period: 3h
+    depends_on: [agent-proxy]
     env_file: [etc/agent.env, etc/community-x86_64.env]
     environment:
       OMARCHY_WORKER_ROLE: community
-      WORKER_LABELS: '{"where":"${WHERE:-omarchy-studio}","emulated":true}'
+      FACTORY_PROVIDER: anthropic
+      ANTHROPIC_BASE_URL: http://agent-proxy:8790
+      ANTHROPIC_API_KEY: via-agent-proxy
+      WORKER_LABELS: '{"where":"${WHERE:-omarchy-studio}","emulated":true,"agent":"via agent-proxy"}'
     volumes:
       - ${POOL_ROOT:-/srv/omarchy-pool}/cache/pacman/x86_64:/var/cache/pacman/pkg
       - ${POOL_ROOT:-/srv/omarchy-pool}/cache/build/x86_64:/build/cache

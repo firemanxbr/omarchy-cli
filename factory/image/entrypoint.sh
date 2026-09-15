@@ -31,6 +31,10 @@
 #   community  a shared community worker: builds anyone's community
 #              packages, drafts PKGBUILDs for package requests with its
 #              owner's agent key (WORKER_SHARED=1 is implied).
+#   agent      no worker at all: the agent served over HTTP on :8790
+#              (factory/bin/agent-proxy) for a sibling container that
+#              cannot run it — the emulated x86_64 community worker, where
+#              Claude Code's binary dies under qemu. Needs no token.
 #
 # A role reports itself in the worker's labels ("role"), so the Factory page
 # shows what each container is for. Extra arguments go to `pkg-repo work`
@@ -38,9 +42,18 @@
 # when a role is set); in community mode they are ignored.
 set -euo pipefail
 : "${OMARCHY_API:=https://pkgs.firemanxbr.org}"
-: "${OMARCHY_WORKER_TOKEN:?OMARCHY_WORKER_TOKEN is required: register a worker on the Contributors page}"
 role="${OMARCHY_WORKER_ROLE:-}"
-case "$role" in ""|pool|review|community) ;; *) echo "omarchy-worker: OMARCHY_WORKER_ROLE must be pool, review or community (or unset)" >&2; exit 2 ;; esac
+case "$role" in ""|pool|review|community|agent) ;; *) echo "omarchy-worker: OMARCHY_WORKER_ROLE must be pool, review, community or agent (or unset)" >&2; exit 2 ;; esac
+if [[ "$role" == agent ]]; then
+  # The agent alone, for the containers that cannot run it. Claude Code is
+  # installed below the same way a worker installs it; then the proxy.
+  if [[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" && -z "${CLAUDE_CODE_BIN:-}" ]] && ! command -v claude >/dev/null 2>&1 && [[ ! -x "$HOME/.local/bin/claude" ]]; then
+    curl -fsSL https://claude.ai/install.sh | bash >/dev/null 2>&1 || echo "omarchy-worker: Claude Code did not install; the proxy will answer 502 until it does" >&2
+  fi
+  export PATH="$HOME/.local/bin:$PATH"
+  exec python3 /usr/local/lib/omarchy-factory/bin/agent-proxy
+fi
+: "${OMARCHY_WORKER_TOKEN:?OMARCHY_WORKER_TOKEN is required: register a worker on the Contributors page}"
 
 self="$(curl -sS --fail-with-body --max-time 30 "$OMARCHY_API/api/v1/factory/workers/self" -H "authorization: Bearer $OMARCHY_WORKER_TOKEN" 2>&1)" \
   || { echo "omarchy-worker: the pool did not accept this token: $self" >&2; exit 2; }
@@ -68,7 +81,7 @@ agent=""; for k in ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN OPENAI_API_KEY GEMI
 # it (it is Anthropic's, under their terms); the official installer fetches
 # the release for this architecture, checksum verified, into this
 # container's home at first start. ~200 MB, once per container.
-if [[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" && -z "${CLAUDE_CODE_BIN:-}" ]] && ! command -v claude >/dev/null 2>&1 && [[ ! -x "$HOME/.local/bin/claude" ]]; then
+if [[ "${FACTORY_PROVIDER:-claude-code}" == claude-code && -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" && -z "${CLAUDE_CODE_BIN:-}" ]] && ! command -v claude >/dev/null 2>&1 && [[ ! -x "$HOME/.local/bin/claude" ]]; then
   echo "omarchy-worker: CLAUDE_CODE_OAUTH_TOKEN is set; installing Claude Code (claude.ai/install.sh) for the audits and drafts" >&2
   if curl -fsSL https://claude.ai/install.sh | bash >/dev/null 2>&1 && [[ -x "$HOME/.local/bin/claude" ]]; then
     echo "omarchy-worker: Claude Code $("$HOME/.local/bin/claude" --version 2>/dev/null | head -n1) installed" >&2

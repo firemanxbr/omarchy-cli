@@ -1,0 +1,85 @@
+#!/usr/bin/env python3
+"""The agent, served over HTTP to a container that cannot run it itself.
+
+Claude Code is a Bun executable and dies under qemu user emulation
+(`uncaught target signal 6`), so the project's emulated x86_64 community
+worker on an aarch64 host has no agent of its own (2026-09-15). This
+process runs natively beside it — the same image, OMARCHY_WORKER_ROLE=agent,
+the same CLAUDE_CODE_OAUTH_TOKEN — and answers the Anthropic Messages API
+shape that factory/bin/agent.py already speaks:
+
+    POST /v1/messages   {model, max_tokens, system, messages:[{role:user, content}]}
+                        → {content:[{type:text, text}], model, stop_reason, usage}
+    GET  /health        the probe (agent.py --probe), as JSON
+
+The emulated worker points at it with FACTORY_PROVIDER=anthropic,
+ANTHROPIC_BASE_URL=http://agent-proxy:8790 and any ANTHROPIC_API_KEY (the
+key is never read here; the compose network is the only caller). One
+request at a time, in order — the agent is one subscription.
+"""
+import json
+import os
+import sys
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import agent  # noqa: E402
+
+LOCK = threading.Lock()
+PORT = int(os.environ.get("AGENT_PROXY_PORT", "8790"))
+
+
+class Handler(BaseHTTPRequestHandler):
+    server_version = "omarchy-agent-proxy/1"
+
+    def _json(self, status, body):
+        data = json.dumps(body).encode()
+        self.send_response(status)
+        self.send_header("content-type", "application/json")
+        self.send_header("content-length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def log_message(self, fmt, *args):  # one line per request, to stderr, no client noise
+        sys.stderr.write("agent-proxy: " + (fmt % args) + "\n")
+
+    def do_GET(self):  # noqa: N802
+        if self.path != "/health":
+            return self._json(404, {"error": "GET /health or POST /v1/messages"})
+        with LOCK:
+            ok, detail = agent.probe()
+        return self._json(200 if ok else 503, {"ok": ok, **detail})
+
+    def do_POST(self):  # noqa: N802
+        if self.path != "/v1/messages":
+            return self._json(404, {"error": "POST /v1/messages"})
+        try:
+            body = json.loads(self.rfile.read(int(self.headers.get("content-length", "0")) or 0) or b"{}")
+        except json.JSONDecodeError:
+            return self._json(400, {"type": "error", "error": {"type": "invalid_request_error", "message": "body is not JSON"}})
+        system = body.get("system") or ""
+        if isinstance(system, list):  # the API also accepts a list of text blocks
+            system = "\n".join(b.get("text", "") for b in system if isinstance(b, dict))
+        user = ""
+        for m in body.get("messages") or []:
+            if m.get("role") == "user":
+                c = m.get("content")
+                user = c if isinstance(c, str) else "\n".join(b.get("text", "") for b in c if isinstance(b, dict))
+        max_tokens = int(body.get("max_tokens") or 4000)
+        with LOCK:
+            try:
+                text, model = agent.complete(system, user, max_tokens=max_tokens, timeout=int(os.environ.get("AGENT_PROXY_TIMEOUT", "600")))
+            except SystemExit as e:
+                return self._json(502, {"type": "error", "error": {"type": "api_error", "message": str(e)[:1000]}})
+        return self._json(200, {"id": "msg_proxy", "type": "message", "role": "assistant", "model": model, "stop_reason": "end_turn",
+                                "content": [{"type": "text", "text": text}], "usage": {"input_tokens": 0, "output_tokens": 0}})
+
+
+if __name__ == "__main__":
+    found = agent.provider()
+    if not found:
+        print("agent-proxy: no agent key in the environment; nothing to serve", file=sys.stderr)
+        sys.exit(2)
+    print(f"agent-proxy: serving {found[0]}/{agent.model_for(*found)} on :{PORT} (POST /v1/messages, GET /health)", file=sys.stderr)
+    ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()

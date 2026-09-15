@@ -59,6 +59,9 @@ jobs:
       - name: The agent's claude-code provider, against a fake claude
         working-directory: .
         run: python3 tests/agent-claude-code.py
+      - name: The agent proxy, against a fake agent
+        working-directory: .
+        run: python3 tests/agent-proxy.py
       - name: The setup script, against an Asahi-like pacman.conf
         working-directory: .
         run: bash tests/setup-script.sh

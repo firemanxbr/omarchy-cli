@@ -36,7 +36,7 @@ changed=0
 # review pair next, the pool pair last: the pool's own jobs pause least.
 # Only the services the active profiles enable (compose.yml: `emulated`).
 enabled="$(docker compose config --services 2>/dev/null | tr '\n' ' ')"
-for svc in community-x86_64 community-aarch64 review-x86_64 review-aarch64 pool-x86_64 pool-aarch64; do
+for svc in agent-proxy community-x86_64 community-aarch64 review-x86_64 review-aarch64 pool-x86_64 pool-aarch64; do
   [[ " $enabled " == *" $svc "* ]] || continue
   # Pull again before each service: a drain can take hours (a pool worker
   # finishes its sync first) and the image that was newest at the start may
@@ -62,5 +62,5 @@ for svc in community-x86_64 community-aarch64 review-x86_64 review-aarch64 pool-
     && log "$svc: running $(docker inspect -f '{{.Image}}' "$(docker compose ps -q "$svc")" | cut -c8-19)" \
     || log "$svc: FAILED to replace — docker compose logs $svc"
 done
-(( changed )) || log "nothing to roll out: the six run the latest image"
+(( changed )) || log "nothing to roll out: every service runs the latest image"
 (( check )) || docker image prune -f >/dev/null 2>&1 || true
