@@ -218,8 +218,8 @@ async function touchWorker(env: Env, w: { worker: string; arch: string; hostname
     .run();
 }
 
-/** The work that needs an agent that answers: a draft (the PKGBUILD is the agent's) and an audit (the second agent). */
-export const AGENT_SCOPE = "(kind = 'audit' OR (kind = 'build' AND pkgbuild_ref LIKE 'draft:%'))";
+/** The work that needs an agent that answers: a draft (the PKGBUILD is the agent's), the project's review build (its recipe is), and an audit (the second agent). */
+export const AGENT_SCOPE = "(kind = 'audit' OR (kind = 'build' AND (pkgbuild_ref LIKE 'draft:%' OR pkgbuild_ref LIKE 'review:%')))";
 
 /** A worker is ready for what it declares when it is alive and, if that includes agent work, its agent answered last time. */
 export function workerReady(w: { last_seen: string; kinds: string | null; agent: string | null; agent_status: string | null; trust: string }, aliveSince: number): boolean {
@@ -229,7 +229,7 @@ export function workerReady(w: { last_seen: string; kinds: string | null; agent:
   return !needsAgent || w.agent_status === "ok";
 }
 
-const ALL_KINDS = ["build", "sync", "promote", "rollback", "render", "health", "security", "metrics", "gc", "enqueue", "audit", "verify", "relayout"];
+const ALL_KINDS = ["build", "sync", "promote", "rollback", "render", "health", "security", "metrics", "gc", "enqueue", "audit", "verify", "relayout", "publish"];
 /** Jobs any architecture can run: they read the index or the staging area, not packages of one arch. */
 const ANY_ARCH_KINDS = "'metrics', 'gc', 'security', 'promote', 'audit', 'verify', 'relayout'";
 
@@ -302,8 +302,8 @@ export async function handleClaim(request: Request, env: Env, actor: Actor): Pro
     lease_minutes: LEASE_MINUTES,
     repo: "https://github.com/firemanxbr/omarchy-pool",
     pkgbuild_path: task.kind === "build" && !(task.pkgbuild_ref.includes(":") || task.pkgbuild_ref.startsWith("draft")) ? `factory/pkgbuilds/${task.group}/${task.name}` : null,
-    // Where a community result goes: PUT these back with the job token.
-    upload: task.trust === "community" ? `/api/v1/factory/tasks/${task.id}/artifacts/<filename>` : null,
+    // Where a staged result goes — a contributor's build, or the project's review build: PUT these back with the job token.
+    upload: task.trust === "community" || params.review !== undefined ? `/api/v1/factory/tasks/${task.id}/artifacts/<filename>` : null,
   });
 }
 
@@ -348,7 +348,24 @@ export async function handleComplete(id: number, request: Request, env: Env, act
       .run();
     await env.DB.prepare("UPDATE build_workers SET last_seen = ?, current_task = NULL, builds_done = builds_done + 1 WHERE id = ?").bind(now(), who).run();
     const p = task.params ? (JSON.parse(task.params) as Record<string, string>) : {};
-    const label = task.kind === "audit" ? `${p.name} (task ${p.task})` : [p.source, p.arch, p.ring, p.from && p.to ? `${p.from} → ${p.to}` : null].filter(Boolean).join("/");
+    const label = task.kind === "audit" ? `${p.name} (task ${p.task})` : task.kind === "publish" ? `${p.name} ${p.version ?? ""} (${p.arch})` : [p.source, p.arch, p.ring, p.from && p.to ? `${p.from} → ${p.to}` : null].filter(Boolean).join("/");
+    if (task.kind === "publish" && p.task) {
+      // The project's approved build is in the pool: the registration is published, the build's row says so, the seal is written next to the object.
+      const built = Number(p.task);
+      const res = (b.result ?? {}) as { sha256?: string; filename?: string; version?: string };
+      await env.DB.batch([
+        env.DB.prepare("UPDATE factory_packages SET status = 'published', detail = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE name = ?")
+          .bind(`${res.version ?? p.version ?? ""} for ${p.arch} built by the project (task ${built}), approved, signed, in edge`, task.name),
+        env.DB.prepare("UPDATE build_tasks SET status = 'done', result_sha256 = COALESCE(?, result_sha256), publish = 1 WHERE id = ? AND status = 'staged'").bind(res.sha256 ?? null, built),
+      ]);
+      if (res.sha256) {
+        try {
+          await writeAttestation(env, res.sha256);
+        } catch (e) {
+          await event(env, "build", "warn", `${task.name}: attestation not written — ${String(e)}`, { task: built, sha256: res.sha256 });
+        }
+      }
+    }
     if (task.kind === "audit" && p.task) {
       // The second agent's report joins the evidence on the record.
       const audited = await env.DB.prepare("SELECT name, staged_prefix FROM build_tasks WHERE id = ?").bind(Number(p.task)).first<{ name: string; staged_prefix: string | null }>();
@@ -358,10 +375,12 @@ export async function handleComplete(id: number, request: Request, env: Env, act
     return json({ task: id, status: "done" });
   }
   if (!b.sha256 || !b.filename) return json({ error: "sha256 and filename are required" }, 400);
-  if (task.trust === "community") {
-    // The result must be in the contributor's staging workspace: the
-    // package named, its PKGBUILD and the build log.
-    const prefix = `staging/${task.owner}/${task.name}/${task.id}/`;
+  const review = task.params ? (JSON.parse(task.params) as { review?: number }).review : undefined;
+  if (task.trust === "community" || review !== undefined) {
+    // The result must be in staging — the contributor's workspace, or the
+    // project's for a review build: the package named, its PKGBUILD and
+    // the build log.
+    const prefix = `staging/${review !== undefined ? "@project" : task.owner}/${task.name}/${task.id}/`;
     const have = (await env.DB.prepare("SELECT key FROM staging_objects WHERE task_id = ?").bind(id).all<{ key: string }>()).results.map((r) => r.key.slice(prefix.length));
     const missing = [b.filename, "PKGBUILD", "build.log"].filter((f) => !have.includes(f));
     if (missing.length) return json({ error: `upload ${missing.join(", ")} to staging first (PUT /factory/tasks/${id}/artifacts/<filename>)`, have }, 409);
@@ -379,8 +398,8 @@ export async function handleComplete(id: number, request: Request, env: Env, act
     // A newer build of the same package and architecture supersedes the
     // staged ones before it: one row per package in the review queue, the
     // audits of the old ones cancelled with them (their evidence stays).
-    const older = await env.DB.prepare("SELECT id FROM build_tasks WHERE kind = 'build' AND trust = 'community' AND status = 'staged' AND name = ? AND arch = ? AND id < ?")
-      .bind(task.name, task.arch, id)
+    const older = await env.DB.prepare("SELECT id FROM build_tasks WHERE kind = 'build' AND trust = ? AND status = 'staged' AND name = ? AND arch = ? AND id < ?")
+      .bind(task.trust, task.name, task.arch, id)
       .all<{ id: number }>();
     for (const o of older.results) {
       await env.DB.batch([
@@ -389,8 +408,11 @@ export async function handleComplete(id: number, request: Request, env: Env, act
       ]);
     }
     await env.DB.prepare("UPDATE factory_packages SET status = 'staged', detail = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE name = ?")
-      .bind(`${b.version ?? ""} built for ${task.arch} by ${who}; waiting for a maintainer`, task.name).run();
-    await event(env, "build", "ok", `${task.name} ${b.version ?? ""} built for ${task.arch} by ${who}${b.duration_ms ? " in " + Math.round(b.duration_ms / 60000) + " min" : ""} — staged for a maintainer (${task.owner})`, { task: id, arch: task.arch, sha256: b.sha256, filename: b.filename, worker: who, owner: task.owner, staged_prefix: prefix, duration_ms: b.duration_ms ?? null });
+      .bind(review !== undefined ? `${b.version ?? ""} for ${task.arch} built by the project (task ${id}), gate ${vet?.verdict ?? "n/a"}${vet?.warnings ? " with " + vet.warnings + " warning(s)" : ""}; waiting for a maintainer's approval` : `${b.version ?? ""} built for ${task.arch} by ${who}; waiting for a maintainer`, task.name).run();
+    await event(env, "build", "ok", review !== undefined
+      ? `${task.name} ${b.version ?? ""} built by the project for ${task.arch} on ${who}${b.duration_ms ? " in " + Math.round(b.duration_ms / 60000) + " min" : ""} — from ${task.owner ?? "?"}'s build ${review}, staged for approval`
+      : `${task.name} ${b.version ?? ""} built for ${task.arch} by ${who}${b.duration_ms ? " in " + Math.round(b.duration_ms / 60000) + " min" : ""} — staged for a maintainer (${task.owner})`,
+      { task: id, arch: task.arch, sha256: b.sha256, filename: b.filename, worker: who, owner: task.owner, staged_prefix: prefix, duration_ms: b.duration_ms ?? null, review: review ?? null });
     // The second agent: a project worker whose owner set an agent key reads
     // the staged PKGBUILD, log and .PKGINFO and attaches a report to the
     // evidence (audit.json, audit.md in the same staging prefix). It runs
@@ -457,8 +479,9 @@ export async function handleFail(id: number, request: Request, env: Env, actor: 
   const exhausted = b.final === true || task.attempts >= task.max_attempts;
   // What the worker uploaded before giving up — the log, the PKGBUILD, the
   // gate's verdict — is evidence too: a failed attempt is on the record.
-  if (task.trust === "community" && task.kind === "build" && task.owner) {
-    await recordEvidence(env, task.name, await requestOf(env, task.name), id, `staging/${task.owner}/${task.name}/${task.id}/`, ["PKGBUILD", "build.log", "vet.json", "tests.log"]);
+  const review = task.kind === "build" && task.params ? (JSON.parse(task.params) as { review?: number }).review : undefined;
+  if (task.kind === "build" && (task.trust === "community" ? task.owner : review !== undefined)) {
+    await recordEvidence(env, task.name, await requestOf(env, task.name), id, `staging/${review !== undefined ? "@project" : task.owner}/${task.name}/${task.id}/`, ["PKGBUILD", "build.log", "vet.json", "tests.log"]);
   }
   // A requeued task goes behind its peers (priority + 10) so one broken
   // PKGBUILD does not hold the queue.
@@ -470,6 +493,9 @@ export async function handleFail(id: number, request: Request, env: Env, actor: 
   await env.DB.prepare("UPDATE build_workers SET last_seen = ?, current_task = NULL, builds_failed = builds_failed + 1 WHERE id = ?").bind(now(), who).run();
   if (task.trust === "community" && exhausted) {
     await env.DB.prepare("UPDATE factory_packages SET status = 'registered', detail = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE name = ?").bind(`build failed on ${who}: ${(b.error ?? "").slice(0, 160)}`, task.name).run();
+  } else if (review !== undefined && exhausted) {
+    // The project's build failed: the contributor's stays staged, and the review row says what the project ran into.
+    await env.DB.prepare("UPDATE factory_packages SET detail = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE name = ?").bind(`the project's build (task ${id}) failed on ${who}: ${(b.error ?? "").slice(0, 160)}`, task.name).run();
   }
   await event(env, "build", exhausted ? "error" : "warn", `${task.name} for ${task.arch} failed on ${who} (attempt ${task.attempts}/${task.max_attempts})${b.final ? " — the recipe's, not retried" : exhausted ? " — giving up" : " — back in the queue"}: ${(b.error ?? "").slice(0, 120)}`, { task: id, arch: task.arch, worker: who, attempts: task.attempts, exhausted, final: b.final === true });
   return json({ task: id, status: exhausted ? "failed" : "queued", attempts: task.attempts });

@@ -299,7 +299,8 @@ const CSS = String.raw`
   .ring-heads { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); margin: 12px 0 10px; }
   .ring-head { background: var(--panel-2); padding: 8px 10px; display: grid; gap: 1px; text-decoration: none; color: inherit; min-width: 0; } .ring-head:hover { background: var(--panel); }
   .ring-head .k { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; } .ring-head b { font-family: Geist, sans-serif; font-size: 20px; font-weight: 600; line-height: 1.15; } .ring-head .s { font-size: 11.5px; color: var(--dim); line-height: 1.4; }
-  .feed a.row { text-decoration: none; color: inherit; cursor: pointer; } .feed a.row:hover .what { color: var(--text); }
+  .feed a.row { text-decoration: none; color: inherit; cursor: pointer; }
+  tr.project-row td { background: var(--panel-2); } tr.project-row td:first-child { box-shadow: inset 3px 0 0 var(--green); } .feed a.row:hover .what { color: var(--text); }
   .charts.three { grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); }
   .charts.three .chart { display: flex; flex-direction: column; } .charts.three .chart > .mini { margin-top: auto; }
   .charts.three #c-sec { display: flex; flex-direction: column; flex: 1; } .charts.three #c-sec .hrows { flex: 1; align-content: space-evenly; } .charts.three #c-sec > p { margin-top: auto; }

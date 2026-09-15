@@ -65,13 +65,36 @@ export async function factoryChain(env: Env, sha256: string): Promise<Record<str
   // maintainer wrote and merged, and the approval it answers is linked to
   // the build when it lands (handleComplete). Both chains read the same way.
   const staged = ref.startsWith("staging:") ? Number(ref.slice(8)) : null;
+  // Since the project builds again from the evidence (review:<task>, PR C2), the recipe is the
+  // project's agent's own; the contributor's build is what it learned from.
+  const review = ref.startsWith("review:") ? Number(ref.slice(7)) : null;
   const recipe: Record<string, unknown> = { ref };
   const approval = await env.DB.prepare("SELECT by, note, created_at, task_id FROM approvals WHERE decision = 'approved' AND (rebuild_task = ?1 OR task_id = ?2) ORDER BY id DESC LIMIT 1")
     .bind(build.id, staged ?? -1)
     .first<{ by: string; note: string | null; created_at: string; task_id: number }>();
   let sourceBuild: Record<string, unknown> | null = null;
   let audit: Record<string, unknown> | null = null;
-  const learned = staged ?? approval?.task_id ?? null;
+  const learned = staged ?? review ?? (approval && approval.task_id !== build.id ? approval.task_id : null);
+  const auditOf = async (task: number): Promise<Record<string, unknown> | null> => {
+    const a = await env.DB.prepare("SELECT status, result FROM build_tasks WHERE kind = 'audit' AND json_extract(params, '$.task') = ? ORDER BY id DESC LIMIT 1").bind(task).first<{ status: string; result: string | null }>();
+    if (!a) return null;
+    if (a.status === "done" && a.result) {
+      try {
+        const r = JSON.parse(a.result) as { verdict?: string; summary?: string; model?: string; findings?: unknown[] };
+        return { of_task: task, verdict: r.verdict ?? null, summary: r.summary ?? null, agent: r.model ?? null, findings: Array.isArray(r.findings) ? r.findings.length : null, report: `/api/v1/factory/tasks/${task}/artifacts/audit.md` };
+      } catch {
+        return { of_task: task, verdict: null, error: "unreadable report" };
+      }
+    }
+    return { of_task: task, verdict: null, status: a.status };
+  };
+  if (review) {
+    // The project's own build: its recipe, its gate, its audit, in the project's staging space.
+    recipe.by = "the project's agent, from the evidence";
+    recipe.pkgbuild = `/api/v1/factory/tasks/${build.id}/artifacts/PKGBUILD`;
+    recipe.learned_from = `/api/v1/factory/tasks/${review}/artifacts/PKGBUILD`;
+    audit = await auditOf(build.id);
+  }
   if (learned) {
     const src = await env.DB.prepare("SELECT * FROM build_tasks WHERE id = ?").bind(learned).first<TaskRow>();
     if (src) {
@@ -80,19 +103,11 @@ export async function factoryChain(env: Env, sha256: string): Promise<Record<str
       if (staged) {
         recipe.from = src.pkgbuild_ref;
         recipe.pkgbuild = `/api/v1/factory/tasks/${src.id}/artifacts/PKGBUILD`;
-      } else recipe.learned_from = `/api/v1/factory/tasks/${src.id}/artifacts/PKGBUILD`;
-      const a = await env.DB.prepare("SELECT status, result FROM build_tasks WHERE kind = 'audit' AND json_extract(params, '$.task') = ? ORDER BY id DESC LIMIT 1").bind(src.id).first<{ status: string; result: string | null }>();
-      if (a?.status === "done" && a.result) {
-        try {
-          const r = JSON.parse(a.result) as { verdict?: string; summary?: string; model?: string; findings?: unknown[] };
-          audit = { verdict: r.verdict ?? null, summary: r.summary ?? null, agent: r.model ?? null, findings: Array.isArray(r.findings) ? r.findings.length : null, report: `/api/v1/factory/tasks/${src.id}/artifacts/audit.md` };
-        } catch {
-          audit = { verdict: null, error: "unreadable report" };
-        }
-      } else if (a) audit = { verdict: null, status: a.status };
+      } else if (!review) recipe.learned_from = `/api/v1/factory/tasks/${src.id}/artifacts/PKGBUILD`;
+      if (!audit) audit = await auditOf(src.id);
     }
   }
-  if (!staged) {
+  if (!staged && !review) {
     recipe.repository = REPO_URL;
     recipe.path = `factory/pkgbuilds/${build.group}/${build.name}/PKGBUILD`;
     recipe.commit = ref;
@@ -101,7 +116,7 @@ export async function factoryChain(env: Env, sha256: string): Promise<Record<str
   return {
     builder: { worker: builder.worker, trust: "project" },
     buildType: "makepkg in a fresh Arch Linux container (factory/worker/omarchy-build-worker.sh --inside)",
-    build: { task: build.id, arch: build.arch, version: build.version, started_at: build.started_at, finished_at: build.finished_at, duration_ms: build.duration_ms, attempts: build.attempts, log: `/api/v1/factory/tasks/${build.id}` },
+    build: { task: build.id, arch: build.arch, version: build.version, started_at: build.started_at, finished_at: build.finished_at, duration_ms: build.duration_ms, attempts: build.attempts, log: review ? `/api/v1/factory/tasks/${build.id}/artifacts/build.log` : `/api/v1/factory/tasks/${build.id}`, gate: vetOf(build.result) },
     recipe,
     source_build: sourceBuild,
     audit,

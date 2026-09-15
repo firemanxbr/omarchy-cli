@@ -199,76 +199,116 @@ describe("a community build, its audit and the review", () => {
     task = again;
   });
 
-  it("a maintainer of the group approves — never their own package, no exception — and nothing of the contributor's is queued", async () => {
-    expect((await call("POST", `/factory/tasks/${task}/approve`, {}, "omc_alice")).status).toBe(403);
-    expect((await call("POST", `/factory/tasks/${task}/reject`, {}, "omc_m1")).status).toBe(400); // a note is required
-    // 'alice' brought it, so m1 may approve. Make it m1's own first: the sole maintainer of the group, still 403 — no bootstrap.
-    await env.DB.prepare("UPDATE build_tasks SET owner = 'm1' WHERE id = ?").bind(task).run();
-    const sole = await call("POST", `/factory/tasks/${task}/approve`, {}, "omc_m1");
+  it("a contributor's build cannot be approved; a maintainer — never the owner — has the project build it", async () => {
+    // Nothing of the contributor's is ever what users get: the approval is refused outright.
+    const refused = await call("POST", `/factory/tasks/${task}/approve`, {}, "omc_m2");
+    expect(refused.status).toBe(409);
+    expect(refused.json.error).toMatch(/Have the project build it first/);
+    expect((await call("POST", `/factory/tasks/${task}/build`, {}, "omc_alice")).status).toBe(403);
+    // The owner is who requested the package (the registration), not who happened to build it.
+    await env.DB.prepare("UPDATE factory_packages SET owner = 'm1' WHERE name = 'mine'").run();
+    const own = await call("POST", `/factory/tasks/${task}/build`, {}, "omc_m1");
+    expect(own.status).toBe(403);
+    expect(own.json.error).toMatch(/another maintainer/);
+    await env.DB.prepare(`UPDATE factory_groups SET maintainers = '["m1","m2"]' WHERE name = 'community'`).run();
+    const asked = await call("POST", `/factory/tasks/${task}/build`, { note: "reads well" }, "omc_m2");
+    expect(asked.status, JSON.stringify(asked.json)).toBe(200);
+    expect(asked.json).toMatchObject({ from: task, by: "m2", task: expect.any(Number) });
+    expect((await call("POST", `/factory/tasks/${task}/build`, {}, "omc_m2")).status).toBe(409); // once at a time
+    const t = await env.DB.prepare("SELECT trust, kind, pkgbuild_ref, publish, owner, params FROM build_tasks WHERE id = ?").bind(asked.json.task).first<{ trust: string; kind: string; pkgbuild_ref: string; publish: number; owner: string; params: string }>();
+    expect(t).toMatchObject({ trust: "project", kind: "build", pkgbuild_ref: `review:${task}`, publish: 0, owner: "m1" });
+    expect(JSON.parse(t!.params)).toMatchObject({ review: task, request: req, project: "https://github.com/alice/mine", by: "m2", description: null });
+    // No build ever starts from the staged artifact itself.
+    expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM build_tasks WHERE pkgbuild_ref LIKE 'staging:%' AND kind = 'build'").first<{ n: number }>())!.n).toBe(0);
+    // The review row says the project is on it.
+    const row = (await call("GET", "/factory/review")).json.staged.find((x: any) => x.id === task);
+    expect(row).toMatchObject({ kind: "contributor", project_build: { id: asked.json.task, status: "queued" } });
+    projectTask = asked.json.task;
+  });
+
+  let projectTask: number;
+  let projectToken: string;
+
+  it("the project's review build runs on a trusted worker with its agent, stages its own package and evidence, and queues its audit", async () => {
+    // A worker whose agent is down is not handed it (a review build drafts with the agent); one whose agent answers is.
+    expect((await call("POST", "/factory/claim", { arch: "aarch64", kinds: ["build"], agent: "claude-code/claude-sonnet-5", agent_status: "error" }, "omw_w1")).status).toBe(204);
+    const c = await call("POST", "/factory/claim", { arch: "aarch64", kinds: ["build"], agent: "claude-code/claude-sonnet-5", agent_status: "ok" }, "omw_w1");
+    expect(c.status).toBe(200);
+    expect(c.json.task.id).toBe(projectTask);
+    expect(c.json.task.pkgbuild_ref).toBe(`review:${task}`);
+    expect(c.json.upload).toBe(`/api/v1/factory/tasks/${projectTask}/artifacts/<filename>`);
+    expect(c.json.pkgbuild_path).toBeNull();
+    projectToken = c.json.token;
+    // Everything to the project's staging space — no quota, its own prefix.
+    for (const f of ["PKGBUILD", "build.log", "PKGINFO", "tests.log", "mine-1.0-1-aarch64.pkg.tar.zst"]) {
+      expect((await call("PUT", `/factory/tasks/${projectTask}/artifacts/${f}`, undefined, projectToken, `the project's ${f}`)).status).toBe(201);
+    }
+    await call("PUT", `/factory/tasks/${projectTask}/artifacts/vet.json`, undefined, projectToken, JSON.stringify({ schema: "omarchy-pool/vet/1", verdict: "pass", checks: [{ name: "smoke", status: "pass", detail: "" }] }));
+    expect((await env.DB.prepare("SELECT key FROM staging_objects WHERE task_id = ? AND key LIKE '%PKGBUILD'").bind(projectTask).first<{ key: string }>())!.key).toBe(`staging/@project/mine/${projectTask}/PKGBUILD`);
+    const st = await call("POST", `/factory/tasks/${projectTask}/complete`, { sha256: "e".repeat(64), filename: "mine-1.0-1-aarch64.pkg.tar.zst", version: "1.0-1", duration_ms: 90000 }, projectToken);
+    expect(st.json.status).toBe("staged");
+    expect(await env.DB.prepare("SELECT status, detail FROM factory_packages WHERE name = 'mine'").first()).toMatchObject({ status: "staged", detail: expect.stringMatching(/built by the project \(task \d+\), gate pass/) });
+    // Its evidence is on the record, its audit queued, and the review shows it as the project's — the contributor's row points at it.
+    expect(await env.PACKAGES.head(`factory/mine/${req}/build-${projectTask}/PKGBUILD`)).not.toBeNull();
+    expect(await env.DB.prepare("SELECT status FROM build_tasks WHERE kind = 'audit' AND json_extract(params, '$.task') = ?").bind(projectTask).first()).toMatchObject({ status: "queued" });
+    const rows = (await call("GET", "/factory/review")).json.staged;
+    expect(rows.find((x: any) => x.id === projectTask)).toMatchObject({ kind: "project", from: task, owner: "m1", vet: { verdict: "pass" } });
+    expect(rows.find((x: any) => x.id === task)).toMatchObject({ project_build: { id: projectTask, status: "staged" } });
+  });
+
+  it("a maintainer — never the owner, no exception — approves the project's build; a publish job carries it into the pool; the seal tells the chain", async () => {
+    await env.DB.prepare(`UPDATE factory_groups SET maintainers = '["m1"]' WHERE name = 'community'`).run();
+    const sole = await call("POST", `/factory/tasks/${projectTask}/approve`, {}, "omc_m1");
     expect(sole.status).toBe(403);
     expect(sole.json.error).toMatch(/one maintainer cannot approve/);
     await env.DB.prepare(`UPDATE factory_groups SET maintainers = '["m1","m2"]' WHERE name = 'community'`).run();
-    expect((await call("POST", `/factory/tasks/${task}/approve`, {}, "omc_m1")).status).toBe(403);
-    const other = await call("POST", `/factory/tasks/${task}/approve`, { note: "looks right" }, "omc_m2");
-    expect(other.status).toBe(200);
-    expect(other.json).toMatchObject({ decision: "approved", by: "m2", recipe: "factory/pkgbuilds/community/mine/PKGBUILD" });
-    expect((await call("POST", `/factory/tasks/${task}/approve`, {}, "omc_m2")).status).toBe(409);
-    // No task was queued from the staged artifacts: the project builds only what a maintainer merges.
-    expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM build_tasks WHERE pkgbuild_ref LIKE 'staging:%' AND kind = 'build'").first<{ n: number }>())!.n).toBe(0);
-    // Approved builds leave the review queue; the record keeps the decision, without a build yet.
-    expect((await call("GET", "/factory/review")).json.staged.some((t: any) => t.id === task)).toBe(false);
-    const approvals = await call("GET", "/factory/approvals");
-    expect(approvals.json.approvals[0]).toMatchObject({ task_id: task, decision: "approved", by: "m2", rebuild_task: null });
-    // The profile's track record: m2 signed one approval in 'community'.
-    const m2 = await call("GET", "/users/m2");
-    expect(m2.json.record).toEqual([{ group: "community", contributed: { approved: 0, staged: 0, bumps: 0, donated: 0, rejected: 0 }, maintained: { approvals: 1, rejections: 0, rebuilds_failed: 0 }, score: 2 }]);
-  });
-
-  it("the project's build of the merged recipe completes with the seal: linked to the approval, the chain as JSON, an attestation next to the object", async () => {
-    // The recipe m2 wrote landed on main: the enqueue job queues the project build at that commit.
-    await env.DB.prepare(`UPDATE factory_packages SET owner = 'm1', status = 'approved' WHERE name = 'mine'`).run();
-    const q = await call("POST", "/factory/enqueue", { name: "mine", group: "community", pkgbuild_ref: "9f1c2ab", reason: "merged", arches: ["aarch64"], version: "1.0-1" }, "omc_m2");
-    expect(q.status, JSON.stringify(q.json)).toBe(201);
-    // The trusted worker claims it, publishes the package to the pool with the job token, completes.
-    const c = await call("POST", "/factory/claim", { arch: "aarch64", kinds: ["build"] }, "omw_w1");
+    const other = await call("POST", `/factory/tasks/${projectTask}/approve`, { note: "looks right" }, "omc_m2");
+    expect(other.status, JSON.stringify(other.json)).toBe(200);
+    expect(other.json).toMatchObject({ task: projectTask, decision: "approved", by: "m2", publish: expect.any(Number) });
+    expect((await call("POST", `/factory/tasks/${projectTask}/approve`, {}, "omc_m2")).status).toBe(409);
+    expect(await env.DB.prepare("SELECT task_id, rebuild_task FROM approvals ORDER BY id DESC LIMIT 1").first()).toEqual({ task_id: projectTask, rebuild_task: projectTask });
+    expect(await env.DB.prepare("SELECT status FROM factory_packages WHERE name = 'mine'").first()).toMatchObject({ status: "approved" });
+    // The publish job: a project worker takes it; its token may read the staged package (a maintainer's privilege otherwise).
+    const pub = await env.DB.prepare("SELECT kind, trust, params FROM build_tasks WHERE id = ?").bind(other.json.publish).first<{ kind: string; trust: string; params: string }>();
+    expect(pub).toMatchObject({ kind: "publish", trust: "project" });
+    expect(JSON.parse(pub!.params)).toMatchObject({ task: projectTask, files: ["mine-1.0-1-aarch64.pkg.tar.zst"], by: "m2" });
+    const c = await call("POST", "/factory/claim", { arch: "aarch64", kinds: ["publish"] }, "omw_w1");
     expect(c.status).toBe(200);
-    expect(c.json.task.pkgbuild_ref).toBe("9f1c2ab");
+    expect(c.json.task.id).toBe(other.json.publish);
+    const ctx = createExecutionContext();
+    const pk = await worker.fetch(new Request(`${API}/factory/tasks/${projectTask}/artifacts/mine-1.0-1-aarch64.pkg.tar.zst`, { headers: { authorization: `Bearer ${c.json.token}` } }), env, ctx);
+    expect(pk.status).toBe(200);
+    expect(await pk.text()).toBe("the project's mine-1.0-1-aarch64.pkg.tar.zst");
+    expect((await worker.fetch(new Request(`${API}/factory/tasks/${projectTask}/artifacts/mine-1.0-1-aarch64.pkg.tar.zst`), env, createExecutionContext())).status).toBe(403);
+    // The worker publishes into the pool with the job token, renders, completes; the brain marks the registration published and writes the seal.
     const filename = "mine-1.0-1-aarch64.pkg.tar.zst";
     const bytes = new TextEncoder().encode("the project's build of mine");
     await env.PACKAGES.put(packageKey("factory", "aarch64", filename), bytes);
-    const s = "c".repeat(64);
+    const s = "e".repeat(64);
     const indexed = await call("POST", "/packages?source=factory&arch=aarch64", { schema_version: 1, name: "mine", version: "1.0-1", arch: "aarch64", sha256: s, filename, size_download: bytes.length, size_installed: 1, description: "mine", provides: ["mine"], requires: [], files: [] }, c.json.token);
     expect(indexed.status, JSON.stringify(indexed.json)).toBe(201);
-    const done = await call("POST", `/factory/tasks/${c.json.task.id}/complete`, { sha256: s, filename, version: "1.0-1", duration_ms: 60000 }, c.json.token);
-    expect(done.json).toMatchObject({ status: "done", attested: true });
-    // The build is what users get: the registration is published, the approval it answers keeps the task.
+    const done = await call("POST", `/factory/tasks/${c.json.task.id}/complete`, { summary: "published", result: { sha256: s, filename, version: "1.0-1", task: projectTask }, duration_ms: 5000 }, c.json.token);
+    expect(done.json).toMatchObject({ status: "done" });
     expect(await env.DB.prepare("SELECT status FROM factory_packages WHERE name = 'mine'").first()).toMatchObject({ status: "published" });
-    // (/factory/approvals is served from the edge cache for 30 s — the row itself is the check.)
-    expect(await env.DB.prepare("SELECT task_id, rebuild_task FROM approvals ORDER BY id DESC LIMIT 1").first()).toEqual({ task_id: task, rebuild_task: c.json.task.id });
-    // The seal: the whole chain, from the contributor's build that was the evidence to the approval and the merged recipe.
+    expect(await env.DB.prepare("SELECT status, result_sha256 FROM build_tasks WHERE id = ?").bind(projectTask).first()).toMatchObject({ status: "done", result_sha256: s });
+    // The seal: the project's own build and recipe, learned from the contributor's, approved by m2.
     const seal = (await call("GET", `/packages/${s}/provenance`)).json;
     expect(seal).toMatchObject({ origin: "factory", seal: "built by the Omarchy Pool", name: "mine", version: "1.0-1" });
     expect(seal.chain).toMatchObject({
       builder: { worker: "w1", trust: "project" },
-      build: { task: c.json.task.id, arch: "aarch64" },
-      recipe: { ref: "9f1c2ab", commit: "9f1c2ab", path: "factory/pkgbuilds/community/mine/PKGBUILD", learned_from: `/api/v1/factory/tasks/${task}/artifacts/PKGBUILD` },
-      source_build: { task, worker: "w3" },
-      approval: { by: "m2", note: "looks right", of_task: task },
+      build: { task: projectTask, arch: "aarch64", gate: { verdict: "pass" } },
+      recipe: { ref: `review:${task}`, by: "the project's agent, from the evidence", pkgbuild: `/api/v1/factory/tasks/${projectTask}/artifacts/PKGBUILD`, learned_from: `/api/v1/factory/tasks/${task}/artifacts/PKGBUILD` },
+      source_build: { task, worker: "w3", gate: null }, // the superseding build staged no vet.json
+      approval: { by: "m2", note: "looks right", of_task: projectTask },
     });
-    // The superseding build's audit never ran (the decision came first and cancelled it): the seal says so, and the summary skips the verdict.
-    expect(seal.chain.audit).toEqual({ verdict: null, status: "cancelled" });
+    expect(seal.chain.audit).toMatchObject({ of_task: projectTask, verdict: null, status: "cancelled" });
     expect(seal.summary).toBe("built by the project on w1, approved by m2, signed by the pool");
-    // The attestation: an in-toto Statement about exactly this object, in the pool beside it.
-    expect(seal.object).toBe(`${env.POOL_URL}/factory/aarch64/${filename}`);
     expect(seal.attestation.statement).toBe(`${env.POOL_URL}/factory/aarch64/${filename}.provenance.json`);
-    const obj = await env.PACKAGES.get(packageKey("factory", "aarch64", `${filename}.provenance.json`));
-    const statement = JSON.parse(await obj!.text());
+    const statement = JSON.parse(await (await env.PACKAGES.get(packageKey("factory", "aarch64", `${filename}.provenance.json`)))!.text());
     expect(statement._type).toBe("https://in-toto.io/Statement/v1");
-    expect(statement.subject).toEqual([{ name: filename, digest: { sha256: s } }]);
     expect(statement.predicate.approval.by).toBe("m2");
-    // A synced object has a seal too: where it came from and that its upstream signature was checked.
-    expect(seal.upstream).toBeUndefined();
   });
+
 });
 
 describe("a recipe's failure", () => {

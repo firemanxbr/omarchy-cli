@@ -66,7 +66,7 @@ import { handleTrustWorker, handleTrustList, handleNewToken } from "./routes/con
 import { groupsOf, GOVERNANCE_FILE } from "./governance";
 import { handleQueueJob } from "./jobs";
 import { isMaintainer } from "./routes/contributors";
-import { handleReviewList, handleApprove, handleReject, handleApprovals } from "./routes/review";
+import { handleReviewList, handleApprove, handleReject, handleApprovals, handleProjectBuild } from "./routes/review";
 import { handleAuthStart, handleAuthCallback, handleLogout } from "./routes/auth";
 import { handleSignPool } from "./routes/pool";
 import { signingEnabled, publicKey } from "./signing";
@@ -240,11 +240,11 @@ async function factoryRoutes(method: string, path: string, url: URL, request: Re
     const c = await contributorOf(request, env);
     return c ? handleNewToken(c, env) : json({ error: "sign in first" }, 401);
   }
-  // Maintainers: approve or reject a staged build.
-  if ((m = path.match(/^\/factory\/tasks\/(\d+)\/(approve|reject)$/)) && method === "POST") {
+  // Maintainers: have the project build a staged package, approve or reject a staged build.
+  if ((m = path.match(/^\/factory\/tasks\/(\d+)\/(approve|reject|build)$/)) && method === "POST") {
     const c = await contributorOf(request, env);
     if (!c) return json({ error: "a maintainer's contributor token is required" }, 401);
-    return m[2] === "approve" ? handleApprove(c, Number(m[1]), request, env) : handleReject(c, Number(m[1]), request, env);
+    return m[2] === "approve" ? handleApprove(c, Number(m[1]), request, env) : m[2] === "build" ? handleProjectBuild(c, Number(m[1]), request, env) : handleReject(c, Number(m[1]), request, env);
   }
   // Workers: registered ones only (own token), or a job's token. There is
   // no shared worker secret: every worker is somebody's registration.
@@ -374,7 +374,12 @@ async function api(method: string, path: string, url: URL, request: Request, env
     return c ? handleMe(c, env) : json({ error: "a contributor token is required (POST /factory/register)" }, 401);
   }
   if ((m = path.match(/^\/factory\/tasks\/(\d+)\/artifacts$/)) && method === "GET") return handleStagingList(Number(m[1]), env);
-  if ((m = path.match(/^\/factory\/tasks\/(\d+)\/artifacts\/([A-Za-z0-9][A-Za-z0-9._:+-]{0,200})$/)) && method === "GET") { const c = await contributorOf(request, env); return handleStagingGet(Number(m[1]), m[2], env, !!c && isMaintainer(c)); }
+  if ((m = path.match(/^\/factory\/tasks\/(\d+)\/artifacts\/([A-Za-z0-9][A-Za-z0-9._:+-]{0,200})$/)) && method === "GET") {
+    // A package in staging is for maintainers — and for the publish job that carries the project's build into the pool (its token names the task).
+    const c = await contributorOf(request, env);
+    const job = c ? null : await jobOf(request, env);
+    return handleStagingGet(Number(m[1]), m[2], env, (!!c && isMaintainer(c)) || (!!job && job.k === "publish" && job.s.includes(`staging:${m[1]}`)));
+  }
   if ((m = path.match(/^\/factory\/tasks\/(\d+)$/)) && method === "GET") return handleTask(Number(m[1]), env);
   if (path.startsWith("/factory/") && (method === "POST" || method === "PUT" || method === "DELETE" || method === "PATCH")) {
     const r = await factoryRoutes(method, path, url, request, env);

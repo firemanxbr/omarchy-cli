@@ -834,9 +834,25 @@ impl Api {
 
     /// Streams `url` to `dest`, returning the SHA-256 of what was written.
     pub fn download(&self, url: &str, dest: &Path) -> Result<String, RepoError> {
+        self.download_with(url, dest, false)
+    }
+
+    /// The same, with this client's token: what only a maintainer or this
+    /// job may read (a package in staging, for the publish job).
+    pub fn download_as_self(&self, url: &str, dest: &Path) -> Result<String, RepoError> {
+        self.download_with(url, dest, true)
+    }
+
+    fn download_with(&self, url: &str, dest: &Path, authed: bool) -> Result<String, RepoError> {
         use sha2::{Digest, Sha256};
         with_retry("download", || {
-            let mut resp = Self::check(self.http.get(url).send()?)?;
+            let req = self.http.get(url);
+            let req = if authed {
+                req.bearer_auth(&self.token)
+            } else {
+                req
+            };
+            let mut resp = Self::check(req.send()?)?;
             let mut file = std::fs::File::create(dest)?;
             let mut hasher = Sha256::new();
             let mut buf = vec![0u8; 1024 * 1024];

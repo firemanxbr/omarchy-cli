@@ -84,8 +84,15 @@ export function scopesFor(kind: string, id: number, trust: string, params: Recor
   const ring = typeof params.ring === "string" ? params.ring : "edge";
   switch (kind) {
     case "build":
-      if (trust === "community") s.push(`staging:${id}`);
+      // A contributor's build, and the project's review build (review:<task>, params.review), stage: the
+      // result waits for a maintainer. A recipe on main publishes.
+      if (trust === "community" || params.review !== undefined) s.push(`staging:${id}`);
       else s.push("pool:write", `release:${ring}`, `artifacts:*:${ring}`);
+      break;
+    case "publish":
+      // The project's approved build, from staging into the pool: reads the staged package (staging:<task>), writes edge.
+      if (typeof params.task === "number" || typeof params.task === "string") s.push(`staging:${params.task}`);
+      s.push("pool:write", "release:edge", "artifacts:*:edge");
       break;
     case "sync": {
       // One task syncs every source of an architecture, each into its own

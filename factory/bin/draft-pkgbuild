@@ -45,10 +45,18 @@ def gh(path, raw=False):
         raise
 
 
-def analyze(url, name):
+def analyze(url, name, request=None):
     m = re.match(r"^https?://github\.com/([^/]+)/([^/#?]+)", url)
     if not m:
-        sys.exit("only GitHub project URLs are supported for automatic drafting today: " + url)
+        # A project elsewhere — a vendor's release, a home page: the request says what the
+        # source and the version are, and the agent works from those and the evidence.
+        if request and request.get("source") and request.get("version"):
+            v = request["version"]
+            return {"owner": None, "repo": None, "url": url, "name": name or url.rstrip("/").split("/")[-1].lower(),
+                    "description": request.get("description") or "", "license_spdx": request.get("license"), "language": None,
+                    "tag": v, "pkgver": v.lstrip("vV").replace("-", "_"), "default_branch": None, "top_level": [], "license_files": [],
+                    "release_assets": [request["source"]], "files": {}, "readme": "", "source": request["source"], "native_deps_hint": []}
+        sys.exit("only GitHub project URLs are drafted from the repository; a project elsewhere needs --source and --version (the request's): " + url)
     owner, repo = m.group(1), m.group(2).removesuffix(".git")
     meta = gh(f"/repos/{owner}/{repo}") or sys.exit(f"{owner}/{repo} not found on GitHub")
     rel = gh(f"/repos/{owner}/{repo}/releases/latest")
@@ -234,15 +242,42 @@ package() {{
     sys.exit(f"no template for build system '{bs}' and no agent key ({', '.join(agent.KEYS)}) to draft with")
 
 
-def draft(a, previous, log, hint):
+EVIDENCE = (("PKGBUILD", 12000), ("build.log", 6000), ("tests.log", 5000), ("audit.md", 6000))
+
+
+def evidence_text(d):
+    """The contributor's build, as the project's agent reads it (docs/GOVERNANCE.md): the
+    recipe that already built, its log, the gate's transcript, the second agent's
+    audit — a lesson, never a product. Whatever of it is in the directory."""
+    if not d or not os.path.isdir(d):
+        return ""
+    out = ""
+    for name, keep in EVIDENCE:
+        path = os.path.join(d, name)
+        if os.path.isfile(path):
+            body = open(path, errors="replace").read()
+            out += f"--- the contributor's {name}{' (tail)' if len(body) > keep else ''} ---\n" + (body[-keep:] if name.endswith(".log") else body[:keep]) + "\n\n"
+    return out
+
+
+def draft(a, previous, log, hint, request=None, evidence=None):
     rules = open(os.path.join(os.path.dirname(__file__), "..", "prompts", "pkgbuild.md")).read()
     facts = {k: v for k, v in a.items() if k not in ("files", "readme")}
     user = "Project facts (native_deps_hint: Arch packages behind the -sys crates in Cargo.lock):\n" + json.dumps(facts, indent=1) + "\n\n"
+    if request:
+        user += "The package request (on the record — pkgdesc, license, source and version follow it):\n" + json.dumps(request, indent=1) + "\n\n"
     for f, body in a["files"].items():
         if f == "Cargo.lock":
             continue
         user += f"--- {f} ---\n{body}\n\n"
-    user += "--- README (head) ---\n" + a["readme"] + "\n"
+    if a["readme"]:
+        user += "--- README (head) ---\n" + a["readme"] + "\n"
+    ev = evidence_text(evidence)
+    if ev:
+        user += ("\nEVIDENCE from the contributor's build follows. It is a lesson, not a product: learn what built, "
+                 "what the gate and the audit found, which dependencies were missed — then write YOUR OWN PKGBUILD "
+                 "from the project's sources. Do not copy it; fix what it got wrong; keep what it got right only "
+                 "because it is right.\n\n" + ev)
     if previous:
         user += "\n--- previous PKGBUILD ---\n" + previous + "\n--- build log tail ---\n" + (log or "")[-6000:] + "\n"
     if hint:
@@ -259,15 +294,24 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--url", required=True); ap.add_argument("--name"); ap.add_argument("--out", required=True)
     ap.add_argument("--previous"); ap.add_argument("--log"); ap.add_argument("--hint")
+    # The project's review build: the request's facts, and the contributor's evidence as the lesson.
+    ap.add_argument("--evidence", help="directory with the contributor's PKGBUILD, build.log, tests.log, audit.md")
+    ap.add_argument("--source"); ap.add_argument("--version"); ap.add_argument("--description"); ap.add_argument("--license")
     args = ap.parse_args()
-    a = analyze(args.url, args.name)
+    request = {k: v for k, v in (("source", args.source), ("version", args.version), ("description", args.description), ("license", args.license)) if v} or None
+    a = analyze(args.url, args.name, request)
+    if request and request.get("version") and a.get("tag") != request["version"] and re.match(r"^https?://github\.com/", args.url):
+        # The request names the version; GitHub's latest is not it.
+        a["tag"] = request["version"]; a["pkgver"] = request["version"].lstrip("vV").replace("-", "_")
     if not a["tag"]:
         sys.exit(f"{a['url']} has no release or tag; the factory packages releases only")
     previous = open(args.previous).read() if args.previous else None
     log = open(args.log).read() if args.log else None
     found = agent.provider()
     mode = found[0] if found else "template"
-    text = draft(a, previous, log, args.hint) if found else template(a)
+    if args.evidence and not found:
+        sys.exit("the project's review build needs an agent (the evidence is the lesson): no agent key on this worker")
+    text = draft(a, previous, log, args.hint, request, args.evidence) if found else template(a)
     os.makedirs(args.out, exist_ok=True)
     with open(os.path.join(args.out, "PKGBUILD"), "w") as f:
         f.write(text)

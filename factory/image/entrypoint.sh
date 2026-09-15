@@ -110,7 +110,7 @@ case "$mode" in
       review)
         [[ -n "$agent" ]] || echo "omarchy-worker: $id has no agent key — approved rebuilds run, audits wait for a review worker with one (ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN, OPENAI_API_KEY, GEMINI_API_KEY or XAI_API_KEY)" >&2
         echo "omarchy-worker: $id — review worker ($arch): approved rebuilds${agent:+ and audits of staged builds}, no pool jobs" >&2
-        exec pkg-repo work --arch "$arch" --labels "$labels" --kind build ${agent:+--kind audit} "$@"
+        exec pkg-repo work --arch "$arch" --labels "$labels" --kind build --kind publish ${agent:+--kind audit} "$@"
         ;;
       *)
         echo "omarchy-worker: $id — project worker ($arch, ${owner:-project}); pool jobs and approved rebuilds${agent:+, audits of staged builds}" >&2
