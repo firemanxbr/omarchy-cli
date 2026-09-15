@@ -27,9 +27,16 @@ interface Registration {
 
 /** `pkgdesc='…'`, `url="…"`, `license=('MIT')` — the three lines a PKGBUILD always has. */
 export function pkgbuildFields(text: string): { url: string | null; pkgdesc: string | null; license: string | null } {
+  // Quoted (either quote, parentheses allowed inside — "The popular web
+  // browser by Google (Stable Channel)"), the first element of an array
+  // (license=('MIT')), or bare (url=https://…).
   const one = (key: string): string | null => {
-    const m = text.match(new RegExp(`^${key}=\\(?\\s*(['"]?)([^'"\\n)]*)\\1`, "m"));
-    return m && m[2].trim() ? m[2].trim() : null;
+    const quoted = text.match(new RegExp(`^${key}=(['"])(.*?)\\1`, "m"));
+    if (quoted) return quoted[2].trim() || null;
+    const array = text.match(new RegExp(`^${key}=\\(\\s*(['"]?)([^'")\\s]+)\\1`, "m"));
+    if (array) return array[2].trim() || null;
+    const bare = text.match(new RegExp(`^${key}=(\\S+)`, "m"));
+    return bare ? bare[1].trim() : null;
   };
   return { url: one("url"), pkgdesc: one("pkgdesc"), license: one("license") };
 }

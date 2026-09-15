@@ -277,11 +277,16 @@ reg=$(curl -s "$OMARCHY_API/api/v1/factory/packages"); grep -q '"packages"' <<<"
      ('later', 'community', 'aarch64', 'draft:https://github.com/x/later@latest', 'bump to v2', 100, 0, 'community', 'someone-else', 'build', strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+14 days')),
      ('nowish', 'community', 'aarch64', 'draft:https://github.com/x/nowish@latest', 'package-request #1', 100, 0, 'community', 'someone-else', 'build', NULL)" >/dev/null)
 w3=(-H "authorization: Bearer omw_e2e_w3" -H "content-type: application/json")
-[[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/claim" "${w3[@]}" -d '{"arch":"aarch64"}')" == 204 ]] || { echo "a worker not started --shared must only see its owner's tasks"; exit 1; }
-c3=$(curl -s -X POST "$OMARCHY_API/api/v1/factory/claim" "${w3[@]}" -d '{"arch":"aarch64","shared":true}')
+[[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/claim" "${w3[@]}" -d '{"arch":"aarch64","agent":"openai/gpt-5","agent_status":"ok"}')" == 204 ]] || { echo "a worker not started --shared must only see its owner's tasks"; exit 1; }
+# Donating a worker is a maintainer's call: a contributor's --shared is ignored; a maintainer's is honoured.
+[[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/claim" "${w3[@]}" -d '{"arch":"aarch64","shared":true,"agent":"openai/gpt-5","agent_status":"ok"}')" == 204 ]] || { echo "a contributor's worker must not build strangers' packages, --shared or not"; exit 1; }
+(cd "$ROOT/worker" && npx wrangler d1 execute omarchy-repo --local --persist-to "$WRANGLER_STATE" --command "UPDATE build_workers SET owner = 'e2e' WHERE id = 'w3'" >/dev/null)
+# A draft is the agent's work: a worker whose agent did not answer the probe gets nothing; one whose agent did gets it.
+[[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/claim" "${w3[@]}" -d '{"arch":"aarch64","shared":true,"agent":"openai/gpt-5","agent_status":"error","agent_error":"HTTP 402"}')" == 204 ]] || { echo "a worker whose agent is down must not be handed a draft"; exit 1; }
+c3=$(curl -s -X POST "$OMARCHY_API/api/v1/factory/claim" "${w3[@]}" -d '{"arch":"aarch64","shared":true,"agent":"openai/gpt-5","agent_status":"ok"}')
 grep -q '"name":"nowish"' <<<"$c3" || { echo "a shared worker must get the task that is shareable now: $c3"; exit 1; }
-[[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/claim" "${w3[@]}" -d '{"arch":"aarch64","shared":true}')" == 204 ]] || { echo "a shared worker must not get a task before its shared_after"; exit 1; }
-fac3=$(curl -s "$OMARCHY_API/api/v1/factory?limit=50"); grep -q '"id":"w3","arch":"aarch64"' <<<"$fac3" && grep -q '"mode":"shared"' <<<"$fac3" || { echo "the claim did not record the worker as shared: $fac3"; exit 1; }
+[[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/claim" "${w3[@]}" -d '{"arch":"aarch64","shared":true,"agent":"openai/gpt-5","agent_status":"ok"}')" == 204 ]] || { echo "a shared worker must not get a task before its shared_after"; exit 1; }
+fac3=$(curl -s "$OMARCHY_API/api/v1/factory?limit=50"); grep -q '"id":"w3","arch":"aarch64"' <<<"$fac3" && grep -q '"mode":"shared"' <<<"$fac3" && grep -q '"agent_status":"ok"' <<<"$fac3" && grep -q '"ready":true' <<<"$fac3" || { echo "the claim did not record the worker as shared and ready: $fac3"; exit 1; }
 # The community build's evidence goes to staging with the job token; the
 # builder cannot write the audit files. Staging it queues the second agent.
 c3_id=$(jq -r .task.id <<<"$c3"); c3_tok=$(jq -r .token <<<"$c3"); c3j=(-H "authorization: Bearer $c3_tok")
@@ -296,7 +301,8 @@ python3 -c 'import json,sys; d=json.load(sys.stdin); t=[t for t in d["staged"] i
 # A project worker that declares the audit kind (it has an agent key) takes it;
 # the report is attached to the staged build's evidence with the audit's own token.
 [[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/claim" "${w3[@]}" -d '{"arch":"aarch64","kinds":["audit"]}')" == 204 ]] || { echo "a community worker never audits"; exit 1; }
-au=$(curl -s -X POST "$OMARCHY_API/api/v1/factory/claim" "${w1[@]}" -d '{"arch":"aarch64","kinds":["audit"],"agent":"anthropic/claude-sonnet-5"}'); grep -q '"kind":"audit"' <<<"$au" && grep -q "\"task\":$c3_id" <<<"$au" || { echo "the project worker did not get the audit: $au"; exit 1; }
+[[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/claim" "${w1[@]}" -d '{"arch":"aarch64","kinds":["audit"],"agent":"anthropic/claude-sonnet-5","agent_status":"error","agent_error":"no answer"}')" == 204 ]] || { echo "the second agent must answer the probe before it audits"; exit 1; }
+au=$(curl -s -X POST "$OMARCHY_API/api/v1/factory/claim" "${w1[@]}" -d '{"arch":"aarch64","kinds":["audit"],"agent":"anthropic/claude-sonnet-5","agent_status":"ok"}'); grep -q '"kind":"audit"' <<<"$au" && grep -q "\"task\":$c3_id" <<<"$au" || { echo "the project worker did not get the audit: $au"; exit 1; }
 # What the worker said it runs shows on the Factory page; the key itself never travels.
 facw=$(curl -s "$OMARCHY_API/api/v1/factory?limit=10&after=agent")
 python3 -c 'import json,sys; w=[w for w in json.load(sys.stdin)["workers"] if w["id"]=="w1"][0]; assert w["agent"]=="anthropic/claude-sonnet-5", w' <<<"$facw" || { echo "the worker's agent is not listed"; exit 1; }
@@ -317,7 +323,7 @@ sme=$(curl -s "$OMARCHY_API/auth/me" -H "cookie: omc=oms_e2e"); grep -q '"login"
 [[ "$(curl -s -o /dev/null -w '%{http_code}' "$OMARCHY_API/auth/me" -H "cookie: omc=oms_e2e")" == 401 ]] || { echo "a signed-out session must stop working"; exit 1; }
 [[ "$(curl -s -o /dev/null -w '%{http_code}' "$OMARCHY_API/api/v1/factory/me" -H "authorization: Bearer omc_e2e")" == 200 ]] || { echo "signing out of the browser must not revoke the CLI token"; exit 1; }
 # A worker learns what its registration is (the image decides its mode from this).
-wself=$(curl -s "$OMARCHY_API/api/v1/factory/workers/self" -H "authorization: Bearer omw_e2e_w3"); grep -q '"trust":"community"' <<<"$wself" && grep -q '"owner":"e2e-contributor"' <<<"$wself" || { echo "workers/self did not describe the registration: $wself"; exit 1; }
+wself=$(curl -s "$OMARCHY_API/api/v1/factory/workers/self" -H "authorization: Bearer omw_e2e_w3"); grep -q '"trust":"community"' <<<"$wself" && grep -q '"owner":"e2e"' <<<"$wself" || { echo "workers/self did not describe the registration: $wself"; exit 1; }
 [[ "$(curl -s -o /dev/null -w '%{http_code}' "$OMARCHY_API/api/v1/factory/workers/self")" == 401 ]] || { echo "workers/self must need a worker token"; exit 1; }
 upage=$(curl -s "$OMARCHY_API/api/v1/users/e2e"); grep -q '"role":"maintainer"' <<<"$upage" && grep -q '"github":"https://github.com/e2e"' <<<"$upage" || { echo "the profile API did not describe the seeded maintainer: $upage"; exit 1; }
 [[ "$(curl -s -o /dev/null -w '%{http_code}' "$OMARCHY_API/api/v1/users/nobody-here")" == 404 ]] || { echo "an unknown login must be 404"; exit 1; }

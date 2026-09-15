@@ -74,7 +74,7 @@ const BODY = String.raw`
         <div class="table-wrap" style="border:0"><table id="my-packages"><thead><tr><th>Package</th><th>Project</th><th>Arches</th><th>Version · licence</th><th>Stage</th><th>Detail</th><th></th></tr></thead><tbody></tbody></table></div>
       </div>
       <div class="panel"><h3>Your workers <button type="button" id="w-toggle">+ register one</button></h3>
-        <p class="sub" style="margin:0 0 10px;font-size:12.5px">Optional: builds happen on the shared workers otherwise. Register one, run the signed image with the token it gives you — shown once — and your builds skip the queue. <code>WORKER_SHARED=1</code> donates it to everyone's. <a href="/docs/workers">Run a worker →</a></p>
+        <p class="sub" style="margin:0 0 10px;font-size:12.5px">Optional: builds happen on the shared workers otherwise. Register one, run the signed image with the token it gives you — shown once — and your builds skip the queue; it builds only your packages, with your agent. <a href="/docs/workers">Run a worker →</a></p>
         <form id="worker-form" class="form" onsubmit="return false" hidden>
           <label>Name <input type="text" id="w-name" placeholder="laptop" required></label>
           <label>Architecture <select id="w-arch"><option>x86_64</option><option>aarch64</option></select></label>
@@ -171,7 +171,7 @@ __CHARTS__
         "podman run -d --name omarchy-worker --restart unless-stopped --stop-timeout 10800 \\\n  -e OMARCHY_WORKER_TOKEN=" + d.token + " -e GITHUB_TOKEN=\"$(gh auth token)\" \\\n  ghcr.io/firemanxbr/omarchy-worker:latest\n\n" +
         "# or with compose (" + REPO + "/blob/main/factory/image/compose.yml)\n" +
         "OMARCHY_WORKER_TOKEN=" + d.token + " GITHUB_TOKEN=\"$(gh auth token)\" podman compose -f compose.yml up -d\n\n" +
-        "# add -e WORKER_SHARED=1 to build anyone's packages; -e ANTHROPIC_API_KEY=… (or OPENAI_API_KEY, GEMINI_API_KEY, XAI_API_KEY: your key) for agent-drafted PKGBUILDs";
+        "# -e ANTHROPIC_API_KEY=… (or OPENAI_API_KEY, GEMINI_API_KEY, XAI_API_KEY, CLAUDE_CODE_OAUTH_TOKEN: your key) — the agent that writes the PKGBUILD; without one that answers, the worker is not ready";
       $("#worker-form").reset(); refresh();
     }).catch(function (e) { $("#w-btn").disabled = false; $("#pkg-state").textContent = "failed: " + e; });
     return false;
