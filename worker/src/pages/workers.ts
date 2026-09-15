@@ -69,8 +69,11 @@ podman run -d --name omarchy-worker --restart unless-stopped --stop-timeout 1080
 # an agent drafts and corrects PKGBUILDs on this machine, with your key — the pool never holds one;
 # one of these is enough (Anthropic, OpenAI, Gemini, xAI), FACTORY_MODEL picks the model
   -e ANTHROPIC_API_KEY=sk-…      # or OPENAI_API_KEY / GEMINI_API_KEY / XAI_API_KEY
-  -e FACTORY_MODEL=claude-sonnet-5</pre>
-      <p>The Factory page shows which agent each worker reported (<code>anthropic/claude-sonnet-5</code>, <code>openai/gpt-5</code>, …); the key itself never leaves your machine.</p>
+  -e FACTORY_MODEL=claude-sonnet-5
+
+# or your Claude subscription instead of a key (see "A Claude subscription as the agent" below)
+  -e CLAUDE_CODE_OAUTH_TOKEN=…    # what 'claude setup-token' printed on your machine</pre>
+      <p>The Factory page shows which agent each worker reported (<code>anthropic/claude-sonnet-5</code>, <code>claude-code/claude-sonnet-5</code>, <code>openai/gpt-5</code>, …); the key itself never leaves your machine.</p>
       <p>A shared worker with an agent is what turns a <em>package request</em> (a GitHub issue) into a first PKGBUILD and a first build; without one, requests wait. What your agent produces is evidence like any other build: a maintainer reads it before anything reaches users.</p></div>
       <div class="step"><h3>4. Watch it</h3><p>In <b>Docker Desktop</b>, <em>Containers</em> lists <code>omarchy-worker</code> with its state and a <em>Logs</em> tab; in <b>Podman Desktop</b>, the same under <em>Containers</em>. On the command line: <code>docker logs -f omarchy-worker</code> / <code>podman logs -f omarchy-worker</code>. The container exits after each task (that is by design) and the restart policy brings it back.</p>
       <div class="shot">Screenshot to add: Docker Desktop → Containers, the running <code>omarchy-worker</code> and its Logs tab; Podman Desktop → Containers, the same.</div></div>
@@ -112,7 +115,35 @@ podman run -d --name omarchy-worker --restart unless-stopped --security-opt labe
 --once                    one task, then exit
 --labels '{"where":"…"}'  shown on the Factory page</pre>
       <p>A project worker never builds a contributor's package: those run on the contributor's worker, or on a worker somebody donated with <code>WORKER_SHARED=1</code>. What it builds is the rebuild a maintainer approved — never one the same maintainer brought — and the pool signs the result.</p></div>
-      <div class="step"><h3>5. The second agent</h3><p>Add your agent key — <code>-e ANTHROPIC_API_KEY=sk-…</code>, or <code>OPENAI_API_KEY</code>, <code>GEMINI_API_KEY</code>, <code>XAI_API_KEY</code> (your key, on your machine; <code>-e FACTORY_MODEL=…</code> picks the model) — and the worker also takes the <b>audit</b> of every build a contributor stages: it reads the PKGBUILD, the log and the <code>.PKGINFO</code> the maintainer will read, asks the model for a structured review — supply chain, security, packaging practice, licence — and attaches the report to the evidence. <a href="/review">Review</a> shows the verdict next to the build; the maintainer still decides. No such worker running, and the column says <em>waiting</em>.</p></div>
+      <div class="step"><h3>5. The second agent</h3><p>Add your agent key — <code>-e ANTHROPIC_API_KEY=sk-…</code>, or <code>OPENAI_API_KEY</code>, <code>GEMINI_API_KEY</code>, <code>XAI_API_KEY</code>, or a Claude subscription as <code>CLAUDE_CODE_OAUTH_TOKEN</code> (<a href="#claude-code">below</a>); your key, on your machine; <code>-e FACTORY_MODEL=…</code> picks the model — and the worker also takes the <b>audit</b> of every build a contributor stages: it reads the PKGBUILD, the log and the <code>.PKGINFO</code> the maintainer will read, asks the model for a structured review — supply chain, security, packaging practice, licence — and attaches the report to the evidence. <a href="/review">Review</a> shows the verdict next to the build; the maintainer still decides. No such worker running, and the column says <em>waiting</em>.</p></div>
+    </div>
+  </section>
+
+  <section id="claude-code">
+    <h2>A Claude subscription as the agent</h2>
+    <p class="sub">A Claude Pro or Max subscription can be the worker's agent instead of an API key: the worker runs <b>Claude Code in print mode</b> — <code>claude -p</code>, no tools, no session, the report as JSON — with a token from your own login. Nothing else changes: the same drafts, the same audits, the same evidence for the maintainer.</p>
+    <div class="steps">
+      <div class="step"><h3>1. A token, on your machine</h3><p>With Claude Code installed and logged in on the machine you use (the Studio, the laptop — not the worker), run</p>
+<pre>claude setup-token</pre>
+      <p>It opens the browser for a one-time consent and prints a long-lived token (<code>sk-ant-oat01-…</code>). That token is your subscription: keep it like a password, revoke it from your Claude account when a machine is lost. The worker never needs your login, only this.</p></div>
+      <div class="step"><h3>2. Give it to the worker</h3>
+<pre># a contributor's worker (docker works the same)
+podman run -d --name omarchy-worker --restart unless-stopped --stop-timeout 10800 \
+  -e OMARCHY_WORKER_TOKEN=&lt;omw_…&gt; -e GITHUB_TOKEN="$(gh auth token)" \
+  -e CLAUDE_CODE_OAUTH_TOKEN=&lt;sk-ant-oat01-…&gt; \
+  ${IMG}:latest
+
+# with compose: the same variable in the environment or a .env file
+CLAUDE_CODE_OAUTH_TOKEN=… OMARCHY_WORKER_TOKEN=… podman compose up -d
+
+# a project host (factory/host): the line goes in etc/agent.env, which the review
+# and community services read; FACTORY_PROVIDER makes the choice explicit when an
+# API key sits in the same file
+CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-…
+FACTORY_PROVIDER=claude-code</pre>
+      <p>At start the worker installs Claude Code for its architecture (the official installer, checksum verified, into the container's home — about 200 MB, once per container; the image does not ship it) and reports <code>claude-code/claude-sonnet-5</code> as its agent on the Factory page. <code>FACTORY_MODEL</code> picks another model (<code>claude-opus-5</code>); <code>FACTORY_REASONING=low</code> keeps a draft or an audit from thinking longer than it needs. A binary of your own, mounted at <code>/usr/local/bin/claude</code> or named by <code>CLAUDE_CODE_BIN</code>, skips the install.</p></div>
+      <div class="step"><h3>3. What it does, exactly</h3><p>Every completion is one process: <code>claude -p --tools "" --max-turns 1 --no-session-persistence --output-format json --model … --system-prompt …</code>, the PKGBUILD and the log on stdin, in an empty directory. No tool is available to the model — it cannot read a file, run a command or reach the network; it answers, and the worker reads the answer. The token goes to the child process; an <code>ANTHROPIC_API_KEY</code> in the same environment is withheld from it, so choosing the subscription means the subscription.</p></div>
+      <div class="step"><h3>4. What it costs, and whose rules</h3><p>Nothing on top of the subscription — and the subscription's limits apply: each draft and each audit is a message in the same five-hour and weekly windows as your own use of Claude, and a worker that hits the limit fails the task (<em>You've hit your limit</em>, back in the queue for the next window; the pool retries an audit three times). Your agreement with Anthropic is what allows this use: read their consumer terms on automated and shared use before you put the token on a shared worker or a project host — the API key (<code>ANTHROPIC_API_KEY</code>, a workspace with a spending limit in the Console) is the plain path, and switching is one variable.</p></div>
     </div>
   </section>
 

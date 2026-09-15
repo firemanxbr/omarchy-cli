@@ -306,8 +306,9 @@ enum Command {
         /// Job kinds to pull (repeatable). Default: every pool job and the
         /// project builds; `audit` (the second agent's review of a staged
         /// build) joins them when an agent key is set (`ANTHROPIC_API_KEY`,
-        /// `OPENAI_API_KEY`, `GEMINI_API_KEY`, `XAI_API_KEY`) — the worker
-        /// owner's key, never the pool's.
+        /// `OPENAI_API_KEY`, `GEMINI_API_KEY`, `XAI_API_KEY`, or
+        /// `CLAUDE_CODE_OAUTH_TOKEN` for a Claude subscription through Claude
+        /// Code) — the worker owner's key, never the pool's.
         #[arg(long = "kind")]
         kinds: Vec<String>,
         /// Free JSON shown on the Factory page, e.g. {"where":"droplet-1"}.

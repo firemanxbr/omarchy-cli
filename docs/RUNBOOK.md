@@ -381,7 +381,9 @@ tasks from the pool ([factory/README.md](../factory/README.md)). Day to day:
 - **The audit** (the second agent, GOVERNANCE.md): every staged community
   build queues an `audit` task. A project worker takes it only when it
   was started with an agent key in its environment — `ANTHROPIC_API_KEY`,
-  `OPENAI_API_KEY`, `GEMINI_API_KEY` or `XAI_API_KEY` (`pkg-repo work` adds
+  `OPENAI_API_KEY`, `GEMINI_API_KEY` or `XAI_API_KEY`, or a Claude
+  subscription as `CLAUDE_CODE_OAUTH_TOKEN` (Claude Code in print mode, no
+  tools; the worker installs it at start) (`pkg-repo work` adds
   the `audit` kind by itself then; `FACTORY_PROVIDER` picks among several
   keys, `FACTORY_MODEL` the model — defaults `claude-sonnet-5`, `gpt-5`,
   `gemini-3.6-flash`, `grok-4`; `FACTORY_REASONING=low` keeps a reasoning

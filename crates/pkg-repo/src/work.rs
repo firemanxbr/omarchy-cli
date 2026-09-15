@@ -31,8 +31,9 @@ const POLL: Duration = Duration::from_secs(30);
 
 /// The agent providers `factory/bin/agent.py` knows, in the order it picks
 /// them when several keys are set: (name, key variable, default model).
-const AGENTS: [(&str, &str, &str); 4] = [
+const AGENTS: [(&str, &str, &str); 5] = [
     ("anthropic", "ANTHROPIC_API_KEY", "claude-sonnet-5"),
+    ("claude-code", "CLAUDE_CODE_OAUTH_TOKEN", "claude-sonnet-5"),
     ("openai", "OPENAI_API_KEY", "gpt-5"),
     ("gemini", "GEMINI_API_KEY", "gemini-3.6-flash"),
     ("xai", "XAI_API_KEY", "grok-4"),
@@ -944,7 +945,7 @@ fn build_job(opts: &WorkOptions, job: &Api, task: &Task) -> Result<Outcome> {
 fn audit_job(opts: &WorkOptions, job: &Api, task: &Task) -> Result<Outcome> {
     anyhow::ensure!(
         agent_label().is_some(),
-        "no agent key on this worker (ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY or XAI_API_KEY); start it without the audit kind"
+        "no agent key on this worker (ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN, OPENAI_API_KEY, GEMINI_API_KEY or XAI_API_KEY); start it without the audit kind"
     );
     let staged = task
         .params

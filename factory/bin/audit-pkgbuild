@@ -2,7 +2,7 @@
 """The second agent: audits a staged build's PKGBUILD, log and .PKGINFO.
 
 Runs on a project worker whose owner set an agent key (ANTHROPIC_API_KEY,
-OPENAI_API_KEY, GEMINI_API_KEY or XAI_API_KEY — see agent.py; the key is
+OPENAI_API_KEY, GEMINI_API_KEY or XAI_API_KEY, or CLAUDE_CODE_OAUTH_TOKEN — see agent.py; the key is
 the worker owner's, never the pool's). Reads the evidence a contributor staged,
 asks the model for a structured review following factory/prompts/audit.md
 and writes audit.json and audit.md for the maintainer to read on the Review

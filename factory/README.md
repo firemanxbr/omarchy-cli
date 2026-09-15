@@ -48,8 +48,10 @@ PKGBUILD reviewed and merged ──▶ pool: build_requests / build_tasks (D1)
    PKGBUILD following `factory/prompts/pkgbuild.md` — `factory/bin/agent.py`
    speaks to Anthropic, OpenAI, Gemini or xAI by the key set
    (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `XAI_API_KEY`;
-   `FACTORY_MODEL` picks the model), the worker owner's key, never the
-   pool's; without one a template covers Rust,
+   `FACTORY_MODEL` picks the model) — or runs Claude Code in print mode on
+   a Claude subscription (`CLAUDE_CODE_OAUTH_TOKEN`, from `claude
+   setup-token`; the dashboard's *Run a worker* page has the steps) — the
+   worker owner's key, never the pool's; without one a template covers Rust,
    Go, CMake, Meson, autotools and prebuilt release binaries. `updpkgsums`
    fills the checksums and `namcap` lints, in the container.
 4. **It is built before anyone reviews it.** The worker builds it in its
@@ -125,7 +127,8 @@ curl -s -X POST $API/factory/packages/project/build -H "authorization: Bearer $O
 # 5. Run the worker: the project's signed image, one fresh container per task.
 #    GITHUB_TOKEN: the worker reads GitHub's API for every package (the release, the files) — without one,
 #    60 requests an hour from your address; a fine-grained token with no permissions is enough.
-#    the agent key (ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY or XAI_API_KEY) is *yours*, on your machine: the pool never holds one.
+#    the agent key (ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY or XAI_API_KEY — or CLAUDE_CODE_OAUTH_TOKEN,
+#    a Claude subscription through Claude Code) is *yours*, on your machine: the pool never holds one.
 #    WORKER_SHARED=1 donates the worker to other contributors' packages too.
 OMARCHY_WORKER_TOKEN=omw_… GITHUB_TOKEN="$(gh auth token)" ANTHROPIC_API_KEY=sk-… \
   podman compose -f factory/image/compose.yml up -d        # or docker compose; a stop waits for the build (3 h)
