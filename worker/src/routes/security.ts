@@ -198,56 +198,47 @@ export async function handleSecurity(url: URL, env: Env): Promise<Response> {
   }
 
   // Exposure: packages in the ring that depend on a vulnerable one — by
-  // declared name, or by loading a library it provides. Two indexed joins
-  // (package_requires.requirement is indexed) unioned; an OR in the join
-  // condition would scan the whole requires table.
+  // declared name, or by loading a library it provides. The join order is
+  // forced (CROSS JOIN): from the few vulnerable packages and what they
+  // provide, through package_requires' requirement index, into the ring.
+  // Left to itself the planner walked the ring instead — every member's
+  // requires, then a lookup of the vulnerable set — 3.1 M rows read per
+  // call on stable, twice (this and the total), against 108 k for the two
+  // together now; the Security page ran it forty times an hour
+  // (2026-09-15, the day the cost guard tripped).
   // Only confident advisories (exact, name-version) propagate: a name-only
   // one on glibc would mark the whole ring as exposed and say nothing.
   const confident = vulnerable.filter((v) => (v.advisories as { match: string }[]).some((a) => a.match !== "name-only"));
   const exposure = new Map<string, { declared: number; loads: number }>();
   let exposedTotal = 0;
   if (confident.length) {
-    const ids = JSON.stringify(confident.map((v) => v.id));
     const ex = await env.DB.prepare(
-      `SELECT vuln, SUM(declared) AS declared, SUM(loads) AS loads FROM (
-         SELECT v.name AS vuln, COUNT(DISTINCT rq.package_id) AS declared, 0 AS loads
-           FROM packages v
-           JOIN package_requires rq ON rq.requirement = v.name AND rq.kind = 'depends'
-           JOIN ${ringMembers(ring)} rp ON rp.package_id = rq.package_id
-           JOIN packages d ON d.id = rq.package_id AND d.repo_arch = ?1 AND d.id != v.id
-          WHERE v.id IN (SELECT value FROM json_each(?2)) GROUP BY v.name
-         UNION ALL
-         SELECT v.name, 0, COUNT(DISTINCT rq.package_id)
-           FROM packages v
-           JOIN package_provides pv ON pv.package_id = v.id AND pv.capability != v.name
-           JOIN package_requires rq ON rq.requirement = pv.capability AND rq.kind = 'depends'
-           JOIN ${ringMembers(ring)} rp ON rp.package_id = rq.package_id
-           JOIN packages d ON d.id = rq.package_id AND d.repo_arch = ?1 AND d.id != v.id
-          WHERE v.id IN (SELECT value FROM json_each(?2)) GROUP BY v.name
-       ) GROUP BY vuln`,
+      `WITH vuln(id, name) AS MATERIALIZED (
+             SELECT p.id, p.name FROM json_each(?2) j JOIN packages p ON p.id = j.value),
+           caps(vuln_id, vuln, capability) AS MATERIALIZED (
+             SELECT v.id, v.name, v.name FROM vuln v
+             UNION
+             SELECT v.id, v.name, pv.capability FROM vuln v JOIN package_provides pv ON pv.package_id = v.id AND pv.capability != v.name),
+           hits AS (
+             SELECT c.vuln, c.capability = c.vuln AS declared, rq.package_id AS dep
+               FROM caps c
+               CROSS JOIN package_requires rq ON rq.requirement = c.capability AND rq.kind = 'depends'
+               CROSS JOIN ring_packages rp ON rp.ring = '${ring}' AND rp.package_id = rq.package_id
+               CROSS JOIN packages d ON d.id = rq.package_id AND d.repo_arch = ?1 AND d.id != c.vuln_id)
+       SELECT NULL AS vuln, 0 AS declared, 0 AS loads, COUNT(DISTINCT dep) AS exposed FROM hits
+       UNION ALL
+       SELECT vuln,
+              COUNT(DISTINCT CASE WHEN declared THEN dep END) AS declared,
+              COUNT(DISTINCT CASE WHEN NOT declared THEN dep END) AS loads,
+              0 AS exposed
+         FROM hits GROUP BY vuln`,
     )
-      .bind(arch, ids)
-      .all<{ vuln: string; declared: number; loads: number }>();
-    for (const r of ex.results) exposure.set(r.vuln, { declared: r.declared, loads: r.loads });
-    const total = await env.DB.prepare(
-      `SELECT COUNT(*) AS n FROM (
-         SELECT rq.package_id FROM packages v
-           JOIN package_requires rq ON rq.requirement = v.name AND rq.kind = 'depends'
-           JOIN ${ringMembers(ring)} rp ON rp.package_id = rq.package_id
-           JOIN packages d ON d.id = rq.package_id AND d.repo_arch = ?1 AND d.id != v.id
-          WHERE v.id IN (SELECT value FROM json_each(?2))
-         UNION
-         SELECT rq.package_id FROM packages v
-           JOIN package_provides pv ON pv.package_id = v.id AND pv.capability != v.name
-           JOIN package_requires rq ON rq.requirement = pv.capability AND rq.kind = 'depends'
-           JOIN ${ringMembers(ring)} rp ON rp.package_id = rq.package_id
-           JOIN packages d ON d.id = rq.package_id AND d.repo_arch = ?1 AND d.id != v.id
-          WHERE v.id IN (SELECT value FROM json_each(?2))
-       )`,
-    )
-      .bind(arch, ids)
-      .first<{ n: number }>();
-    exposedTotal = total?.n ?? 0;
+      .bind(arch, JSON.stringify(confident.map((v) => v.id)))
+      .all<{ vuln: string | null; declared: number; loads: number; exposed: number }>();
+    for (const r of ex.results) {
+      if (r.vuln === null) exposedTotal = r.exposed;
+      else exposure.set(r.vuln, { declared: r.declared, loads: r.loads });
+    }
   }
 
   const totals: Record<string, number> = { packages: vulnerable.length, exposed: exposedTotal, kev: vulnerable.filter((v) => v.kev).length };
@@ -264,6 +255,6 @@ export async function handleSecurity(url: URL, env: Env): Promise<Response> {
       vulnerable: vulnerable.map((v) => ({ ...v, id: undefined, fixed_in: fixedElsewhere.get(v.name) ?? [], exposure: exposure.get(v.name) ?? { declared: 0, loads: 0 } })),
     },
     200,
-    { "cache-control": "public, max-age=120" },
+    { "cache-control": "public, max-age=600" },
   );
 }

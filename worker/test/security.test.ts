@@ -72,3 +72,41 @@ describe("GET /security fixed_in", () => {
     expect(v.fixed_in).toEqual([{ ring: "rc", version: "1.15.0-1" }]);
   });
 });
+
+/** Something in the pool that depends on smolvm: by name, or by a library it provides. */
+async function dependant(name: string, requires: string[], token: string): Promise<string> {
+  const filename = `${name}-1.0-1-x86_64.pkg.tar.zst`;
+  const bytes = new TextEncoder().encode(`fake ${filename}`);
+  await env.PACKAGES.put(packageKey("x86_64", filename), bytes);
+  const s = sha(`x86_64/${filename}`);
+  const r = await call("POST", "/packages?source=packages&arch=x86_64", {
+    schema_version: 1, name, version: "1.0-1", arch: "x86_64", sha256: s, filename, size_download: bytes.length, size_installed: 1,
+    description: name, provides: [name], requires, pkginfo: { provides: [] }, files: [`usr/bin/${name}`],
+  }, token);
+  expect(r.status, JSON.stringify(r.json)).toBe(201);
+  return s;
+}
+
+describe("GET /security exposure", () => {
+  it("counts what depends on a vulnerable package in that ring, by name and by a library it provides", async () => {
+    const pool = await issueJobToken(env, { t: 4, k: "test", s: ["pool:write"], e: Math.floor(Date.now() / 1000) + 3600, w: "w-test" });
+    const edge = await issueJobToken(env, { t: 5, k: "test", s: ["release:edge"], e: Math.floor(Date.now() / 1000) + 3600, w: "w-test" });
+    const rc = await issueJobToken(env, { t: 6, k: "test", s: ["release:rc"], e: Math.floor(Date.now() / 1000) + 3600, w: "w-test" });
+    // The vulnerable object also ships a library.
+    await env.DB.prepare("INSERT INTO package_provides (package_id, capability, declared) VALUES (?, 'libsmol.so.1', 0)").bind(cur.id).run();
+    const byName = await dependant("smol-cli", ["smolvm"], pool);
+    const byLibrary = await dependant("smol-gui", ["libsmol.so.1"], pool);
+    const elsewhere = await dependant("smol-rc-only", ["smolvm"], pool);
+    expect((await call("POST", "/releases", { ring: "edge", add: [byName, byLibrary] }, edge)).status).toBe(201);
+    expect((await call("POST", "/releases", { ring: "rc", add: [elsewhere] }, rc)).status).toBe(201);
+
+    const view = (await call("GET", "/security?ring=edge&arch=x86_64&_=3")).json;
+    const v = view.vulnerable.find((p: any) => p.name === "smolvm");
+    expect(v.exposure).toEqual({ declared: 1, loads: 1 });
+    expect(view.totals.exposed).toBe(2);
+    // rc serves a clean smolvm: nothing there is exposed.
+    const rcView = (await call("GET", "/security?ring=rc&arch=x86_64&_=3")).json;
+    expect(rcView.vulnerable.find((p: any) => p.name === "smolvm")).toBeUndefined();
+    expect(rcView.totals.exposed).toBe(0);
+  });
+});
