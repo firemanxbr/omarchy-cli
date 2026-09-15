@@ -24,6 +24,9 @@ accepts it.
 """
 import json
 import os
+import sys
+import time
+import urllib.error
 import urllib.request
 
 PROVIDERS = {
@@ -54,6 +57,28 @@ def available():
     return provider() is not None
 
 
+def _open(req, timeout):
+    """urlopen with patience: a 429 (the free tier's requests per minute, a
+    quota) or a 5xx is waited out — 30 s, 60 s, 120 s, Retry-After when the
+    provider names it — before the audit is called a failure. Eight of the
+    first contributor's nine audits died on Gemini's 429, three attempts
+    each, seconds apart (2026-09-15)."""
+    waits = (30, 60, 120)
+    for attempt, wait in enumerate(waits + (None,)):
+        try:
+            return urllib.request.urlopen(req, timeout=timeout)
+        except urllib.error.HTTPError as e:
+            if wait is None or e.code not in (429, 500, 502, 503, 504):
+                raise
+            retry_after = e.headers.get("Retry-After") if e.headers else None
+            try:
+                wait = max(wait, min(int(retry_after), 600)) if retry_after else wait
+            except ValueError:
+                pass
+            print(f"agent: HTTP {e.code}; waiting {wait} s (attempt {attempt + 1} of {len(waits) + 1})", file=sys.stderr)
+            time.sleep(wait)
+
+
 def complete(system, user, max_tokens=4000, timeout=300):
     """One completion: (text, model) — the model as the provider reports it."""
     found = provider()
@@ -67,7 +92,7 @@ def complete(system, user, max_tokens=4000, timeout=300):
         body = {"model": model, "max_tokens": max_tokens, "system": system, "messages": [{"role": "user", "content": user}]}
         req = urllib.request.Request(base + "/v1/messages", data=json.dumps(body).encode(), method="POST",
                                      headers={"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"})
-        with urllib.request.urlopen(req, timeout=timeout) as r:
+        with _open(req, timeout) as r:
             out = json.load(r)
         return "".join(c.get("text", "") for c in out.get("content", [])), out.get("model", model)
     messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
@@ -79,12 +104,12 @@ def complete(system, user, max_tokens=4000, timeout=300):
             body["reasoning_effort"] = effort
         req = urllib.request.Request(base + "/chat/completions", data=json.dumps(body).encode(), method="POST",
                                      headers={"authorization": "Bearer " + key, "content-type": "application/json"})
-        with urllib.request.urlopen(req, timeout=timeout) as r:
+        with _open(req, timeout) as r:
             out = json.load(r)
         choices = out.get("choices") or []
         text = (choices[0].get("message") or {}).get("content") if choices else None
         finish = choices[0].get("finish_reason") if choices else None
         if finish != "length" or attempt == 2:
             return (text or ""), out.get("model", model)
-        budget = max_tokens * 4
+        budget = min(max_tokens * 4, 65536)  # Gemini's ceiling; the others allow more
     return "", model
