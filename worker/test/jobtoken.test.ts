@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { issueJobToken, jobOf, scopesFor } from "../src/jobtoken";
 import { jobsOf, RULES, SYNC_SOURCES } from "../src/scheduler";
+import { SOURCES } from "../src/routes/packages";
 import type { Env } from "../src/index";
 
 const env = { JOB_TOKEN_SECRET: "test-secret" } as unknown as Env;
@@ -46,6 +47,8 @@ describe("pulled jobs", () => {
     const asahi = JSON.parse(arm.params.sources).find((s: { source: string }) => s.source === "asahi");
     expect(asahi.base_url).toBe("github-release://maralcbr/omarchy-pkgs/asahi-packages-stable-");
     expect(asahi.keyring).toBe("omarchy-asahi");
+    // Every source the scheduler syncs is one the publish route accepts (aur, asahi and asahi-alarm were synced but refused on 2026-09-15).
+    for (const src of SYNC_SOURCES) expect(SOURCES as readonly string[]).toContain(src.source);
     const health = RULES.find((r) => r.job?.kind === "health")!;
     expect(jobsOf(health)).toHaveLength(6);
     const promote = RULES.find((r) => r.job?.kind === "promote" && r.job.params.to === "stable")!;

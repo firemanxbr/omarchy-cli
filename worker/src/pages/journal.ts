@@ -28,7 +28,8 @@ const BODY = String.raw`
 const SCRIPT = String.raw`
   skeletonRows("#events", 7, 8); skeletonRows("#releases", 9, 4);
   var KINDS = ["all", "sync", "promote", "health", "security", "fast-track", "build", "render", "rollback", "gc", "deploy", "cost"], STATUSES = ["all", "ok", "warn", "error"];
-  var kind = "all", status = "all", q = "", EVENTS = [], LAST = null;
+  var qs = new URLSearchParams(location.search);
+  var kind = KINDS.indexOf(qs.get("kind")) >= 0 ? qs.get("kind") : "all", status = "all", q = "", EVENTS = [], LAST = null;
   function pick(id, values, current, on) { var el = $("#" + id); el.innerHTML = values.map(function (v) { return '<button type="button" class="' + (v === current ? "on" : "") + '" data-v="' + v + '">' + v + '</button>'; }).join(""); el.querySelectorAll("button").forEach(function (b) { b.onclick = function () { on(b.getAttribute("data-v")); }; }); }
   function drawEvents() {
     pick("pick-kind", KINDS, kind, function (v) { kind = v; drawEvents(); });

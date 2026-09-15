@@ -478,10 +478,19 @@ fn repo_dir(opts: &WorkOptions) -> Result<PathBuf> {
 
 /// The keyring files the sync verifies against, refreshed daily by the pipeline's own script.
 fn keyrings(opts: &WorkOptions) -> Result<PathBuf> {
+    keyrings_for(opts, &[])
+}
+
+/// The same, but a keyring the task names and the directory lacks brings the
+/// refresh forward: a source added with its own key (asahi-alarm, the Asahi
+/// fork on 2026-09-15) must not fail for a day because yesterday's stamp is
+/// still fresh.
+fn keyrings_for(opts: &WorkOptions, required: &[String]) -> Result<PathBuf> {
     let dir = opts.work_dir.join("keyrings");
     let stamp = dir.join(".fetched");
     let fresh = fresh_within(&stamp, Duration::from_secs(86400));
-    if fresh && dir.join("archlinux.gpg").exists() {
+    let present = |name: &str| dir.join(format!("{name}.gpg")).exists();
+    if fresh && present("archlinux") && required.iter().all(|k| present(k)) {
         return Ok(dir);
     }
     let repo = repo_dir(opts)?;
@@ -566,14 +575,24 @@ struct Pending {
 /// and D1 bills every row written, so eleven sources an hour must not
 /// mean eleven releases. A task with a single source (`params.source`,
 /// the old form, and `pkg-repo job sync --param source=…`) pins its own.
+/// The keyrings a sync task names: one per source of the batch, or the single source's.
+fn task_keyrings(task: &Task, batch: &[serde_json::Value]) -> Vec<String> {
+    let names = if batch.is_empty() {
+        vec![s(&task.params, "keyring")]
+    } else {
+        batch.iter().map(|p| s(p, "keyring")).collect()
+    };
+    names.into_iter().filter(|k| !k.is_empty()).collect()
+}
+
 fn sync_job(opts: &WorkOptions, job: &Api, task: &Task) -> Result<Outcome> {
-    let keys = keyrings(opts)?;
     let batch: Vec<serde_json::Value> = task
         .params
         .get("sources")
         .and_then(serde_json::Value::as_str)
         .and_then(|j| serde_json::from_str(j).ok())
         .unwrap_or_default();
+    let keys = keyrings_for(opts, &task_keyrings(task, &batch))?;
     if batch.is_empty() {
         let o = sync_options(opts, &task.params, &keys, false);
         let report = ops::run_sync_report(job, &o)?;

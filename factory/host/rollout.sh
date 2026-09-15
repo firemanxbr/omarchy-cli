@@ -38,6 +38,11 @@ changed=0
 enabled="$(docker compose config --services 2>/dev/null | tr '\n' ' ')"
 for svc in community-x86_64 community-aarch64 review-x86_64 review-aarch64 pool-x86_64 pool-aarch64; do
   [[ " $enabled " == *" $svc "* ]] || continue
+  # Pull again before each service: a drain can take hours (a pool worker
+  # finishes its sync first) and the image that was newest at the start may
+  # be several releases old by the time the last service is reached —
+  # pool-aarch64 ran v0.0.103 while the rest ran v0.0.116 (2026-09-15).
+  docker compose pull --quiet "$svc" 2>&1 | grep -viE "pulled|pulling|^\s*$" || true
   image="$(docker compose config --format json | jq -r ".services[\"$svc\"].image")"
   wanted="$(docker image inspect -f '{{.Id}}' "$image" 2>/dev/null || true)"
   cid="$(docker compose ps -q "$svc" 2>/dev/null | head -1)"
