@@ -39,6 +39,8 @@
  *   GET  /                                         the dashboard: the Pool (users), /factory (contributors), /pipeline (everyone, live),
  *                                                  /docs, and the detail pages /packages /package/:name /security /status /journal /review /user/:login
  *   GET  /pool/<arch>/<file>                       fallback static origin (dev)
+ *   GET  /setup                                    the one-command setup script (curl … | sudo bash -s -- --ring stable)
+ *   GET  /api/v1/pacman.conf?ring=&arch=&with=     the pacman.d include a ring serves right now
  */
 
 import { handleMultipartComplete, handleMultipartCreate, handleMultipartPart, handlePutPool, handlePutPoolSig } from "./routes/pool";
@@ -90,6 +92,7 @@ import { pipelineHtml } from "./pages/pipeline";
 import { factoryHtml as factoryPageHtml } from "./pages/contribute";
 import { DASHBOARD_HOST, LEGACY_DASHBOARD_HOST, version } from "./meta";
 import { handleStatic } from "./routes/static";
+import { pacmanInclude, setupScript } from "./routes/setup";
 import { runScheduler } from "./scheduler";
 
 export interface Env {
@@ -157,6 +160,8 @@ export default {
         return await handleStatic(decodeURIComponent(path.slice("/pool/".length)), request, env);
       }
       if (path === "/" || path === "/index.html") return html(overviewHtml(env.POOL_URL, version(env)));
+      // One command to join a ring: the script, read by people before they pipe it into sudo.
+      if (path === "/setup" || path === "/setup.sh") return new Response(setupScript(url.origin, env.POOL_URL.replace(/\/$/, "")), { headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "public, max-age=300" } });
       // Sign in with GitHub: cookie session for the dashboard's pages.
       if (path === "/auth/github" && method === "GET") return handleAuthStart(url, env);
       if (path === "/auth/github/callback" && method === "GET") return handleAuthCallback(url, request, env);
@@ -320,6 +325,12 @@ async function api(method: string, path: string, url: URL, request: Request, env
   let m: RegExpMatchArray | null;
 
   if (method === "OPTIONS") return new Response(null, { status: 204, headers: cors() });
+  if (method === "GET" && path === "/pacman.conf") {
+    const withOptional = new Set((url.searchParams.get("with") ?? "").split(",").map((s) => s.trim()).filter(Boolean));
+    const text = await pacmanInclude(env, url.searchParams.get("ring") ?? env.DEFAULT_RING, url.searchParams.get("arch") ?? "x86_64", withOptional, `${url.origin}/setup`);
+    if (text === null) return json({ error: "unknown ring or arch, or no release yet" }, 404);
+    return new Response(text, { headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "public, max-age=120" } });
+  }
   if (method === "GET" && path === "/stats") return handleStats(env);
   if (method === "GET" && path === "/version") return json(version(env), 200, { "cache-control": "public, max-age=30" });
   if (method === "GET" && path === "/status") return handleServiceStatus(env);

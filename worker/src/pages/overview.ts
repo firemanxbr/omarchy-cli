@@ -54,25 +54,18 @@ const BODY = String.raw`
 
   <section id="get-started">
     <div class="h2row"><h2>Get started</h2><a class="more-link" href="/docs#get-started/which-ring">Which ring is for me? →</a></div>
-    <p class="sub">Three steps, once per machine. The thin client on the right is optional.</p>
+    <p class="sub">One command, once per machine. The thin client on the right is optional.</p>
     <div class="start-grid"><div class="steps">
       <div class="step">
-        <h3>1. Choose a ring and your architecture</h3>
+        <h3>1. Choose a ring</h3>
         <div class="choice" id="pick-ring"></div>
-        <div class="choice" id="pick-arch"></div>
         <p id="ring-desc" style="margin:0;font-size:13.5px"></p>
       </div>
       <div class="step">
-        <h3>2. Trust the database key</h3>
-        <pre><span class="copy" data-copy="key">copy</span><span id="key-cmd"></span></pre>
-      </div>
-      <div class="step">
-        <h3>3. Point pacman at the ring</h3>
-        <p>Above <code>[core]</code>/<code>[extra]</code> in <code>/etc/pacman.conf</code> — or in their place, the pool serves the same packages. The list is generated from what the ring serves right now.</p>
-        <div class="choice" id="optional"></div>
-        <pre><span class="copy" data-copy="conf">copy</span><span id="conf"></span></pre>
-        <p style="margin-top:10px">Then:</p>
-        <pre><span class="copy" data-copy="up">copy</span><span id="up-cmd">sudo pacman -Syu</span></pre>
+        <h3>2. Run this</h3>
+        <pre><span class="copy" data-copy="setup">copy</span><span id="setup-cmd"></span></pre>
+        <p style="margin:10px 0 6px">It trusts the key that signs the pool's databases, writes <code>/etc/pacman.d/omarchy-pool.conf</code> with what the ring serves right now, and adds one <code>Include</code> line to <code>/etc/pacman.conf</code> above <code>[core]</code> — your own repositories keep their place. It never upgrades: that is your <code>sudo pacman -Syu</code>, next.</p>
+        <p style="margin:0;font-size:13px"><a href="/setup">Read the script first →</a> · <code>--ring rc</code> switches rings · <code>--remove</code> undoes it · <a href="/docs/get-started">Prefer to do it by hand? The steps, explained →</a></p>
       </div>
       <div class="charts">
         <div class="chart"><h3>Pool growth <span>7 days</span></h3><div class="sub">bytes stored once, from the metrics snapshots</div><div id="c-pool"></div><div class="mini" id="c-pool-mini"></div></div>
@@ -85,6 +78,7 @@ const BODY = String.raw`
         <p>A thin client that knows about rings and releases: what an upgrade would change, whether an out-of-band install is safe, what advisories apply to this machine.</p>
         <div class="tabs" id="cli-tabs"></div>
         <pre id="cli-out"></pre>
+        <div class="choice" id="pick-arch" style="margin:4px 0 6px"></div>
         <pre><span class="copy" data-copy="cli">copy</span><span id="cli-cmd"></span></pre>
       </aside>
       <aside class="community-card" id="community-card">
@@ -175,29 +169,13 @@ __CHARTS__
     pick("pick-ring", RINGS, ring, function (v) { ring = v; drawStart(); });
     pick("pick-arch", ARCHES, arch, function (v) { arch = v; drawStart(); });
     $("#ring-desc").textContent = DESC[ring];
-    $("#key-cmd").innerHTML = 'curl -O ' + POOL + '/omarchy-staging.pub.asc\nsudo pacman-key --add omarchy-staging.pub.asc &amp;&amp; sudo pacman-key --lsign-key staging@firemanxbr.org';
-    var r = data ? data.rings.filter(function (x) { return x.ring === ring; })[0] : null;
-    var cov = data ? data.coverage || [] : [];
-    var optionalSources = cov.filter(function (c) { return c.optional && c.arch === arch; });
-    $("#optional").innerHTML = optionalSources.map(function (c) {
-      return '<button type="button" class="' + (optional[c.source] ? "on" : "") + '" data-v="' + esc(c.source) + '" title="' + esc(c.title || "") + '">' + (optional[c.source] ? "✓ " : "+ ") + esc(c.source) + '</button>';
-    }).join("") + (optionalSources.length ? '<span class="muted" style="font-size:12.5px;align-self:center">optional repositories — off unless you switch them on</span>' : '');
-    $("#optional").querySelectorAll("button").forEach(function (b) { b.onclick = function () { var v = b.getAttribute("data-v"); optional[v] = !optional[v]; drawStart(); }; });
-    var dbs = r ? (r.artifacts || []).filter(function (a) {
-      if (a.kind !== "db" || a.arch !== arch) return false;
-      var src = a.repo.replace(/^omarchy-/, "").replace(new RegExp("-" + ring + "$"), "");
-      var opt = cov.filter(function (c) { return c.source === src && c.arch === arch; })[0];
-      return !(opt && opt.optional) || optional[src];
-    }) : [];
-    $("#conf").innerHTML = dbs.length
-      ? dbs.map(function (a) { return "[<b>" + esc(a.repo) + "</b>]\nSigLevel = Required DatabaseRequired\nServer = " + POOL + "/$arch"; }).join("\n\n")
-      : (data ? '<span class="c"># ' + ring + ' has no databases for ' + arch + ' yet — see the Status page</span>' : '<span class="c"># loading what ' + ring + ' serves…</span>');
+    $("#setup-cmd").innerHTML = 'curl -fsSL ' + location.origin + '/setup | sudo bash -s -- --ring ' + ring;
     $("#cli-cmd").innerHTML = '<span class="c"># binaries for both architectures ship with every release</span>\ncurl -sL https://github.com/firemanxbr/omarchy-pool/releases/latest/download/omarchy-pool-' + (data && data.version && data.version.version !== "dev" ? data.version.version : "vX.Y.Z") + '-' + arch + '-linux.tar.gz | tar xz\n' +
       'sudo install -m 755 omarchy-pool-*/omarchy-cli /usr/local/bin/\n' + 'omarchy-cli --ring ' + ring + ' status';
   }
   document.querySelectorAll(".copy").forEach(function (b) {
     b.onclick = function () {
-      var id = { key: "#key-cmd", conf: "#conf", up: "#up-cmd", cli: "#cli-cmd" }[b.getAttribute("data-copy")];
+      var id = { setup: "#setup-cmd", cli: "#cli-cmd" }[b.getAttribute("data-copy")];
       navigator.clipboard.writeText($(id).textContent).then(function () { b.textContent = "copied"; setTimeout(function () { b.textContent = "copy"; }, 1500); });
     };
   });
