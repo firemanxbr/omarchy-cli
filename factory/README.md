@@ -78,19 +78,25 @@ PKGBUILD reviewed and merged ──▶ pool: package_requests / build_tasks (D1)
    (`factory/bin/audit-pkgbuild`, `factory/prompts/audit.md`) and attaches
    `audit.json` / `audit.md` to the evidence. The Review page shows the
    verdict (`ok`, `warn`, `block`); nothing acts on it, the maintainer does.
-6. **A maintainer approves — never their own package.** On the Review page,
-   a maintainer of the group (`factory/MAINTAINERS.toml`) approves or
-   rejects with the evidence in front of them. The approval is the decision
-   on the record; it queues nothing and copies nothing.
-7. **A maintainer writes the recipe.** With the evidence as the lesson —
-   the contributor's PKGBUILD, the log, the metrics, the audit — a
-   maintainer (not the owner) writes the project's own
-   `factory/pkgbuilds/<group>/<name>/PKGBUILD` and opens the pull request.
-   The merge is what the project builds: the hourly `enqueue` job queues it
-   from `main`, a worker the project trusts builds it, the pool signs it and
-   publishes it into `edge`, and the build is linked to the approval it
-   answers (the seal shows the chain). The project's own recipes take the
-   same door without a staged build first.
+6. **A maintainer has the project build it — never their own package.** On
+   the Review page, a maintainer of the group (`factory/MAINTAINERS.toml`)
+   reads the evidence and presses *Build by the project* (or rejects with
+   a note). A review worker takes the task (`review:<task>`): the project's
+   agent gets the request and the contributor's PKGBUILD, log, gate and
+   audit as the lesson — `draft-pkgbuild --evidence` — and writes the
+   project's own recipe from the project's sources; the same gate runs;
+   the packages, the recipe, the log, the gate go to the project's staging
+   space (`staging/@project/…`) and the evidence to the record; its own
+   audit is queued. Nothing is published yet.
+7. **A maintainer approves the project's build.** With the project's
+   evidence in front of them (the Review page shows both rows), a
+   maintainer — not the owner — approves. The approval is the decision on
+   the record and a `publish` job: a project worker fetches the staged
+   packages with the job's token, publishes them into `edge` as source
+   `factory` (the pool signs), renders, and the brain marks the
+   registration `published`, links the approval to the build and writes
+   the seal next to the object. The project's own recipes (in
+   `factory/pkgbuilds`) take the `enqueue` door without a staged build.
 8. **After that: bumps are evidence too.** Once a day the brain asks GitHub
    for each approved package's latest release and queues a community build
    from the contributor's staged PKGBUILD with `pkgver` moved to the tag
@@ -197,12 +203,12 @@ binaries) — and uploads the package, the PKGBUILD, `PKGINFO` and the build
 log to `staging/<you>/<package>/<task>/`. The task is then **staged**: the
 Factory page lists it, the log and the PKGBUILD are public, the package is
 for maintainers. Nothing you build reaches users: a maintainer of the
-group approves it on the [Review](../../../../review) page, then writes
-the project's own recipe from what your build taught — the PKGBUILD, the
-log, the metrics — and merges it into `factory/pkgbuilds`; a project
-worker builds *that* and publishes it into `edge` as source `factory`,
-signed by the pool. Your build was the evidence, the maintainer's recipe
-is the product. A rejection comes with a note you see on your Contribute
+group reads it on the [Review](../../../../review) page and has the
+project build it again — the project's agent, a worker the project
+trusts, its own recipe written with your PKGBUILD, log, gate and audit as
+the lesson — then approves *that* build into `edge` as source `factory`,
+signed by the pool. Your build was the evidence, the project's build is
+the product. A rejection comes with a note you see on your Contribute
 page.
 
 What a build can and cannot do, learned from the first contributor's day

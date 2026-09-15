@@ -12,13 +12,14 @@ const BODY = String.raw`
   <div class="hero compact">
     <p class="eyebrow">Review</p>
     <h1>What contributors built, waiting for a maintainer</h1>
-    <p class="lede">Each row is evidence, not a package: read the PKGBUILD, the log, the manifest, the gate's verdict and the audit, then <b>approve</b> or <b>reject</b> with a note the contributor sees. Nothing here is copied: an approval is the decision, and the project builds the recipe a maintainer writes from this evidence and merges into <code>factory/pkgbuilds/&lt;group&gt;/&lt;name&gt;/</code>. Never your own package. <a href="/docs/governance">Governance →</a></p>
+    <p class="lede">Each row is evidence, not a package: read the PKGBUILD, the log, the manifest, the gate's verdict and the audit, then <b>approve</b> or <b>reject</b> with a note the contributor sees. Nothing here is copied: have <b>the project build it</b> — its agent, a worker it trusts, its own recipe from this evidence — and approve <em>that</em> build into <code>edge</code>. Never your own package. <a href="/docs/governance">Governance →</a></p>
   </div>
   <p class="sub" id="who"></p>
 
   <section>
     <h2>Staged builds</h2>
-    <div class="table-wrap"><table id="staged"><thead><tr><th>#</th><th>Package</th><th>Arch</th><th>Project</th><th>Detected</th><th>Built by</th><th>Evidence</th><th>Gate</th><th>Audit</th><th>Decision</th></tr></thead><tbody></tbody></table></div>
+    <p class="sub">Two kinds of row. A <b>contributor's build</b> is evidence: read it, then have <b>the project build it</b> — its agent, a worker it trusts, its own recipe from what it learned — or reject it. <b>The project's build</b> is what users get: approve it into <code>edge</code>, or reject it.</p>
+    <div class="table-wrap"><table id="staged"><thead><tr><th>#</th><th>Package</th><th>Arch</th><th>Project</th><th>Version · licence</th><th>Build</th><th>Evidence</th><th>Gate</th><th>Audit</th><th>Decision</th></tr></thead><tbody></tbody></table></div>
     <p class="sub">The audit column is the second agent (<a href="/docs/governance">Governance</a>): a project worker whose owner set an agent key reads the PKGBUILD, the log and the <code>.PKGINFO</code> and writes a report — supply chain, security, packaging practice, licence. It is evidence for you, never a decision: <span class="pill ok">ok</span> nothing worth a change · <span class="pill warn">warn</span> approve with the findings in mind · <span class="pill error">block</span> do not approve as is. <em>Waiting</em> means no project worker with a key has picked it up yet.</p>
   </section>
 
@@ -44,11 +45,13 @@ const SCRIPT = String.raw`
   $("#who").innerHTML = 'Read-only until you <a href="/auth/github?next=/review">sign in with GitHub</a>; approving and rejecting need the maintainer role.';
   whoami(function (me) { if (me) { login = me.login; signedIn = true; $("#who").innerHTML = 'Signed in as <b>' + esc(me.login) + '</b> (' + esc(me.role) + (me.areas && me.areas.length ? ' of ' + esc(me.areas.join(", ")) : '') + ')' + (me.role === "contributor" ? ' — approving needs the maintainer role.' : '.'); load(); } });
   function person(l) { return l ? '<a href="/user/' + encodeURIComponent(l) + '">' + esc(l) + '</a>' : ''; }
+  // Three decisions (docs/GOVERNANCE.md): on a contributor's build, "build" (the project builds it again, its
+  // own recipe from this evidence) or "reject"; on the project's build, "approve" (into edge) or "reject".
   function decide(id, what) {
     var note = what === "reject" ? prompt("Why? The contributor sees this.") : (prompt("Note for the record (optional)") || "");
     if (what === "reject" && !note) return;
     busy(fetch(API + "/tasks/" + id + "/" + what, { method: "POST", headers: headers(), body: JSON.stringify({ note: note }) })).then(function (r) { return r.json(); }).then(function (d) {
-      alert(d.error ? d.error : (what === "approve" ? "Approved. Now the recipe: write " + d.recipe + " from the evidence and open the pull request — the project builds it once it is on main." : "Rejected"));
+      alert(d.error ? d.error : what === "approve" ? "Approved — the project's build goes into edge (publish job #" + d.publish + ")." : what === "build" ? "The project is building it: task #" + d.task + " on a review worker, with the project's agent. It shows here when it is staged." : "Rejected");
       load();
     });
   }
@@ -76,13 +79,20 @@ const SCRIPT = String.raw`
     skeletonRows("#staged", 9, 3); skeletonRows("#trust", 7, 2); skeletonRows("#people", 4, 1); skeletonRows("#decisions", 7, 2);
     busy(fetch(API + "/review")).then(function (r) { return r.json(); }).then(function (d) {
       pager("#staged", (d.staged || []), function (t) {
-        var det = t.detected || {};
-        return '<tr><td>' + t.id + '</td><td><b>' + esc(t.name) + '</b> <span class="src">' + esc(t.group) + '</span>' + (t.version ? ' <span class="mono muted">' + esc(t.version) + '</span>' : '') + '</td><td>' + esc(t.arch) + '</td>' +
-          '<td>' + (t.url ? '<a href="' + esc(t.url) + '">' + esc(t.url.replace(/^https?:\/\/(www\.)?github\.com\//, "")) + '</a>' : '—') + '</td><td>' + esc([det.build_system, det.license, det.latest_tag].filter(Boolean).join(" · ")) + '</td>' +
-          '<td>' + person(t.owner) + ' <span class="muted">' + (t.duration_ms ? Math.round(t.duration_ms / 1000) + " s" : "") + '</span></td>' +
+        var det = t.detected || {}, project = t.kind === "project";
+        var who = project ? '<span class="pill ok" title="the project\'s own build, from ' + esc(String(t.from || "")) + '">the project</span> <span class="muted">from #' + esc(String(t.from || "")) + ' by ' + esc(t.owner || "") + '</span>' : person(t.owner) + ' <span class="muted">' + (t.duration_ms ? Math.round(t.duration_ms / 1000) + " s" : "") + '</span>';
+        var pb = t.project_build;
+        var decision = !(token || signedIn) ? '<span class="muted">sign in</span>'
+          : project ? '<button type="button" data-approve="' + t.id + '">Approve</button> <button type="button" data-reject="' + t.id + '">Reject</button>'
+          : pb && (pb.status === "queued" || pb.status === "leased") ? '<span class="muted">the project is building it (#' + pb.id + ')</span> <button type="button" data-reject="' + t.id + '">Reject</button>'
+          : pb && pb.status === "staged" ? '<span class="muted">the project\'s build #' + pb.id + ' is below</span> <button type="button" data-reject="' + t.id + '">Reject</button>'
+          : (pb && pb.status === "failed" ? '<span class="pill error" title="' + esc(pb.error || "") + '">project build #' + pb.id + ' failed</span> ' : '') + '<button type="button" data-build="' + t.id + '">Build by the project</button> <button type="button" data-reject="' + t.id + '">Reject</button>';
+        return '<tr' + (project ? ' class="project-row"' : '') + '><td>' + t.id + '</td><td><b>' + esc(t.name) + '</b>' + (t.version ? ' <span class="mono muted">' + esc(t.version) + '</span>' : '') + '</td><td>' + esc(t.arch) + '</td>' +
+          '<td>' + (t.url ? '<a href="' + esc(t.url) + '">' + esc(t.url.replace(/^https?:\/\/(www\.)?(github\.com\/)?/, "")) + '</a>' : '—') + '</td><td>' + esc([det.latest_tag, det.license].filter(Boolean).join(" · ")) + '</td>' +
+          '<td>' + who + '</td>' +
           '<td><a class="run" href="' + t.evidence.pkgbuild + '">PKGBUILD</a> <a class="run" href="' + t.evidence.log + '">log</a> <a class="run" href="' + t.evidence.pkginfo + '">PKGINFO</a> <span class="mono muted">' + esc((t.result_sha256 || "").slice(0, 12)) + '</span></td>' +
           '<td>' + gate(t) + '</td><td>' + audit(t) + '</td>' +
-          '<td>' + (token || signedIn ? '<button type="button" data-approve="' + t.id + '">Approve</button> <button type="button" data-reject="' + t.id + '">Reject</button>' : '<span class="muted">sign in</span>') + '</td></tr>';
+          '<td>' + decision + '</td></tr>';
       }, { empty: 'nothing waiting for review' });
       endSkeleton();
     }).catch(function () { endSkeleton(); });
@@ -103,8 +113,8 @@ const SCRIPT = String.raw`
     }).catch(function () { endSkeleton(); });
   }
   document.addEventListener("click", function (ev) {
-    var b = ev.target.closest ? ev.target.closest("button[data-approve],button[data-reject]") : null; if (!b) return;
-    decide(b.getAttribute("data-approve") || b.getAttribute("data-reject"), b.hasAttribute("data-approve") ? "approve" : "reject");
+    var b = ev.target.closest ? ev.target.closest("button[data-approve],button[data-reject],button[data-build]") : null; if (!b) return;
+    decide(b.getAttribute("data-approve") || b.getAttribute("data-reject") || b.getAttribute("data-build"), b.hasAttribute("data-approve") ? "approve" : b.hasAttribute("data-build") ? "build" : "reject");
   });
   load();
   liveStats(function () {}, 120000);

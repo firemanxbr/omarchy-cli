@@ -77,7 +77,7 @@ pub fn agent_label() -> Option<String> {
 pub fn default_kinds() -> Vec<String> {
     let mut kinds: Vec<String> = [
         "build", "sync", "render", "promote", "health", "security", "enqueue", "rollback", "gc",
-        "verify", "relayout",
+        "verify", "relayout", "publish",
     ]
     .iter()
     .map(|k| (*k).to_owned())
@@ -342,10 +342,13 @@ fn report(job: &Api, token: &str, task: &Task, outcome: Result<Outcome>, took: u
         }
         Err(e) => {
             let msg = format!("{e:#}");
+            // A failed gate is the recipe's failure: the next fresh container
+            // fails it the same way — final, as the community worker reports.
+            let last = msg.contains("— the gate");
             let _ = job.post_json_as(
                 token,
                 &format!("/factory/tasks/{}/fail", task.id),
-                &serde_json::json!({ "error": msg, "duration_ms": took, "log_tail": msg }),
+                &serde_json::json!({ "error": msg, "duration_ms": took, "log_tail": msg, "final": last }),
             );
             eprintln!("task {}: failed — {e:#}", task.id);
         }
@@ -497,6 +500,7 @@ fn execute(opts: &WorkOptions, task: &Task, token: &Arc<Mutex<String>>) -> Resul
             })
         }
         "build" => build_job(opts, &job, task),
+        "publish" => publish_job(opts, &job, task),
         "audit" => audit_job(opts, &job, task),
         "verify" => verify_job(opts, &job, task),
         "relayout" => relayout_job(opts, &job),
@@ -676,6 +680,108 @@ struct Pending {
 /// and D1 bills every row written, so eleven sources an hour must not
 /// mean eleven releases. A task with a single source (`params.source`,
 /// the old form, and `pkg-repo job sync --param source=…`) pins its own.
+/// Uploads a build's evidence files to the task's staging space, the ones
+/// that exist: `at_dir` from the task directory, `at_out` from its `out/`.
+fn stage_evidence(job: &Api, task: u64, dir: &Path, at_dir: &[&str], at_out: &[&str]) {
+    let files = at_dir.iter().map(|f| (dir.join(f), (*f).to_owned())).chain(
+        at_out
+            .iter()
+            .map(|f| (dir.join("out").join(f), (*f).to_owned())),
+    );
+    for (path, name) in files {
+        if let Ok(bytes) = std::fs::read(&path) {
+            if let Err(e) =
+                job.put_bytes(&format!("/factory/tasks/{task}/artifacts/{name}"), &bytes)
+            {
+                eprintln!("task {task}: {name} not staged: {e}");
+            }
+        }
+    }
+}
+
+/// The publish job: the project's approved build, from its staging space
+/// into the pool — the packages the approval listed, downloaded with this
+/// job's token (a package in staging is for maintainers and for this job),
+/// published into edge as source `factory` (the pool signs), edge rendered
+/// for both architectures. What users get.
+fn publish_job(opts: &WorkOptions, job: &Api, task: &Task) -> Result<Outcome> {
+    let built = task
+        .params
+        .get("task")
+        .and_then(serde_json::Value::as_i64)
+        .ok_or_else(|| anyhow!("publish: params.task names the project's build"))?;
+    let files: Vec<String> = task
+        .params
+        .get("files")
+        .and_then(serde_json::Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default();
+    anyhow::ensure!(
+        !files.is_empty(),
+        "publish: params.files lists the staged packages"
+    );
+    let dir = opts.work_dir.join(format!("publish-{}", task.id));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir)?;
+    let mut pkgs = Vec::new();
+    for f in &files {
+        anyhow::ensure!(
+            f.ends_with(".pkg.tar.zst") && !f.contains('/'),
+            "publish: {f} is not a package file name"
+        );
+        let dest = dir.join(f);
+        job.download_as_self(
+            &format!("{}/api/v1/factory/tasks/{built}/artifacts/{f}", job.base()),
+            &dest,
+        )
+        .with_context(|| format!("fetching {f} of the project's build {built}"))?;
+        pkgs.push(dest);
+    }
+    pkgs.sort();
+    ops::publish(
+        job,
+        "edge",
+        "factory",
+        &task.arch,
+        Some(&format!(
+            "factory task {built}: {} approved ({})",
+            task.name,
+            s(&task.params, "by")
+        )),
+        &pkgs,
+    )?;
+    let mut rendered = ops::render(job, "edge", &task.arch, opts.sign.as_deref())?;
+    let other = if task.arch == "aarch64" {
+        "x86_64"
+    } else {
+        "aarch64"
+    };
+    rendered.extend(ops::render(job, "edge", other, opts.sign.as_deref())?);
+    let main = pkgs
+        .iter()
+        .find(|p| {
+            p.file_name()
+                .is_some_and(|f| f.to_string_lossy().starts_with(&format!("{}-", task.name)))
+        })
+        .unwrap_or(&pkgs[0]);
+    let manifest = pkg_extract::extract_manifest(main)?;
+    let _ = std::fs::remove_dir_all(&dir);
+    Ok(Outcome {
+        summary: format!(
+            "{} {} — the project's build {built}, approved — published into edge for {} ({})",
+            manifest.name,
+            manifest.version,
+            task.arch,
+            rendered.join(", ")
+        ),
+        result: serde_json::json!({ "sha256": manifest.sha256, "filename": manifest.filename, "version": manifest.version, "rendered": rendered, "task": built }),
+    })
+}
+
 /// The keyrings a sync task names: one per source of the batch, or the single source's.
 fn task_keyrings(task: &Task, batch: &[serde_json::Value]) -> Vec<String> {
     let names = if batch.is_empty() {
@@ -1016,7 +1122,14 @@ fn build_job(opts: &WorkOptions, job: &Api, task: &Task) -> Result<Outcome> {
         u.replace("://localhost", "://host.containers.internal")
             .replace("://127.0.0.1", "://host.containers.internal")
     };
-    let meta = format!(
+    // The project's review build (review:<task>, params.review): the
+    // request's facts ride along for the drafter, and the result is staged
+    // for a maintainer instead of published.
+    let review = task
+        .params
+        .get("review")
+        .and_then(serde_json::Value::as_i64);
+    let mut meta = format!(
         "name={}\ngroup={}\nref={}\narch={}\npool={}\nexport OMARCHY_API={}\n",
         shell_quote(&task.name),
         shell_quote(&group),
@@ -1025,6 +1138,21 @@ fn build_job(opts: &WorkOptions, job: &Api, task: &Task) -> Result<Outcome> {
         shell_quote(&from_container(&opts.pool)),
         shell_quote(&from_container(&opts.api))
     );
+    if review.is_some() {
+        for (var, key) in [
+            ("review_url", "project"),
+            ("review_source", "source"),
+            ("review_version", "version"),
+            ("review_desc", "description"),
+            ("review_license", "license"),
+        ] {
+            let v = s(&task.params, key);
+            if !v.is_empty() {
+                use std::fmt::Write as _;
+                let _ = writeln!(meta, "{var}={}", shell_quote(&v));
+            }
+        }
+    }
     std::fs::write(dir.join("meta.sh"), meta)?;
     std::fs::copy(
         repo.join("factory/worker/omarchy-build-worker.sh"),
@@ -1051,6 +1179,25 @@ fn build_job(opts: &WorkOptions, job: &Api, task: &Task) -> Result<Outcome> {
         "-v",
     ])
     .arg(format!("{}:/task", dir.display()));
+    // What the operator hands every build container: the agent's address
+    // (OMARCHY_BUILD_ENV, comma-separated KEY=VALUE — the agent-proxy on the
+    // Studio, where Claude Code cannot run under qemu) and the network it
+    // is on (OMARCHY_BUILD_NETWORK). A review build needs an agent inside.
+    if let Ok(envs) = std::env::var("OMARCHY_BUILD_ENV") {
+        for kv in envs.split(',').map(str::trim).filter(|kv| kv.contains('=')) {
+            run.arg("-e").arg(kv);
+        }
+    }
+    if let Ok(net) = std::env::var("OMARCHY_BUILD_NETWORK") {
+        if !net.is_empty() {
+            run.arg("--network").arg(net);
+        }
+    }
+    if let Ok(token) = std::env::var("GITHUB_TOKEN") {
+        if !token.is_empty() {
+            run.arg("-e").arg("GITHUB_TOKEN");
+        }
+    }
     // A package cache shared by every build container on this host
     // (OMARCHY_PKG_CACHE, one directory per architecture): pacman downloads
     // a dependency once, not once per build.
@@ -1082,7 +1229,22 @@ fn build_job(opts: &WorkOptions, job: &Api, task: &Task) -> Result<Outcome> {
             .rev()
             .collect::<Vec<_>>()
             .join("\n");
-        return Err(anyhow!("build failed (exit {:?}):\n{tail}", status.code()));
+        if review.is_some() {
+            // What there is goes on the record: the log, the gate's verdict, the recipe that failed.
+            stage_evidence(
+                job,
+                task.id,
+                &dir,
+                &["build.log"],
+                &["PKGBUILD", "vet.json", "tests.log"],
+            );
+        }
+        let gate = status.code() == Some(5);
+        return Err(anyhow!(
+            "build failed (exit {:?}){}:\n{tail}",
+            status.code(),
+            if gate { " — the gate" } else { "" }
+        ));
     }
     let mut pkgs: Vec<PathBuf> = std::fs::read_dir(dir.join("out"))?
         .filter_map(Result::ok)
@@ -1091,6 +1253,59 @@ fn build_job(opts: &WorkOptions, job: &Api, task: &Task) -> Result<Outcome> {
         .collect();
     pkgs.sort();
     anyhow::ensure!(!pkgs.is_empty(), "makepkg produced no package");
+    if let Some(from) = review {
+        // The project's review build: everything to staging for a
+        // maintainer — the packages, the recipe, the log, the manifest, the
+        // gate — nothing to the pool until the approval's publish job.
+        let main = pkgs
+            .iter()
+            .find(|p| {
+                p.file_name()
+                    .is_some_and(|f| f.to_string_lossy().starts_with(&format!("{}-", task.name)))
+            })
+            .unwrap_or(&pkgs[0]);
+        let manifest = pkg_extract::extract_manifest(main)?;
+        let pkginfo = Command::new("tar")
+            .arg("-xOf")
+            .arg(main)
+            .arg(".PKGINFO")
+            .output()
+            .map(|o| o.stdout)
+            .unwrap_or_default();
+        for p in &pkgs {
+            let name = p
+                .file_name()
+                .map(|f| f.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            job.put_bytes(
+                &format!("/factory/tasks/{}/artifacts/{name}", task.id),
+                &std::fs::read(p)?,
+            )
+            .with_context(|| format!("staging {name}"))?;
+        }
+        if !pkginfo.is_empty() {
+            job.put_bytes(
+                &format!("/factory/tasks/{}/artifacts/PKGINFO", task.id),
+                &pkginfo,
+            )
+            .context("staging PKGINFO")?;
+        }
+        stage_evidence(
+            job,
+            task.id,
+            &dir,
+            &["build.log"],
+            &["PKGBUILD", "vet.json", "tests.log"],
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+        return Ok(Outcome {
+            summary: format!(
+                "{} {} built by the project for {} from staged task {from} — staged for a maintainer's approval",
+                manifest.name, manifest.version, task.arch
+            ),
+            result: serde_json::json!({ "sha256": manifest.sha256, "filename": manifest.filename, "version": manifest.version, "review": from }),
+        });
+    }
     // The pool signs what it stores (SECURITY.md); a local key only covers
     // a pool that has none.
     if let Some(key) = &opts.sign {

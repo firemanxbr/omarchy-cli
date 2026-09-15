@@ -349,18 +349,24 @@ rb=$(curl -s -X POST "$OMARCHY_API/api/v1/factory/jobs" "${mauth[@]}" -d '{"kind
      ('mine', 'community', 'aarch64', '1.0-1', 'draft:https://github.com/e2e/mine@latest', 'contributor', 100, 0, 'community', 'e2e', 'build', 'staged', 'staging/e2e/mine/1/');
    UPDATE factory_groups SET maintainers = '[\"e2e\",\"other\"]' WHERE name = 'community'" >/dev/null)
 mine=$(curl -s "$OMARCHY_API/api/v1/factory/review" | python3 -c 'import json,sys; print([t["id"] for t in json.load(sys.stdin)["staged"] if t["name"]=="mine"][0])')
-[[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/tasks/$mine/approve" "${mauth[@]}" -d '{}')" == 403 ]] || { echo "a maintainer must not approve their own package when another maintainer exists"; exit 1; }
+# A contributor's build is evidence: approving it is refused before anything else. The owner rule shows on "build":
+# a maintainer never has the project build their own package — with another maintainer around or as the sole one.
+[[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/tasks/$mine/approve" "${mauth[@]}" -d '{}')" == 409 ]] || { echo "a contributor's build must never be approvable"; exit 1; }
+[[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/tasks/$mine/build" "${mauth[@]}" -d '{}')" == 403 ]] || { echo "a maintainer must not have the project build their own package when another maintainer exists"; exit 1; }
 (cd "$ROOT/worker" && npx wrangler d1 execute omarchy-repo --local --persist-to "$WRANGLER_STATE" --command "UPDATE factory_groups SET maintainers = '[\"e2e\"]' WHERE name = 'community'" >/dev/null)
-[[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/tasks/$mine/approve" "${mauth[@]}" -d '{}')" == 403 ]] || { echo "the sole maintainer must not approve their own package either"; exit 1; }
-# Somebody else's package: the approval is a decision on the record, and nothing of the contributor's is queued —
-# the project builds the recipe a maintainer merges into factory/pkgbuilds (the enqueue job).
+[[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/tasks/$mine/build" "${mauth[@]}" -d '{}')" == 403 ]] || { echo "the sole maintainer must not have the project build their own package either"; exit 1; }
+# Somebody else's package: a contributor's build is never approved — it is evidence. A maintainer has the project
+# build it (review:<task>, the project's own recipe, its agent, a worker it trusts); the approval comes on that build.
 (cd "$ROOT/worker" && npx wrangler d1 execute omarchy-repo --local --persist-to "$WRANGLER_STATE" --command "UPDATE build_tasks SET owner = 'someone-else' WHERE id = $mine" >/dev/null)
-dec=$(curl -s -X POST "$OMARCHY_API/api/v1/factory/tasks/$mine/approve" "${mauth[@]}" -d '{"note":"reads well"}'); grep -q '"recipe":"factory/pkgbuilds/community/mine/PKGBUILD"' <<<"$dec" && ! grep -q '"rebuild_task"' <<<"$dec" || { echo "an approval must record the decision and queue nothing: $dec"; exit 1; }
+dec=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/tasks/$mine/approve" "${mauth[@]}" -d '{"note":"reads well"}'); [[ "$dec" == 409 ]] || { echo "a contributor's build must not be approvable (got $dec)"; exit 1; }
+pb=$(curl -s -X POST "$OMARCHY_API/api/v1/factory/tasks/$mine/build" "${mauth[@]}" -d '{"note":"reads well"}'); grep -q "\"from\":$mine" <<<"$pb" && grep -q '"by":"e2e"' <<<"$pb" || { echo "the project build must be queued from the staged evidence: $pb"; exit 1; }
+ptask=$(jq -r .task <<<"$pb")
+[[ "$(cd "$ROOT/worker" && npx wrangler d1 execute omarchy-repo --local --persist-to "$WRANGLER_STATE" --json --command "SELECT pkgbuild_ref || ' ' || trust || ' ' || publish AS r FROM build_tasks WHERE id = $ptask" | jq -r '.[0].results[0].r')" == "review:$mine project 0" ]] || { echo "the project build is a project-trust, staged (publish 0) build from review:$mine"; exit 1; }
 [[ "$(cd "$ROOT/worker" && npx wrangler d1 execute omarchy-repo --local --persist-to "$WRANGLER_STATE" --json --command "SELECT COUNT(*) AS n FROM build_tasks WHERE kind = 'build' AND pkgbuild_ref LIKE 'staging:%'" | jq -r '.[0].results[0].n')" == 0 ]] || { echo "no build may start from a contributor's staged artifact"; exit 1; }
-apr=$(curl -s "$OMARCHY_API/api/v1/factory/approvals"); grep -q '"by":"e2e"' <<<"$apr" && grep -q '"note":"reads well"' <<<"$apr" || { echo "the approval must be on the record: $(head -c 300 <<<"$apr")"; exit 1; }
-# The track record per group on the profile: e2e signed the approval; the package was somebody else's.
-rec=$(curl -s "$OMARCHY_API/api/v1/users/e2e?after=approval")   # a fresh key: the profile is edge-cached for a minute
-python3 -c 'import json,sys; r=[g for g in json.load(sys.stdin)["record"] if g["group"]=="community"][0]; assert r["contributed"]["approved"]==0 and r["maintained"]["approvals"]==1 and r["score"]==2, r' <<<"$rec" || { echo "the profile record is off: $(python3 -c 'import json,sys; print(json.load(sys.stdin)["record"])' <<<"$rec")"; exit 1; }
+[[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/tasks/$mine/build" "${mauth[@]}" -d '{}')" == 409 ]] || { echo "one project build at a time per staged build"; exit 1; }
+# Nothing was approved yet: the profile's record says so.
+rec=$(curl -s "$OMARCHY_API/api/v1/users/e2e?after=review")   # a fresh key: the profile is edge-cached for a minute
+python3 -c 'import json,sys; rs=[g for g in json.load(sys.stdin)["record"] if g["group"]=="community"]; assert not rs or rs[0]["maintained"]["approvals"]==0, rs' <<<"$rec" || { echo "the profile record is off: $(python3 -c 'import json,sys; print(json.load(sys.stdin)["record"])' <<<"$rec")"; exit 1; }
 rpage=$(curl -s "$OMARCHY_API/review"); grep -q "Review" <<<"$rpage" || { echo "review page not served"; exit 1; }
 # A signature for bytes the pool does not serve under that filename is refused.
 [[ "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$OMARCHY_API/api/v1/pool/$(printf 'a%.0s' {1..64})/sig?filename=xz-5.8.4-1-x86_64.pkg.tar.zst&source=packages&arch=x86_64" -H "authorization: Bearer $OMARCHY_TOKEN" --data-binary "@$E2E/pkgs/xz-5.8.4-1-x86_64.pkg.tar.zst.sig")" == 409 ]] || { echo "a mismatching signature must be refused"; exit 1; }

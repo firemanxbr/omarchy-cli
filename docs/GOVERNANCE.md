@@ -26,23 +26,24 @@ agent turns that knowledge into a recipe faster. The agent's key is the
 contributor's, on their machine; the project runs no agent for them.
 
 **Nothing the contributor built is ever used — not the package, not the
-recipe.** The maintainer does not trust it and must not: they write the
-project's recipe themselves, with the knowledge the evidence handed over,
-merge it into `factory/pkgbuilds/<group>/<name>/` by pull request, and a
-worker the project trusts builds *that*; the pool signs the result. What
-the maintainer has in front of them is not "some software, go package it"
-— it is a recipe that already built, its log, its manifest, its metrics,
-the corrections made along the way, the second agent's audit. Evidence.
-It makes the maintainer faster and less likely to err, and the approval
-more confident, not less demanding. The pool enforces the line: an
-approval queues no build, and a worker refuses to start one from a staged
-artifact (`factory/worker/omarchy-build-worker.sh`).
+recipe.** The maintainer does not trust it and must not. What they have in
+front of them is not "some software, go package it" — it is a recipe that
+already built, its log, its manifest, the gate's transcript, the second
+agent's audit, the corrections made along the way. Evidence. A maintainer
+(never the owner) reads it and has **the project build the package
+again**: on a worker the project trusts, with the project's agent, which
+gets the request and that evidence as the lesson and writes the project's
+own recipe from the project's sources — through the same gate, staged
+like any build, its evidence on the record. Then a maintainer approves
+*the project's build*, and only that goes into the pool, signed. The pool
+enforces the line: a contributor's build cannot be approved (the API says
+so), a worker refuses to start from a staged artifact, and the project's
+build carries `review:<task>` — where it learned, never what it copied.
 
 Zero trust between people, shared knowledge between them. Users get a
-package at least **two different people** made — the contributor who
-made it work, the maintainer who wrote the recipe the project built and
-attested — and, when both sides run an agent, one that two independent
-agents built and tested.
+package at least **two different people** stood behind — the contributor
+who made it work, the maintainer who had it built again and attested it —
+built twice, on two workers, by two agents, and never the first one.
 
 ### The second agent
 
@@ -71,21 +72,19 @@ page and at `GET /api/v1/factory/groups`.
 
 ## What a maintainer does
 
-- Approves or rejects the staged builds of their groups, with the evidence
-  (PKGBUILD, log, PKGINFO, audit) in front of them. An approval is the
-  decision, on the record with a name; it queues nothing. **Never their
-  own package**: a maintainer who brought a package is its contributor,
-  and another maintainer of the group approves it (conflict of interest,
-  refused by the pool). A group with a single maintainer is no exception:
-  that maintainer's own packages wait for a second one — which is why a
-  group needs two.
-- Writes the project's recipe for what they approved, from the evidence,
-  and opens the pull request adding `factory/pkgbuilds/<group>/<name>/`.
-  The merge is what the project builds (the hourly `enqueue` job queues
-  it from `main`), signs and publishes into `edge`; the build is linked
-  back to the approval it answers, and the seal of the object shows the
-  whole chain. The maintainer who wrote the recipe is not the package's
-  owner.
+- Reads a contributor's staged build — PKGBUILD, log, PKGINFO, the gate,
+  the audit — and either rejects it with a note or has **the project
+  build it** (`POST /factory/tasks/:id/build`): a review worker, the
+  project's agent, the project's own recipe, the same gate, staged.
+- Approves or rejects **the project's build**, with its evidence in
+  front of them. An approval is the decision, on the record with a name,
+  and the publish job: the project's package into `edge`, signed by the
+  pool, the registration `published`, the seal written next to the
+  object. **Never their own package**: a maintainer who brought a package
+  is its contributor, and another maintainer of the group has it built
+  and approves it (conflict of interest, refused by the pool). A group
+  with a single maintainer is no exception: that maintainer's own
+  packages wait for a second one — which is why a group needs two.
 - Reviews pull requests touching `factory/pkgbuilds/<group>/` (a new recipe
   of the project's own, a version bump).
 - Trusts workers as project workers (`POST /factory/workers/:id/trust`).

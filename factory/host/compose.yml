@@ -57,6 +57,10 @@ services:
     environment:
       OMARCHY_WORKER_ROLE: review
       OMARCHY_WORK_DIR: ${POOL_ROOT:-/srv/omarchy-pool}/work/review-x86_64
+      # The project's review builds run the agent inside a fresh build
+      # container: it reaches the agent-proxy on the compose network.
+      OMARCHY_BUILD_ENV: "FACTORY_PROVIDER=anthropic,ANTHROPIC_BASE_URL=http://agent-proxy:8790,ANTHROPIC_API_KEY=via-agent-proxy"
+      OMARCHY_BUILD_NETWORK: ${COMPOSE_PROJECT_NAME:-omarchy-pool}_default
       OMARCHY_PKG_CACHE: ${POOL_ROOT:-/srv/omarchy-pool}/cache/pacman
       OMARCHY_BUILD_CACHE: ${POOL_ROOT:-/srv/omarchy-pool}/cache/build
       WORKER_LABELS: '{"where":"${WHERE:-omarchy-studio}","emulated":true}'
@@ -66,6 +70,10 @@ services:
     environment:
       OMARCHY_WORKER_ROLE: review
       OMARCHY_WORK_DIR: ${POOL_ROOT:-/srv/omarchy-pool}/work/review-aarch64
+      # The project's review builds run the agent inside a fresh build
+      # container: it reaches the agent-proxy on the compose network.
+      OMARCHY_BUILD_ENV: "FACTORY_PROVIDER=anthropic,ANTHROPIC_BASE_URL=http://agent-proxy:8790,ANTHROPIC_API_KEY=via-agent-proxy"
+      OMARCHY_BUILD_NETWORK: ${COMPOSE_PROJECT_NAME:-omarchy-pool}_default
       OMARCHY_PKG_CACHE: ${POOL_ROOT:-/srv/omarchy-pool}/cache/pacman
       OMARCHY_BUILD_CACHE: ${POOL_ROOT:-/srv/omarchy-pool}/cache/build
       WORKER_LABELS: '{"where":"${WHERE:-omarchy-studio}"}'
@@ -88,7 +96,6 @@ services:
   # FACTORY_PROVIDER=anthropic, ANTHROPIC_BASE_URL=http://agent-proxy:8790.
   # The key is a placeholder the proxy never reads; nothing is published.
   agent-proxy:
-    profiles: [emulated]
     image: ghcr.io/firemanxbr/omarchy-worker:aarch64
     restart: unless-stopped
     env_file: [etc/agent.env]

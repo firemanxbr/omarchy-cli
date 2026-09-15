@@ -81,8 +81,11 @@ agent_probe_if_due() {
 #   <url>@<tag>:<path>         the contributor's own repository at a tag (path is the PKGBUILD or its directory)
 #   draft:<url>@<tag|latest>   drafted here by factory/bin/draft-pkgbuild (the contributor's agent key, if any)
 #   bump:<task>@<tag>          the PKGBUILD approved in <task>, pkgver moved to <tag>, checksums refreshed (a community build: evidence)
+#   review:<task>              the project's own build of what a contributor staged in <task>: the request's
+#                              facts and the contributor's evidence go to the project's agent as the lesson,
+#                              the PKGBUILD it writes is its own; needs an agent (meta.sh carries the request)
 #   staging:<task>             refused since 2026-09-15: a build never starts from a contributor's staged
-#                              artifact; the project builds the recipe a maintainer wrote (docs/GOVERNANCE.md)
+#                              artifact — the project writes its own (review:<task>, docs/GOVERNANCE.md)
 prepare_container() {
   # pacman's download sandbox (seccomp + landlock) has no place in an
   # already-isolated, sometimes emulated container.
@@ -135,8 +138,24 @@ fetch_pkgbuild() { # name group ref → /build/pkg holds the PKGBUILD directory
   local name="$1" group="$2" ref="$3"
   rm -rf /build/pkg /build/src
   if [[ "$ref" == staging:* ]]; then
-    echo "==> refused: a build never starts from a contributor's staged artifact (task ${ref#staging:}); the project builds the recipe a maintainer wrote into factory/pkgbuilds/$group/$name (docs/GOVERNANCE.md)" >&2
+    echo "==> refused: a build never starts from a contributor's staged artifact (task ${ref#staging:}); the project writes its own (review:<task>, docs/GOVERNANCE.md)" >&2
     return 1
+  elif [[ "$ref" == review:* ]]; then
+    # The project's review build: the evidence of the contributor's staged
+    # build — PKGBUILD, log, the gate, the audit — is fetched as the lesson;
+    # the agent writes the project's own recipe from the project's sources
+    # and the request's facts (meta.sh: review_url, review_source, …).
+    local from="${ref#review:}"
+    [[ -n "$(agent_label)" ]] || { echo "==> refused: the project's review build needs an agent that answers; this worker has none" >&2; return 1; }
+    echo "==> The project's build: learning from staged task $from ($(agent_label))"
+    rm -rf /build/evidence && mkdir -p /build/evidence /build/pkg
+    local f
+    for f in PKGBUILD build.log tests.log audit.md; do
+      curl -sSf --max-time 60 "${OMARCHY_API:-https://pkgs.firemanxbr.org}/api/v1/factory/tasks/$from/artifacts/$f" -o "/build/evidence/$f" 2>/dev/null || rm -f "/build/evidence/$f"
+    done
+    ls -la /build/evidence
+    GITHUB_TOKEN="${GITHUB_TOKEN:-}" python3 /build/pool/factory/bin/draft-pkgbuild --url "${review_url:-$OMARCHY_REVIEW_URL}" --name "$name" --out /build/pkg --evidence /build/evidence \
+      ${review_source:+--source "$review_source"} ${review_version:+--version "$review_version"} ${review_desc:+--description "$review_desc"} ${review_license:+--license "$review_license"}
   elif [[ "$ref" == bump:* ]]; then
     # A new upstream release of an approved package: the PKGBUILD a
     # maintainer approved, with pkgver moved to the tag and pkgrel reset;
@@ -343,7 +362,7 @@ vet_package() { # name → 0 pass (maybe warnings), 5 fail; writes vet.json and 
 # agent doing the heavy lifting, on the contributor's machine.
 build_with_retries() { # name group ref
   local name="$1" group="$2" ref="$3" attempt=1 max=1
-  [[ "$ref" == draft:* && -n "$(agent_label)" ]] && max=3
+  [[ ( "$ref" == draft:* || "$ref" == review:* ) && -n "$(agent_label)" ]] && max=3
   fetch_pkgbuild "$name" "$group" "$ref"
   while :; do
     if run_makepkg > /build/attempt.log 2>&1; then
@@ -359,13 +378,18 @@ build_with_retries() { # name group ref
     attempt=$((attempt + 1))
     echo "==> Attempt $attempt: correcting the PKGBUILD from the log"
     cp /build/pkg/PKGBUILD /build/PKGBUILD.prev
-    local url; url="${ref#draft:}"; url="${url%@*}"
-    python3 /build/pool/factory/bin/draft-pkgbuild --url "$url" --name "$name" --out /build/pkg --previous /build/PKGBUILD.prev --log /build/attempt.log || return 4
+    if [[ "$ref" == review:* ]]; then
+      python3 /build/pool/factory/bin/draft-pkgbuild --url "${review_url:-$OMARCHY_REVIEW_URL}" --name "$name" --out /build/pkg --evidence /build/evidence --previous /build/PKGBUILD.prev --log /build/attempt.log \
+        ${review_source:+--source "$review_source"} ${review_version:+--version "$review_version"} ${review_desc:+--description "$review_desc"} ${review_license:+--license "$review_license"} || return 4
+    else
+      local url; url="${ref#draft:}"; url="${url%@*}"
+      python3 /build/pool/factory/bin/draft-pkgbuild --url "$url" --name "$name" --out /build/pkg --previous /build/PKGBUILD.prev --log /build/attempt.log || return 4
+    fi
   done
 }
 
 inside() {
-  local name group ref arch pool
+  local name group ref arch pool review_url review_source review_version review_desc review_license
   # shellcheck source=/dev/null
   source /task/meta.sh
   prepare_container

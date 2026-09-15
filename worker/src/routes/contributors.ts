@@ -413,6 +413,16 @@ export function stagingKey(owner: string, name: string, task: number, filename: 
   return `staging/${owner}/${name}/${task}/${filename}`;
 }
 
+/** A task that stages: a contributor's build (their workspace, their quota) or the project's review build (the project's space, no quota). */
+function stagingOwner(task: { trust: string; owner: string | null; params: string | null }): string | null {
+  if (task.trust === "community") return task.owner;
+  try {
+    return task.params && (JSON.parse(task.params) as { review?: unknown }).review !== undefined ? "@project" : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * PUT /factory/tasks/:id/artifacts/:filename — the worker uploads the
  * package(s), PKGBUILD, build.log and manifest.json of a community task it
@@ -423,9 +433,10 @@ export function stagingKey(owner: string, name: string, task: number, filename: 
 const AUDIT_FILES = ["audit.json", "audit.md"];
 
 export async function handleStagingPut(taskId: number, filename: string, request: Request, env: Env, w: WorkerIdentity): Promise<Response> {
-  const task = await env.DB.prepare("SELECT id, name, owner, status, lease_owner, trust FROM build_tasks WHERE id = ?").bind(taskId).first<{ id: number; name: string; owner: string; status: string; lease_owner: string; trust: string }>();
+  const task = await env.DB.prepare("SELECT id, name, owner, status, lease_owner, trust, params FROM build_tasks WHERE id = ?").bind(taskId).first<{ id: number; name: string; owner: string; status: string; lease_owner: string; trust: string; params: string | null }>();
   if (!task) return json({ error: "no such task" }, 404);
-  if (task.trust !== "community") return json({ error: "project tasks publish to the pool, not to staging" }, 400);
+  const space = stagingOwner(task);
+  if (!space) return json({ error: "project tasks publish to the pool, not to staging" }, 400);
   if (w.job === "audit") {
     // The second agent's report, next to the evidence it read: only once
     // the build is staged (its own worker is done), only the report files.
@@ -437,23 +448,26 @@ export async function handleStagingPut(taskId: number, filename: string, request
     if (AUDIT_FILES.includes(filename)) return json({ error: `${filename} is written by the audit job, not by the build` }, 403);
   }
   if (!/^[A-Za-z0-9][A-Za-z0-9._:+-]{0,200}$/.test(filename)) return json({ error: "bad filename" }, 400);
-  const used = await env.DB.prepare("SELECT COALESCE(SUM(size), 0) AS bytes FROM staging_objects WHERE owner = ?").bind(task.owner).first<{ bytes: number }>();
   const len = Number(request.headers.get("content-length") ?? 0);
-  if ((used?.bytes ?? 0) + len > STAGING_QUOTA_BYTES) return json({ error: `staging quota of ${STAGING_QUOTA_BYTES} bytes reached for ${task.owner}; older builds expire after 30 days` }, 413);
+  if (space !== "@project") {
+    const used = await env.DB.prepare("SELECT COALESCE(SUM(size), 0) AS bytes FROM staging_objects WHERE owner = ?").bind(space).first<{ bytes: number }>();
+    if ((used?.bytes ?? 0) + len > STAGING_QUOTA_BYTES) return json({ error: `staging quota of ${STAGING_QUOTA_BYTES} bytes reached for ${space}; older builds expire after 30 days` }, 413);
+  }
   if (len > SINGLE_PUT_MAX) return json({ error: "above 90 MB use /multipart" }, 413);
   if (!request.body) return json({ error: "empty body" }, 400);
-  const key = stagingKey(task.owner, task.name, task.id, filename);
+  const key = stagingKey(space, task.name, task.id, filename);
   const obj = await env.STAGING.put(key, request.body, { httpMetadata: { contentType: isTextEvidence(filename) ? "text/plain; charset=utf-8" : "application/octet-stream" } });
-  await env.DB.prepare("INSERT OR REPLACE INTO staging_objects (key, owner, task_id, size) VALUES (?, ?, ?, ?)").bind(key, task.owner, task.id, obj?.size ?? len).run();
+  await env.DB.prepare("INSERT OR REPLACE INTO staging_objects (key, owner, task_id, size) VALUES (?, ?, ?, ?)").bind(key, space, task.id, obj?.size ?? len).run();
   return json({ key, size: obj?.size ?? len }, 201);
 }
 
 export async function handleStagingMultipart(taskId: number, filename: string, url: URL, request: Request, env: Env, w: WorkerIdentity): Promise<Response> {
-  const task = await env.DB.prepare("SELECT id, name, owner, status, lease_owner, trust FROM build_tasks WHERE id = ?").bind(taskId).first<{ id: number; name: string; owner: string; status: string; lease_owner: string; trust: string }>();
-  if (!task || task.trust !== "community") return json({ error: "no such community task" }, 404);
+  const task = await env.DB.prepare("SELECT id, name, owner, status, lease_owner, trust, params FROM build_tasks WHERE id = ?").bind(taskId).first<{ id: number; name: string; owner: string; status: string; lease_owner: string; trust: string; params: string | null }>();
+  const space = task ? stagingOwner(task) : null;
+  if (!task || !space) return json({ error: "no such staging task" }, 404);
   if (task.status !== "leased" || task.lease_owner !== w.id) return json({ error: "the lease is not yours" }, 409);
   if (!/^[A-Za-z0-9][A-Za-z0-9._:+-]{0,200}$/.test(filename) || AUDIT_FILES.includes(filename)) return json({ error: "bad filename" }, 400);
-  const key = stagingKey(task.owner, task.name, task.id, filename);
+  const key = stagingKey(space, task.name, task.id, filename);
   const action = url.searchParams.get("action");
   if (action === "create") {
     const mp = await env.STAGING.createMultipartUpload(key);
@@ -471,7 +485,7 @@ export async function handleStagingMultipart(taskId: number, filename: string, u
   if (action === "complete") {
     const b = (await request.json()) as { parts: { partNumber: number; etag: string }[] };
     const obj = await mp.complete(b.parts);
-    await env.DB.prepare("INSERT OR REPLACE INTO staging_objects (key, owner, task_id, size) VALUES (?, ?, ?, ?)").bind(key, task.owner, task.id, obj.size).run();
+    await env.DB.prepare("INSERT OR REPLACE INTO staging_objects (key, owner, task_id, size) VALUES (?, ?, ?, ?)").bind(key, space, task.id, obj.size).run();
     return json({ key, size: obj.size }, 201);
   }
   if (action === "abort") {
