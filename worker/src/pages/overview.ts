@@ -27,7 +27,7 @@ const BODY = String.raw`
     </form>
   </div>
 
-  <div class="tiles" id="tiles"></div>
+  <div class="tiles six" id="tiles"></div>
 
   <section id="how">
     <div class="h2row"><h2>From upstream to your machine</h2><a class="more-link" href="/docs/how-it-works">The full story, stage by stage →</a></div>
@@ -54,73 +54,51 @@ const BODY = String.raw`
 
   <section id="get-started">
     <div class="h2row"><h2>Get started</h2><a class="more-link" href="/docs#get-started/which-ring">Which ring is for me? →</a></div>
-    <p class="sub">One command, once per machine. The thin client on the right is optional.</p>
-    <div class="start-grid"><div class="steps">
-      <div class="step">
-        <h3>1. Choose a ring</h3>
+    <p class="sub">One command, once per machine. <a href="/docs/get-started">What it does, how to switch rings, how to undo it →</a></p>
+    <div class="start-grid">
+      <div class="step start-cmd">
+        <h3>Point pacman at a ring <span class="dim" style="font-size:12px;font-weight:400">x86_64 · aarch64</span></h3>
         <div class="choice" id="pick-ring"></div>
-        <p id="ring-desc" style="margin:0;font-size:13.5px"></p>
-      </div>
-      <div class="step">
-        <h3>2. Run this</h3>
+        <p id="ring-desc" style="margin:0 0 12px;font-size:13.5px"></p>
         <pre><span class="copy" data-copy="setup">copy</span><span id="setup-cmd"></span></pre>
-        <p style="margin:10px 0 6px">It trusts the key that signs the pool's databases, writes <code>/etc/pacman.d/omarchy-pool.conf</code> with what the ring serves right now, and adds one <code>Include</code> line to <code>/etc/pacman.conf</code> above <code>[core]</code> — your own repositories keep their place. It never upgrades: that is your <code>sudo pacman -Syu</code>, next.</p>
-        <p style="margin:0;font-size:13px"><a href="/setup">Read the script first →</a> · <code>--ring rc</code> switches rings · <code>--remove</code> undoes it · <a href="/docs/get-started">Prefer to do it by hand? The steps, explained →</a></p>
+        <p style="margin:10px 0 0;font-size:13px">Then <code>sudo pacman -Syu</code>. <a href="/setup">Read the script first →</a></p>
       </div>
-      <div class="charts">
-        <div class="chart"><h3>Pool growth <span>7 days</span></h3><div class="sub">bytes stored once, from the metrics snapshots</div><div id="c-pool"></div><div class="mini" id="c-pool-mini"></div></div>
-        <div class="chart"><h3>Security in stable <span id="sec-when">now</span></h3><div class="sub">open advisories matched against what stable serves</div><div id="c-sec"></div></div>
-      </div>
-    </div>
-    <div class="start-side">
       <aside class="cli-card">
         <h3>omarchy-cli <span class="dim" style="font-size:12px;font-weight:400">optional</span></h3>
-        <p>A thin client that knows about rings and releases: what an upgrade would change, whether an out-of-band install is safe, what advisories apply to this machine.</p>
-        <div class="tabs" id="cli-tabs"></div>
-        <pre id="cli-out"></pre>
-        <div class="choice" id="pick-arch" style="margin:4px 0 6px"></div>
-        <pre><span class="copy" data-copy="cli">copy</span><span id="cli-cmd"></span></pre>
+        <p>Upgrades explained, installs checked, advisories for this machine.</p>
+        <pre><span class="copy" data-copy="cli">copy</span><span id="cli-cmd">sudo pacman -S omarchy-cli</span></pre>
+        <p style="font-size:13px"><a href="/docs/get-started#cli">status · check · upgrade · security →</a></p>
+        <p id="cli-note" class="dim" style="font-size:12px"></p>
       </aside>
-      <aside class="community-card" id="community-card">
-        <div id="cc-machines" hidden>
-          <h3><span class="live"><i></i>machines on the pool</span><span class="dim" style="font-size:12px;font-weight:400" id="cc-day">yesterday</span></h3>
-          <div class="big" id="cc-machines-n">…</div>
-          <p id="cc-machines-line">about — distinct addresses that fetched a ring database over the day: no accounts, no cookies, nothing kept per request</p>
-          <div id="cc-spark"></div>
-          <div id="cc-split" style="margin-top:8px"></div>
-          <div class="mini" id="cc-arch" style="grid-template-columns:repeat(2,1fr)"></div>
-        </div>
-        <h3 style="margin-top:6px"><span class="live"><i></i>the people</span><span class="dim" style="font-size:12px;font-weight:400">on the record</span></h3>
-        <div class="big" id="cc-count">…</div>
-        <p id="cc-line">contributors and maintainers, counted from what the pool recorded</p>
-        <div class="people" id="cc-people"></div>
-        <p><a href="/factory">Bring a package →</a></p>
-      </aside>
-    </div></div>
+    </div>
+    <div class="charts three">
+      <div class="chart"><h3>Pool growth <span>7 days</span></h3><div class="sub">bytes stored once, from the metrics snapshots</div><div id="c-pool"></div><div class="mini" id="c-pool-mini"></div></div>
+      <div class="chart"><h3>Security in stable <span id="sec-when">now</span></h3><div class="sub">open advisories matched against what stable serves</div><div id="c-sec"></div></div>
+      <div class="chart"><h3><span class="live"><i></i>machines on the pool</span><span id="mc-days">14 days</span></h3><div class="sub">distinct addresses that fetched a ring database, once a day · no accounts, no cookies</div><div id="mc-spark"><div class="empty loading">Loading</div></div><div class="mini five" id="mc-split"></div><div class="people-row" id="cc-people"><span class="dim">the people, from what the pool recorded…</span></div></div>
+    </div>
   </section>
 
   <section>
     <div class="h2row"><h2>Coverage</h2><a class="more-link" href="/status">Every source, every number →</a></div>
-    <p class="sub">Everything upstream serves, on both architectures — that is the target. Share of what upstream serves that edge already pins, right now.</p>
-    <div class="coverage-box">
-      <div><div class="k">x86_64</div><div id="c-coverage-x86_64"></div></div>
-      <div><div class="k">aarch64</div><div id="c-coverage-aarch64"></div></div>
-    </div>
+    <p class="sub">Share of what each upstream serves that edge already pins, on both architectures.</p>
+    <div class="coverage-box"><div class="cov" id="c-coverage"></div></div>
   </section>
 
   <section>
     <h2>Made in the open</h2>
     <p class="sub">The pool is a project, not a service you rent. Everything it does is on the record.</p>
-    <div class="community">
-      <div class="box">
-        <div class="stats" id="open-stats"></div>
-        <div class="people" id="open-people"></div>
-        <p>Want your name here? Bring a package to the <a href="/factory">Factory →</a></p>
-      </div>
-      <div class="box">
+    <div class="tiles four" id="open-stats"></div>
+    <div class="open-grid">
+      <div class="box feed-box">
         <div class="feed-head"><b>The last things the pipeline did</b><span class="live"><i></i>live · every minute</span></div>
         <div class="feed" id="open-journal"><div class="muted">loading…</div></div>
-        <p><a href="/journal">Full journal, ring history →</a></p>
+        <p class="sub" style="margin:10px 0 0"><a href="/journal">Full journal →</a></p>
+      </div>
+      <div class="box feed-box">
+        <div class="feed-head"><b>The rings</b><span class="dim" style="font-size:11.5px;letter-spacing:.06em;text-transform:uppercase">head · last releases</span></div>
+        <div class="ring-heads" id="open-heads"></div>
+        <div class="feed" id="open-releases"><div class="muted">loading…</div></div>
+        <p class="sub" style="margin:10px 0 0"><a href="/journal#releases">Ring history, every release →</a></p>
       </div>
     </div>
     <div class="sponsor compact"><p><b>Help keep it running.</b> Hardware, compute and agent tokens are what the pool needs. Everything it gets shows up on the <a href="/pipeline">Pipeline</a> page — open source, in the open.</p><a class="mail" href="mailto:sponsor@firemanxbr.org">sponsor@firemanxbr.org</a></div>
@@ -128,7 +106,7 @@ const BODY = String.raw`
 `;
 
 const SCRIPT = String.raw`
-  skeletonTiles("#tiles", 5);
+  skeletonTiles("#tiles", 6);
 __CHARTS__
   var RING_INFO = {
     stable: { title: "Recommended for daily use", text: "What <b>rc</b> served for a day without a failed check.", lag: "≈ 2 days behind Arch" },
@@ -136,25 +114,10 @@ __CHARTS__
     edge: { title: "For CI and developers", text: "What upstream published in the last three hours, signature-verified.", lag: "≤ 3 hours behind Arch" }
   };
   var DESC = {
-    stable: "Recommended. What rc served for a day without a failed check; about two days behind Arch, rolled back automatically if a promotion fails.",
-    rc: "Yesterday's edge, promoted after a real pacman and an ABI check passed on both architectures. For testers.",
-    edge: "What upstream published in the last three hours, signature-verified only. For CI and developers."
+    stable: "Recommended. What rc served for a day without a failed check — about two days behind Arch.",
+    rc: "Yesterday's edge, after a real pacman and an ABI check on both architectures. For testers.",
+    edge: "What upstream published in the last three hours, signature-verified. For CI and developers."
   };
-  // What the thin client prints, as examples (the live output depends on the machine).
-  var CLI_OUT = {
-    status: "$ omarchy-cli --ring stable status\n# example — the live output names the release this machine is on\nring     stable  release #<seq>\npinned   #<seq-1> on this machine\nupgrade  <n> packages · <size> · no ABI change",
-    check: "$ omarchy-cli check ./some-1.0-1-x86_64.pkg.tar.zst\n# example — the ABI safety check before an out-of-band install\nlib<x>  <old> → <new>   <n> packages on this machine load it\n         blocked: this install would break <them>",
-    upgrade: "$ omarchy-cli --ring stable upgrade\n# drives pacman and pins the release you are on\n:: pacman -Syu against release #<seq> … done\n:: pinned #<seq>",
-    security: "$ omarchy-cli security\n# what applies to this machine, from the pool's advisories\nstable #<seq> on this machine: <n> packages\n  <n> exploited in the wild      (CISA KEV)\n  <n> medium   … fixed in edge → fast-track"
-  };
-  var cliTab = "status";
-  function drawCli() {
-    $("#cli-tabs").innerHTML = Object.keys(CLI_OUT).map(function (c) { return '<button type="button" data-cli="' + c + '" class="' + (cliTab === c ? "on" : "") + '">' + c + '</button>'; }).join("");
-    $("#cli-tabs").querySelectorAll("button").forEach(function (b) { b.onclick = function () { cliTab = b.getAttribute("data-cli"); drawCli(); }; });
-    $("#cli-out").textContent = CLI_OUT[cliTab];
-  }
-  drawCli();
-
   var RINGS = ["stable", "rc", "edge"], ARCHES = ["x86_64", "aarch64"];
   var q = new URLSearchParams(location.search);
   var ring = RINGS.indexOf(q.get("ring")) >= 0 ? q.get("ring") : "stable";
@@ -167,11 +130,10 @@ __CHARTS__
   // The pacman configuration, generated from what the ring serves right now (the same as /docs/get-started).
   function drawStart() {
     pick("pick-ring", RINGS, ring, function (v) { ring = v; drawStart(); });
-    pick("pick-arch", ARCHES, arch, function (v) { arch = v; drawStart(); });
     $("#ring-desc").textContent = DESC[ring];
     $("#setup-cmd").innerHTML = 'curl -fsSL ' + location.origin + '/setup | sudo bash -s -- --ring ' + ring;
-    $("#cli-cmd").innerHTML = '<span class="c"># binaries for both architectures ship with every release</span>\ncurl -sL https://github.com/firemanxbr/omarchy-pool/releases/latest/download/omarchy-pool-' + (data && data.version && data.version.version !== "dev" ? data.version.version : "vX.Y.Z") + '-' + arch + '-linux.tar.gz | tar xz\n' +
-      'sudo install -m 755 omarchy-pool-*/omarchy-cli /usr/local/bin/\n' + 'omarchy-cli --ring ' + ring + ' status';
+    $("#cli-cmd").innerHTML = 'sudo pacman -S omarchy-cli\nomarchy-cli --ring ' + ring + ' status';
+    $("#cli-note").innerHTML = 'Not on your ring yet? <a href="/docs/get-started#cli">The release tarball →</a>';
   }
   document.querySelectorAll(".copy").forEach(function (b) {
     b.onclick = function () {
@@ -188,11 +150,14 @@ __CHARTS__
     var lastSync = latest(d.events, "sync");
     var synced = (d.coverage || []).filter(function (c) { return c.upstream_total != null; }).length, expected = (d.coverage || []).length;
     var sh = latest(d.latest, "health", "stable", "x86_64"), sha = latest(d.latest, "health", "stable", "aarch64");
+    // The audience (audience.ts): yesterday's distinct addresses that fetched a ring database — no accounts, no cookies, nothing kept per request.
+    var aud = d.audience || [], y = aud.length ? aud[aud.length - 1] : null;
     setTiles("#tiles", [
       ["Packages in stable", num(stable.package_count), num(byArch(stable, "x86_64")) + " x86_64 · " + num(byArch(stable, "aarch64")) + " aarch64"],
       ["Stable release", stable.release ? "#" + stable.release.seq : "—", stable.release ? ago(stable.release.created_at) + " · health " + (sh ? sh.status : "n/a") + " / " + (sha ? sha.status : "n/a") : "no release yet"],
-      ["Sources mirrored", synced + " / " + expected, "Arch · Arch Linux ARM · Omarchy (OPR)"],
+      ["Sources mirrored", synced + " / " + expected, "Arch · Arch Linux ARM · Omarchy · Asahi"],
       ["Open advisories in stable", '<span id="t-sec">…</span>', '<span id="t-sec-s">matching the five feeds…</span>'],
+      ["Machines on the pool", y ? "≈ " + num(y.machines) + (y.machines >= 10000 ? "+" : "") : "—", y ? "yesterday · " + ["stable", "rc", "edge"].map(function (r) { return r + " " + num((y.by_ring || {})[r] || 0); }).join(" · ") + " · " + num(y.requests) + " fetches" : "counted once a day"],
       ["Last sync", lastSync ? ago(lastSync.created_at) : "never", lastSync ? esc(lastSync.summary) : "waiting for the first run"]
     ]);
     drawStart();
@@ -213,12 +178,18 @@ __CHARTS__
     $("#proof-tested").innerHTML = stable.release ? '<b>' + num(stable.release.seq) + '</b> stable releases so far · health ' + (sh ? sh.status : "n/a") + ' / ' + (sha ? sha.status : "n/a") : 'no stable release yet';
     $("#proof-rollback").innerHTML = rollbacks.length ? 'last rollback <b>' + ago(rollbacks[0].created_at) + '</b> · ' + esc(rollbacks[0].ring || "") + ' · automatic' : 'none in the recent journal — <b>0</b> of the last ' + (d.events || []).length + ' events';
 
-    var cov = (d.coverage || []).filter(function (c) { return !c.optional; }).slice().sort(function (a, b) { return a.arch === b.arch ? (a.source < b.source ? -1 : 1) : (a.arch === "x86_64" ? -1 : 1); });
-    ARCHES.forEach(function (a) {
-      $("#c-coverage-" + a).innerHTML = hrows(cov.filter(function (c) { return c.arch === a; }).map(function (c) { var up = c.upstream_total, pct = up ? Math.min(100, Math.round(1000 * c.indexed / up) / 10) : 0; return [c.source, "", pct, null, up == null ? "—" : pct + "%"]; }), 90);
-    });
+    // Coverage: one row per source, the sources both architectures serve first, so core is core on either side.
+    var covBy = {}; (d.coverage || []).filter(function (c) { return !c.optional; }).forEach(function (c) { covBy[c.source] = covBy[c.source] || {}; covBy[c.source][c.arch] = c; });
+    var covNames = Object.keys(covBy).sort(function (a, b) { var na = Object.keys(covBy[a]).length, nb = Object.keys(covBy[b]).length; return nb - na || (a < b ? -1 : 1); });
+    var covCell = function (c, a) {
+      if (!c) return '<div class="bar none" data-tip="not served on ' + a + '"></div><div class="p num dim">—</div>';
+      var up = c.upstream_total, pct = up ? Math.min(100, Math.round(1000 * c.indexed / up) / 10) : 0, label = up == null ? "—" : pct + "%";
+      return '<div class="bar" data-tip="' + esc(c.source + " " + a + " · " + num(c.indexed) + " of " + num(up || 0) + " · " + label) + '"><i class="' + (pct >= 100 ? "" : "partial") + '" style="width:' + pct + '%"></i></div><div class="p num">' + label + '</div>';
+    };
+    $("#c-coverage").innerHTML = '<div class="cov-row head"><div></div><div class="k">x86_64</div><div></div><div class="k">aarch64</div><div></div></div>' +
+      covNames.map(function (n) { return '<div class="cov-row"><div class="l">' + esc(n) + '</div>' + covCell(covBy[n].x86_64, "x86_64") + covCell(covBy[n].aarch64, "aarch64") + '</div>'; }).join("");
     var S = d.series || {};
-    $("#c-pool").innerHTML = area((S.metrics || []).map(function (r) { return { t: Date.parse(r.created_at), v: Number(r.bytes || 0) }; }), bytes);
+    $("#c-pool").innerHTML = area((S.metrics || []).map(function (r) { return { t: Date.parse(r.created_at), v: Number(r.bytes || 0) }; }), bytes, 200);
     var m0 = (S.metrics || [])[0], m1 = (S.metrics || [])[(S.metrics || []).length - 1];
     $("#c-pool-mini").innerHTML = '<div><b>' + num(d.pool.objects) + '</b>objects</div><div><b>' + (m0 && m1 ? "+" + num(Math.max(0, Number(m1.objects) - Number(m0.objects))) : "—") + '</b>this week</div><div><b>' + bytes(d.pool.bytes) + '</b>stored once</div>';
 
@@ -237,19 +208,27 @@ __CHARTS__
         '<p class="sub" style="margin:10px 0 0;font-size:12px">Arch and Debian trackers, OSV, CISA KEV, EPSS — every three hours. <a href="/pipeline">Watch it happen →</a> · <a href="/security">Every advisory →</a></p>';
     }).catch(function () { $("#c-sec").innerHTML = '<div class="empty">no security data yet</div>'; });
 
-    // The audience: yesterday's machines, fourteen days of them, by ring and by architecture (audience.ts).
-    var aud = d.audience || [];
-    if (aud.length) {
-      var y = aud[aud.length - 1], m14 = aud.slice(-14);
-      $("#cc-machines").hidden = false; $("#cc-day").textContent = y.day;
-      $("#cc-machines-n").textContent = "≈ " + num(y.machines) + (y.machines >= 10000 ? "+" : "");
-      $("#cc-machines-line").textContent = "distinct addresses that fetched a ring database on " + y.day + " · " + num(y.requests) + " fetches, " + bytes(y.bytes) + (y.sampled ? " · sampled by Cloudflare, so an estimate" : "") + " — no accounts, no cookies, nothing kept per request";
-      $("#cc-spark").innerHTML = m14.length >= 2 ? area(m14.map(function (a) { return { t: Date.parse(a.day + "T12:00:00Z"), v: a.machines }; }), function (v) { return num(Math.round(v)); }) : "";
-      var tot = Math.max(1, y.machines);
-      $("#cc-split").innerHTML = hrows(["stable", "rc", "edge"].map(function (r) { var v = (y.by_ring || {})[r] || 0; return [r, "", Math.round(100 * v / tot), "var(--" + r + ")", num(v)]; }), 60);
-      $("#cc-arch").innerHTML = ["x86_64", "aarch64"].map(function (a) { var v = (y.by_arch || {})[a] || 0; return '<div><b>' + num(v) + '</b>' + a + '</div>'; }).join("");
+    var m14 = aud.slice(-14);
+    $("#mc-spark").innerHTML = m14.length >= 2 ? area(m14.map(function (a) { return { t: Date.parse(a.day + "T12:00:00Z"), v: a.machines }; }), function (v) { return num(Math.round(v)); }) : '<div class="empty">counted once a day — the line needs two days</div>';
+    if (y) {
+      $("#mc-days").textContent = m14.length + " days" + (y.sampled ? " · sampled" : "");
+      $("#mc-split").innerHTML = RINGS.map(function (r) { return '<div><b style="color:var(--' + r + ')">' + num((y.by_ring || {})[r] || 0) + '</b>' + r + '</div>'; }).join("") + ARCHES.map(function (a) { return '<div><b>' + num((y.by_arch || {})[a] || 0) + '</b>' + a + '</div>'; }).join("");
     }
     drawFeed(d.events || []);
+    drawRings(d);
+  }
+
+  // The rings: what each one serves right now, then the last releases across all three — a promotion, a sync, a rollback each make one.
+  function drawRings(d) {
+    $("#open-heads").innerHTML = RINGS.map(function (name) {
+      var r = d.rings.filter(function (x) { return x.ring === name; })[0] || {}, rel = r.release;
+      return '<a href="/diff?ring=' + name + '" class="ring-head"><span class="k" style="color:var(--' + name + ')">' + name + '</span><b>' + (rel ? "#" + rel.seq : "—") + '</b><span class="s">' + (rel ? ago(rel.created_at) + " · " + num(r.package_count) + " pkgs" : "no release yet") + '</span></a>';
+    }).join("");
+    var rows = (d.releases || []).slice(0, 6);
+    $("#open-releases").innerHTML = rows.map(function (r) {
+      var what = (r.source_id ? "promoted · " : "") + (r.note || "release " + r.id);
+      return '<a class="row" href="/diff?ring=' + esc(r.ring) + '&to=' + r.id + '" title="' + esc(what) + '"><span class="when">' + ago(r.created_at) + '</span><span class="kind"><span style="color:var(--' + esc(r.ring) + ')">' + esc(r.ring) + '</span> #' + r.seq + '</span><span class="what">' + esc(what) + '</span></a>';
+    }).join("") || '<div class="muted">no releases yet</div>';
   }
 
   // The feed: eight lines, the newest on top, each cut at the box's edge with
@@ -279,11 +258,13 @@ __CHARTS__
     var landed = pkgs.filter(function (p) { return p.status === "approved" || p.status === "published"; }).length;
     var people = Object.keys(maintainers).map(function (m) { return [m, "maintainer"]; }).concat(Object.keys(contributors).map(function (c) { return [c, "contributor"]; }));
     var chips = people.map(function (p) { return personChip(p[0], p[1]); }).join("");
-    $("#cc-count").textContent = num(people.length);
-    $("#cc-line").textContent = num(Object.keys(contributors).length) + " contributors · " + num(Object.keys(maintainers).length) + " maintainers · " + num(workers.filter(function (w) { return w.alive; }).length) + " workers online";
-    $("#cc-people").innerHTML = chips || '<span class="muted">be the first</span>';
-    $("#open-stats").innerHTML = '<a href="/people#contributors"><b>' + num(Object.keys(contributors).length) + '</b><span>contributors</span></a><a href="/people#maintainers"><b>' + num(Object.keys(maintainers).length) + '</b><span>maintainers</span></a><a href="/people#workers"><b>' + num(workers.filter(function (w) { return w.alive; }).length) + '</b><span>workers online</span></a><a href="/packages?q=factory"><b>' + num(landed) + '</b><span>community packages</span></a>';
-    $("#open-people").innerHTML = chips;
+    $("#cc-people").innerHTML = (chips || '<span class="muted">be the first</span>') + '<span class="dim">' + num(workers.filter(function (w) { return w.alive; }).length) + ' workers online</span><a href="/factory">Bring a package →</a>';
+    var t = function (href, k, v, s) { return '<a class="tile" href="' + href + '"><div class="k">' + k + '</div><div class="v num">' + v + '</div><div class="s">' + s + '</div></a>'; };
+    $("#open-stats").innerHTML =
+      t("/people#contributors", "Contributors", num(Object.keys(contributors).length), "anyone with a package or a worker") +
+      t("/people#maintainers", "Maintainers", num(Object.keys(maintainers).length), "named in MAINTAINERS.toml") +
+      t("/people#workers", "Workers online", num(workers.filter(function (w) { return w.alive; }).length), num(workers.length) + " registered") +
+      t("/packages?q=factory", "Community packages", num(landed), "approved, built by the project");
   });
   liveStats(render, 60000);
 `;

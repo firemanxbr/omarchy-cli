@@ -26,18 +26,19 @@ const CSS = String.raw`
   code, .mono { font-family: "JetBrains Mono", ui-monospace, monospace; }
   .num { font-variant-numeric: tabular-nums; }
 
-  header { display: flex; align-items: center; gap: 28px; padding: 14px 32px; border-bottom: 1px solid var(--line); background: var(--bg-deep); }
+  header { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 24px; padding: 14px 32px; border-bottom: 1px solid var(--line); background: var(--bg-deep); }
+  header .hmid { display: flex; align-items: center; gap: 34px; justify-self: center; }
   header .brand { display: flex; align-items: center; gap: 12px; font-weight: 600; color: var(--text); text-decoration: none; }
   header .brand .mark { width: 22px; height: 22px; background: var(--green); display: grid; place-items: center; color: var(--green-ink); font-size: 12px; font-weight: 700; }
   header nav { display: flex; gap: 22px; font-size: 14px; }
   header nav a { color: var(--muted); text-decoration: none; padding-bottom: 2px; border-bottom: 1px solid transparent; }
   header nav a:hover { color: var(--text); }
   header nav a.active { color: var(--text); border-bottom-color: var(--green); }
-  header .account { font-size: 13px; border: 1px solid var(--line); padding: 5px 11px; white-space: nowrap; display: inline-flex; align-items: center; max-width: min(46vw, 420px); }
+  header .account { font-size: 13px; border: 1px solid var(--line); padding: 5px 11px; white-space: nowrap; display: inline-flex; align-items: center; max-width: min(46vw, 420px); justify-self: end; }
   header .account #account { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
   /* A long GitHub login never wraps the header: the name is cut with an ellipsis (the full one is the link's title). */
   header .account b { max-width: 18ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  header #status { margin-left: 6px; }
+  header #status { margin-left: 0; }
   header .account:hover { border-color: var(--green); }
   header .account a { color: var(--text); text-decoration: none; }
   header .account .who { color: var(--muted); }
@@ -92,7 +93,7 @@ const CSS = String.raw`
   .choice-btn { background: var(--panel-2); color: var(--muted); border: 1px solid var(--line); padding: 3px 10px; font: inherit; font-size: 12.5px; cursor: pointer; vertical-align: middle; margin-left: 8px; }
   #files { max-height: 420px; overflow: auto; }
   footer .gh { font-size: 13px; }
-  header .spacer { flex: 1; }
+  header .spacer { display: none; }
   .btn { background: var(--green); color: var(--green-ink); font-weight: 500; padding: 6px 14px; text-decoration: none; font-size: 14px; }
   .btn:hover { filter: brightness(1.08); }
   .ver { font-size: 12.5px; letter-spacing: .04em; color: var(--green); border: 1px solid var(--green); padding: 2px 8px; text-decoration: none; white-space: nowrap; }
@@ -175,8 +176,8 @@ const CSS = String.raw`
   .kind { display: inline-block; min-width: 68px; color: var(--blue); }
   .when { color: var(--dim); white-space: nowrap; }
   .muted { color: var(--muted); }
-  footer { border-top: 1px solid var(--line); background: var(--bg-deep); padding: 22px 32px; font-size: 13px; color: var(--dim); display: flex; gap: 24px; flex-wrap: wrap; align-items: center; }
-  footer .fright { margin-left: auto; display: inline-flex; align-items: center; gap: 16px; } footer .fright .gh svg { width: 20px; height: 20px; }
+  footer { border-top: 1px solid var(--line); background: var(--bg-deep); padding: 22px 32px; font-size: 13px; color: var(--dim); display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 16px 24px; }
+  footer .more { justify-self: center; } footer .gh { justify-self: end; }
   footer a { color: var(--muted); text-decoration: none; }
 
   .charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr)); gap: 16px; margin: 16px 0; }
@@ -196,12 +197,12 @@ const CSS = String.raw`
   a.run:hover { color: var(--text); }
   #graph { overflow-x: auto; } #graph svg { min-width: 720px; }
   @media (max-width: 720px) {
-    header { display: grid; grid-template-columns: 1fr auto; grid-template-areas: "brand chip" "nav nav" "status account"; gap: 10px 12px; padding: 12px 16px; align-items: center; }
-    header .brand { grid-area: brand; } header .ver { grid-area: chip; justify-self: end; } header .spacer { display: none; }
-    header nav { grid-area: nav; display: flex; gap: 18px; overflow-x: auto; white-space: nowrap; padding-bottom: 4px; margin: 0 -16px; padding-left: 16px; padding-right: 16px; scrollbar-width: none; }
-    header nav::-webkit-scrollbar { display: none; }
-    header #status { grid-area: status; margin-left: 0; } header .account { grid-area: account; justify-self: end; max-width: 60vw; }
-    footer .fright { margin-left: 0; }
+    header { grid-template-columns: 1fr auto; grid-template-areas: "brand account" "mid mid"; gap: 10px 12px; padding: 12px 16px; }
+    header .brand { grid-area: brand; } header .account { grid-area: account; max-width: 60vw; }
+    header .hmid { grid-area: mid; justify-self: stretch; gap: 16px; overflow-x: auto; white-space: nowrap; padding-bottom: 4px; margin: 0 -16px; padding-left: 16px; padding-right: 16px; scrollbar-width: none; }
+    header .hmid::-webkit-scrollbar { display: none; }
+    header nav { gap: 16px; }
+    footer { grid-template-columns: 1fr; justify-items: start; }
     main { padding: 20px 16px 40px; }
     h1 { font-size: 22px; line-height: 1.25; } h2 { font-size: 19px; }
     .lede { font-size: 14px; }
@@ -237,6 +238,9 @@ const CSS = String.raw`
   .sub a, .lede a { color: var(--green); text-decoration: none; } .sub a:hover, .lede a:hover { text-decoration: underline; }
   .tile .v.ok { color: var(--green); } .tile .v.warn { color: var(--amber); }
   .tiles.six { grid-template-columns: repeat(auto-fit, minmax(min(172px, 100%), 1fr)); }
+  .tiles.four { grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); margin: 16px 0; } .tiles.four .tile .v { font-size: 40px; line-height: 1.1; margin-top: 6px; }
+  a.tile { color: inherit; text-decoration: none; display: block; } a.tile:hover { background: var(--panel-2); } a.tile:hover .v { color: var(--green); }
+  .feed-box { border: 1px solid var(--line); background: var(--panel); padding: 16px 20px; }
   .pill.blue { color: var(--blue); border-color: var(--blue); } .pill.lilac { color: var(--lilac); border-color: var(--lilac); }
   .dot.blue { background: var(--blue); }
   .dim { color: var(--dim); }
@@ -274,8 +278,25 @@ const CSS = String.raw`
   .way { border: 1px solid var(--line); background: var(--panel); padding: 18px 20px; display: grid; gap: 8px; align-content: start; }
   .way .tag { font-size: 11.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--dim); display: flex; justify-content: space-between; } .way p { margin: 0; font-size: 13.5px; color: var(--muted); } .way .go { margin-top: 6px; }
   .start-grid { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 16px; align-items: stretch; }
-  .start-grid .steps { grid-template-rows: auto auto auto 1fr; max-width: none; align-content: start; }
-  .start-grid .steps .charts { margin: 0; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); align-items: stretch; }
+  .start-cmd h3 { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+  .mini.five { grid-template-columns: repeat(5, 1fr); }
+  .people-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); font-size: 12.5px; }
+  .people-row .person { padding: 3px 8px 3px 3px; font-size: 12.5px; } .people-row .person .avatar { width: 22px; height: 22px; font-size: 10px; }
+  .people-row a:not(.person) { margin-left: auto; }
+  .cov { display: grid; gap: 7px; font-size: 12.5px; }
+  .cov-row { display: grid; grid-template-columns: 96px minmax(0, 1fr) 48px minmax(0, 1fr) 48px; gap: 10px; align-items: center; }
+  .cov-row.head { margin-bottom: 2px; } .cov-row .k { margin: 0; }
+  .cov-row .l { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cov-row .bar { height: 10px; width: auto; background: var(--panel-2); border: 1px solid var(--line); position: relative; display: block; } .cov-row .bar i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--green); } .cov-row .bar i.partial { background: var(--amber); } .cov-row .bar.none { border-style: dashed; opacity: .5; }
+  .cov-row .p { text-align: right; color: var(--muted); }
+  .open-grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 16px; }
+  .ring-heads { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); margin: 12px 0 10px; }
+  .ring-head { background: var(--panel-2); padding: 8px 10px; display: grid; gap: 1px; text-decoration: none; color: inherit; min-width: 0; } .ring-head:hover { background: var(--panel); }
+  .ring-head .k { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; } .ring-head b { font-family: Geist, sans-serif; font-size: 20px; font-weight: 600; line-height: 1.15; } .ring-head .s { font-size: 11.5px; color: var(--dim); line-height: 1.4; }
+  .feed a.row { text-decoration: none; color: inherit; cursor: pointer; } .feed a.row:hover .what { color: var(--text); }
+  .charts.three { grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); }
+  .charts.three .chart { display: flex; flex-direction: column; } .charts.three .chart > .mini { margin-top: auto; }
+  .charts.three #c-sec { display: flex; flex-direction: column; flex: 1; } .charts.three #c-sec .hrows { flex: 1; align-content: space-evenly; } .charts.three #c-sec > p { margin-top: auto; }
   .coverage-box { border: 1px solid var(--line); background: var(--panel); padding: 14px 16px 10px; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr)); gap: 10px 28px; margin: 16px 0; }
   .coverage-box .k { font-size: 11.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--dim); margin-bottom: 6px; }
   .start-side { display: grid; gap: 16px; grid-template-rows: auto 1fr; }
@@ -310,7 +331,7 @@ const CSS = String.raw`
   .land { border: 1px solid var(--line); background: var(--panel); padding: 12px 14px; display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; align-items: center; }
   .land .avatar { grid-row: span 2; } .land .n { font-weight: 500; display: flex; justify-content: space-between; gap: 8px; align-items: baseline; } .land .n .v { color: var(--dim); font-size: 12px; }
   .land .b { font-size: 12.5px; color: var(--dim); } .land .b a { color: var(--muted); text-decoration: none; }
-  .community { display: grid; grid-template-columns: 1.2fr 1fr; gap: 16px; }
+  .community { display: grid; grid-template-columns: 1.2fr 1fr; gap: 16px; align-items: start; }
   .community .box { border: 1px solid var(--line); background: var(--panel); padding: 18px 20px; display: grid; gap: 12px; align-content: start; } .community .box p { margin: 0; font-size: 13.5px; color: var(--muted); }
   .community .stats { display: flex; gap: 22px; flex-wrap: wrap; } .community .stats a { color: inherit; text-decoration: none; } .community .stats a:hover b { color: var(--green); } .community .stats > * b { display: block; font-family: Geist, sans-serif; font-size: 24px; font-weight: 600; line-height: 1.1; } .community .stats > * span { font-size: 12px; color: var(--dim); letter-spacing: .06em; text-transform: uppercase; }
   .sponsor { border: 1px solid var(--green); background: var(--panel); padding: 18px 20px; display: grid; grid-template-columns: 1fr auto; gap: 12px 24px; align-items: center; margin-top: 16px; }
@@ -425,7 +446,7 @@ const CSS = String.raw`
   .srcs { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr)); gap: 8px; margin-bottom: 12px; } .srcs button { background: var(--panel-2); color: var(--muted); border: 1px solid var(--line); padding: 10px 12px; font: inherit; font-size: 13px; cursor: pointer; text-align: left; } .srcs button.on { border-color: var(--green); color: var(--text); }
   .timeline { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; } .timeline div { border: 1px solid var(--line); background: var(--panel-2); padding: 12px 14px; font-size: 13px; color: var(--muted); } .timeline b { display: block; color: var(--text); margin-bottom: 4px; }
   @media (max-width: 900px) {
-    .community, .two, .profile-head, .live-grid, .docs, .cando, .start-grid, .pk-grid { grid-template-columns: 1fr; }
+    .community, .two, .profile-head, .live-grid, .docs, .cando, .start-grid, .pk-grid, .open-grid { grid-template-columns: 1fr; }
     .docs-side { position: static; } .stepper { grid-template-columns: repeat(2, 1fr); } .timeline { grid-template-columns: 1fr; }
     .gate, .sponsor { grid-template-columns: 1fr; } .sponsor .side { justify-items: start; } .sponsor .promise { text-align: left; }
     .heat .r, .heat .days { grid-template-columns: 80px repeat(14, 1fr); }
@@ -670,12 +691,13 @@ export function page(o: PageOptions): string {
 <div id="progress"></div>
 <header>
   <a class="brand" href="/"><span class="mark">▣</span> omarchy-pool</a>
-  ${chip}
-  <nav>
-    ${nav}
-  </nav>
-  <a id="status" class="status" href="/status" title="checking"><i class="led"></i><span>checking</span></a>
-  <span class="spacer"></span>
+  <div class="hmid">
+    ${chip}
+    <nav>
+      ${nav}
+    </nav>
+    <a id="status" class="status" href="/status" title="checking"><i class="led"></i><span>checking</span></a>
+  </div>
   <span class="account"><a id="account" href="/auth/github?next=${escapeHtml(o.active === "pipeline" ? "/pipeline" : "/factory")}" title="contributors and maintainers sign in with GitHub">Sign in</a><a id="signout" href="/auth/logout" hidden title="sign out of the dashboard on this browser">sign out</a></span>
 </header>
 
@@ -685,11 +707,9 @@ ${o.body}
 </main>
 
 <footer>
+  <a class="fbadge" href="https://omarchy.org/" title="Built for Omarchy">${BUILT_FOR_OMARCHY}</a>
   <span class="more"><span>more:</span>${more}</span>
-  <span class="fright">
-    <a class="gh" href="https://github.com/firemanxbr/omarchy-pool" title="omarchy-pool on GitHub" aria-label="omarchy-pool on GitHub">${GITHUB_ICON}</a>
-    <a class="fbadge" href="https://omarchy.org/" title="Built for Omarchy">${BUILT_FOR_OMARCHY}</a>
-  </span>
+  <a class="gh" href="https://github.com/firemanxbr/omarchy-pool" title="omarchy-pool on GitHub">${GITHUB_ICON} GitHub</a>
 </footer>
 
 <script>

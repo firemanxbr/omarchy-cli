@@ -27,9 +27,9 @@ export const CHARTS = String.raw`  // ---- tiny SVG charts (no library; the page
     body += '<text x="' + left + '" y="11" font-size="10">max ' + esc(fmt(max)) + '</text>';
     return svg(W, H, body);
   }
-  function area(points, fmt) { // points: [{t: ms, v}]
+  function area(points, fmt, height) { // points: [{t: ms, v}]; height in the 360-wide viewBox, 150 unless the card has room
     if (points.length < 2) return '<div class="empty">' + (points.length ? 'one snapshot so far — the line needs two' : 'collecting snapshots') + '</div>';
-    var W = 360, H = 150, top = 16, bottom = 20, left = 6, right = 6;
+    var W = 360, H = height || 150, top = 16, bottom = 20, left = 6, right = 6;
     var vs = points.map(function (p) { return p.v; }), max = Math.max.apply(null, vs) || 1, min = Math.min.apply(null, vs);
     var t0 = points[0].t, t1 = points[points.length - 1].t || t0 + 1;
     var lo = min === max ? 0 : min;
