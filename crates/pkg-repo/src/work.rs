@@ -440,16 +440,22 @@ fn repo_dir(opts: &WorkOptions) -> Result<PathBuf> {
     }
     let dir = opts.work_dir.join("repo");
     let stamp = dir.join(".fetched");
-    let fresh = fresh_within(&stamp, Duration::from_secs(86400));
-    if dir.join("tests").is_dir() && fresh {
-        return Ok(dir);
-    }
     let version = pkg_manifest::BUILD_VERSION;
     let git_ref = if version.starts_with('v') {
         version.to_owned()
     } else {
         "main".to_owned()
     };
+    // The checkout is the release this binary came from: a fresh stamp from
+    // another ref is another release's scripts. The review worker upgraded
+    // to v0.0.116 kept the day-old checkout its predecessor cloned, ran the
+    // old agent.py against the new environment, and nineteen audits died on
+    // "FACTORY_PROVIDER must be one of …" (2026-09-15).
+    let fresh = fresh_within(&stamp, Duration::from_secs(86400))
+        && std::fs::read_to_string(&stamp).is_ok_and(|s| s.trim() == git_ref);
+    if dir.join("tests").is_dir() && fresh {
+        return Ok(dir);
+    }
     let _ = std::fs::remove_dir_all(&dir);
     let status = Command::new("git")
         .args([
