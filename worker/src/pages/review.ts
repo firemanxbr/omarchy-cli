@@ -31,6 +31,14 @@ const BODY = String.raw`
   </section>
 
   <section>
+    <h2>Blocks</h2>
+    <p class="sub">The brake. A blocked contributor gets nothing more in: no request, no build, no worker; their packages leave the rings and their sources stay closed to new accounts. A blocked package leaves every ring. The reason is on the record, and another maintainer lifts it — see <a href="/docs/governance">Governance</a>.</p>
+    <form id="block-form" class="searchbar" hidden><input id="block-what" placeholder="contributor login, or package name" required> <input id="block-why" placeholder="why — the record and the contributor see this" required minlength="4"> <button type="submit">Block</button></form>
+    <div class="two"><div class="table-wrap"><table id="blocked-people"><thead><tr><th>Contributor</th><th>Since</th><th>By</th><th>Reason</th><th></th></tr></thead><tbody></tbody></table></div>
+    <div class="table-wrap"><table id="blocked-packages"><thead><tr><th>Package</th><th>Owner</th><th>Since</th><th>By</th><th>Reason</th><th></th></tr></thead><tbody></tbody></table></div></div>
+  </section>
+
+  <section>
     <h2>Decisions</h2>
     <div class="table-wrap"><table id="decisions"><thead><tr><th>When</th><th>Package</th><th>Arch</th><th>Decision</th><th>By</th><th>Note</th><th>Project build</th></tr></thead><tbody></tbody></table></div>
   </section>
@@ -43,7 +51,7 @@ const SCRIPT = String.raw`
   // from the fallback form travels as a bearer header instead.
   function headers() { var h = { "content-type": "application/json" }; if (token && !signedIn) h["authorization"] = "Bearer " + token; return h; }
   $("#who").innerHTML = 'Read-only until you <a href="/auth/github?next=/review">sign in with GitHub</a>; approving and rejecting need the maintainer role.';
-  whoami(function (me) { if (me) { login = me.login; signedIn = true; $("#who").innerHTML = 'Signed in as <b>' + esc(me.login) + '</b> (' + esc(me.role) + (me.areas && me.areas.length ? ' of ' + esc(me.areas.join(", ")) : '') + ')' + (me.role === "contributor" ? ' — approving needs the maintainer role.' : '.'); load(); } });
+  whoami(function (me) { if (me) { login = me.login; signedIn = true; if (me.role === "maintainer") $("#block-form").hidden = false; $("#who").innerHTML = 'Signed in as <b>' + esc(me.login) + '</b> (' + esc(me.role) + (me.areas && me.areas.length ? ' of ' + esc(me.areas.join(", ")) : '') + ')' + (me.role === "contributor" ? ' — approving needs the maintainer role.' : '.'); load(); } });
   function person(l) { return l ? '<a href="/user/' + encodeURIComponent(l) + '">' + esc(l) + '</a>' : ''; }
   // Three decisions (docs/GOVERNANCE.md): on a contributor's build, "build" (the project builds it again, its
   // own recipe from this evidence) or "reject"; on the project's build, "approve" (into edge) or "reject".
@@ -54,6 +62,26 @@ const SCRIPT = String.raw`
       alert(d.error ? d.error : what === "approve" ? "Approved — the project's build goes into edge (publish job #" + d.publish + ")." : what === "build" ? "The project is building it: task #" + d.task + " on a review worker, with the project's agent. It shows here when it is staged." : "Rejected");
       load();
     });
+  }
+  // The brake (docs/GOVERNANCE.md, *Blocking*): a login or a package name, a reason on the record; another maintainer lifts it.
+  function block(kind, what, lift) {
+    var why = prompt(lift ? "Why lift it? The record keeps this." : "Why? The record and the contributor see this.");
+    if (!why || why.trim().length < 4) return;
+    busy(fetch(API + "/" + kind + "/" + encodeURIComponent(what) + "/" + (lift ? "unblock" : "block"), { method: "POST", headers: headers(), body: JSON.stringify({ reason: why }) })).then(function (r) { return r.json(); }).then(function (d) {
+      if (d.error) alert(d.error);
+      load();
+    });
+  }
+  function blocks() {
+    busy(fetch(API + "/blocks")).then(function (r) { return r.json(); }).then(function (d) {
+      var mine = token || signedIn;
+      pager("#blocked-people", (d.contributors || []), function (b) {
+        return '<tr><td><b>' + person(b.login) + '</b></td><td>' + ago(b.blocked_at) + '</td><td>' + person(b.blocked_by) + '</td><td>' + esc(b.blocked_reason || "") + '</td><td>' + (mine && b.blocked_by !== login ? '<button type="button" data-unblock="contributors" data-what="' + esc(b.login) + '">Lift</button>' : '') + '</td></tr>';
+      }, { empty: 'no contributor blocked' });
+      pager("#blocked-packages", (d.packages || []), function (b) {
+        return '<tr><td><a href="/package/' + encodeURIComponent(b.name) + '"><b>' + esc(b.name) + '</b></a></td><td>' + person(b.owner) + '</td><td>' + ago(b.blocked_at) + '</td><td>' + person(b.blocked_by) + '</td><td>' + esc(b.blocked_reason || "") + '</td><td>' + (mine && b.blocked_by !== login ? '<button type="button" data-unblock="packages" data-what="' + esc(b.name) + '">Lift</button>' : '') + '</td></tr>';
+      }, { empty: 'no package blocked' });
+    }).catch(function () {});
   }
   // The second agent's column: its verdict and one line, the report behind it.
   // The gate: the worker's own checks on the build (factory/README.md *The gate*), pass with its warnings named, or none for a build older than the gate.
@@ -105,6 +133,7 @@ const SCRIPT = String.raw`
       }, { empty: 'no maintainer named yet' });
       endSkeleton();
     }).catch(function () { endSkeleton(); });
+    blocks();
     busy(fetch(API + "/approvals")).then(function (r) { return r.json(); }).then(function (d) {
       pager("#decisions", (d.approvals || []), function (a) {
         return '<tr><td>' + ago(a.created_at) + '</td><td><b>' + esc(a.name) + '</b>' + (a.version ? ' <span class="mono muted">' + esc(a.version) + '</span>' : '') + '</td><td>' + esc(a.arch) + '</td><td>' + esc(a.decision) + '</td><td>' + person(a.by) + '</td><td>' + esc(a.note || "") + '</td><td>' + (a.rebuild_task ? '#' + a.rebuild_task + ' ' + esc(a.rebuild_status || "") + (a.rebuild_result ? ' <span class="mono">' + esc(a.rebuild_result) + '</span>' : '') : (a.decision === "approved" ? '<span class="dim">waiting for the recipe on main</span>' : '—')) + '</td></tr>';
@@ -113,8 +142,23 @@ const SCRIPT = String.raw`
     }).catch(function () { endSkeleton(); });
   }
   document.addEventListener("click", function (ev) {
+    var u = ev.target.closest ? ev.target.closest("button[data-unblock]") : null;
+    if (u) return block(u.getAttribute("data-unblock"), u.getAttribute("data-what"), true);
     var b = ev.target.closest ? ev.target.closest("button[data-approve],button[data-reject],button[data-build]") : null; if (!b) return;
     decide(b.getAttribute("data-approve") || b.getAttribute("data-reject") || b.getAttribute("data-build"), b.hasAttribute("data-approve") ? "approve" : b.hasAttribute("data-build") ? "build" : "reject");
+  });
+  // One field takes either: a login that exists is a contributor, anything else is a package name.
+  $("#block-form").addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    var what = $("#block-what").value.trim(), why = $("#block-why").value.trim();
+    if (!what || why.length < 4) return;
+    busy(fetch("/api/v1/users/" + encodeURIComponent(what))).then(function (r) { return r.status === 200 ? "contributors" : "packages"; }).then(function (kind) {
+      if (!confirm("Block " + (kind === "contributors" ? "contributor " : "package ") + what + "? Their builds stop and " + (kind === "contributors" ? "their packages leave" : "it leaves") + " the rings; another maintainer lifts it.")) return;
+      busy(fetch(API + "/" + kind + "/" + encodeURIComponent(what) + "/block", { method: "POST", headers: headers(), body: JSON.stringify({ reason: why }) })).then(function (r) { return r.json(); }).then(function (d) {
+        if (d.error) alert(d.error); else { $("#block-what").value = ""; $("#block-why").value = ""; }
+        load();
+      });
+    });
   });
   load();
   liveStats(function () {}, 120000);

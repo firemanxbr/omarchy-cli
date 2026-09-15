@@ -36,9 +36,11 @@ const SCRIPT = String.raw`
   Promise.all([
     busy(fetch("/api/v1/factory/groups")).then(function (r) { return r.json(); }).catch(function () { return { groups: [] }; }),
     busy(fetch("/api/v1/factory/packages")).then(function (r) { return r.json(); }).catch(function () { return { packages: [] }; }),
-    busy(fetch("/api/v1/factory")).then(function (r) { return r.json(); }).catch(function () { return { workers: [] }; })
+    busy(fetch("/api/v1/factory")).then(function (r) { return r.json(); }).catch(function () { return { workers: [] }; }),
+    busy(fetch("/api/v1/factory/blocks")).then(function (r) { return r.json(); }).catch(function () { return { contributors: [] }; })
   ]).then(function (res) {
-    var groups = res[0].groups || [], pkgs = res[1].packages || [], workers = res[2].workers || [];
+    var groups = res[0].groups || [], pkgs = res[1].packages || [], workers = res[2].workers || [], blocked = {};
+    (res[3].contributors || []).forEach(function (b) { blocked[b.login] = b.blocked_reason || ""; });
     // Maintainers: per login, the groups they maintain.
     var maint = {};
     groups.forEach(function (g) { (g.maintainers || []).forEach(function (m) { (maint[m] = maint[m] || []).push(g.name); }); });
@@ -58,7 +60,9 @@ const SCRIPT = String.raw`
       var x = contrib[c], bits = [];
       if (x.packages) bits.push(x.packages + " package" + (x.packages === 1 ? "" : "s") + (x.landed ? " · " + x.landed + " landed" : ""));
       if (x.workers) bits.push(x.workers + " worker" + (x.workers === 1 ? "" : "s"));
-      return personChip(c, "contributor", esc(bits.join(" · ")));
+      var extra = esc(bits.join(" · "));
+      if (c in blocked) extra += (extra ? " " : "") + '<span class="pill error" title="' + esc(blocked[c]) + '">blocked</span>';
+      return personChip(c, "contributor", extra);
     }).join("") || '<span class="muted">be the first — <a href="/factory">bring a package</a></span>';
     // Ready means: alive, and — for a worker that builds or audits — an
     // agent that answered the last probe. A key set is not an agent that

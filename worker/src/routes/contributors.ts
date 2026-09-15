@@ -255,10 +255,19 @@ export async function handleRequestPackage(c: Contributor, request: Request, env
   const arches = (Array.isArray(b.arches) ? b.arches : ["x86_64", "aarch64"]).filter((a): a is string => typeof a === "string" && isRepoArch(a));
   if (!arches.length) return json({ error: "arches must include x86_64 and/or aarch64" }, 400);
 
+  // The same project, or the same source, requested before by someone a maintainer blocked: a new account
+  // does not open the door again (docs/GOVERNANCE.md, *Blocking*).
+  const tainted = await env.DB.prepare(
+    `SELECT r.owner, r.name FROM package_requests r JOIN contributors k ON k.login = r.owner
+      WHERE k.blocked_at IS NOT NULL AND (r.project = ?1 OR (?2 != '' AND r.source = ?2)) AND r.owner != ?3 LIMIT 1`,
+  ).bind(parsed.project, (parsed.source ?? (b.source ?? "").trim()), c.login).first<{ owner: string; name: string }>();
+  if (tainted) return json({ error: `${parsed.project} was requested by ${tainted.owner}, who is blocked; a maintainer must lift that first` }, 403);
   // Who has this name, who has this project.
-  const byName = await env.DB.prepare("SELECT owner, status, project FROM factory_packages WHERE name = ?").bind(name).first<{ owner: string; status: string; project: string | null }>();
+  const byName = await env.DB.prepare("SELECT owner, status, project, blocked_at, blocked_reason FROM factory_packages WHERE name = ?").bind(name).first<{ owner: string; status: string; project: string | null; blocked_at: string | null; blocked_reason: string | null }>();
+  if (byName?.blocked_at) return json({ error: `${name} is blocked by a maintainer: ${byName.blocked_reason ?? ""}`.trim() }, 403);
   if (byName && byName.owner !== c.login) return json({ error: `${name} is ${byName.status}, requested by ${byName.owner}` }, 409);
-  const byProject = await env.DB.prepare("SELECT name, owner, status FROM factory_packages WHERE project = ? AND name != ?").bind(parsed.project, name).first<{ name: string; owner: string; status: string }>();
+  const byProject = await env.DB.prepare("SELECT name, owner, status, blocked_at, blocked_reason FROM factory_packages WHERE project = ? AND name != ?").bind(parsed.project, name).first<{ name: string; owner: string; status: string; blocked_at: string | null; blocked_reason: string | null }>();
+  if (byProject?.blocked_at) return json({ error: `${parsed.project} is blocked by a maintainer as ${byProject.name}: ${byProject.blocked_reason ?? ""}`.trim() }, 403);
   if (byProject) return json({ error: `${parsed.project} is already in the pool as ${byProject.name} (${byProject.status}, requested by ${byProject.owner})` }, 409);
   if (byName && !["registered", "rejected", "unmaintained"].includes(byName.status)) return json({ error: `${name} is ${byName.status}; a request can be renewed once it is rejected or unmaintained — press Build to build it again` }, 409);
   const upstream = (await providedBy(env, name)).filter((p) => !["factory", "chaotic"].includes(p.source) && arches.includes(p.arch));
@@ -339,8 +348,9 @@ export async function handleBuildPackage(c: Contributor, name: string, request: 
   const blocked = blockedResponse(c);
   if (blocked) return blocked;
   const b = (await request.json().catch(() => ({}))) as { arches?: unknown; reason?: string; release?: string };
-  const pkg = await env.DB.prepare("SELECT * FROM factory_packages WHERE name = ? AND owner = ?").bind(name, c.login).first<{ name: string; group: string; arches: string; url: string; release: string | null; pkgbuild_path: string | null; detected: string | null }>();
+  const pkg = await env.DB.prepare("SELECT * FROM factory_packages WHERE name = ? AND owner = ?").bind(name, c.login).first<{ name: string; group: string; arches: string; url: string; release: string | null; pkgbuild_path: string | null; detected: string | null; blocked_at: string | null; blocked_reason: string | null }>();
   if (!pkg) return json({ error: "request the package first (POST /factory/packages)" }, 404);
+  if (pkg.blocked_at) return json({ error: `${name} is blocked by a maintainer: ${pkg.blocked_reason ?? ""}`.trim() }, 403);
   const queued = await env.DB.prepare("SELECT COUNT(*) AS n FROM build_tasks WHERE owner = ? AND status IN ('queued', 'leased')").bind(c.login).first<{ n: number }>();
   if ((queued?.n ?? 0) >= QUEUED_QUOTA) return json({ error: `you have ${queued?.n} tasks queued or building; the limit is ${QUEUED_QUOTA}` }, 429);
   const wanted = (Array.isArray(b.arches) ? b.arches : JSON.parse(pkg.arches)) as string[];
@@ -369,6 +379,8 @@ export async function handleBuildPackage(c: Contributor, name: string, request: 
 }
 
 export async function handleRegisterWorker(c: Contributor, request: Request, env: Env): Promise<Response> {
+  const blocked = blockedResponse(c);
+  if (blocked) return blocked;
   const b = (await request.json()) as { name?: string; arch?: string; labels?: unknown };
   if (!b.arch || !isRepoArch(b.arch)) return json({ error: "arch (x86_64|aarch64) is required" }, 400);
   // A worker builds its owner's packages. Donating it to anyone's is decided

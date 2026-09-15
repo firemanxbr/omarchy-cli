@@ -88,7 +88,43 @@ page and at `GET /api/v1/factory/groups`.
 - Reviews pull requests touching `factory/pkgbuilds/<group>/` (a new recipe
   of the project's own, a version bump).
 - Trusts workers as project workers (`POST /factory/workers/:id/trust`).
+- Blocks a contributor or a package when the evidence says so, with the
+  reason on the record (*Blocking*, below).
 - Reviews governance pull requests: this file's changes.
+
+## Blocking
+
+The brake. It is on the Review page, *Blocks*, and in the API; it takes a
+maintainer and a reason of at least four characters, and the reason is
+what the record and the contributor see.
+
+**A blocked contributor** (`POST /factory/contributors/<login>/block`)
+gets nothing more in: no package request, no build, no worker
+registration — the pool answers `403` with the reason. Their workers are
+revoked at once, their queued and running tasks cancelled, their
+registrations rejected and their packages pulled from every ring
+(a release per architecture, rendered by a pool worker). Their projects
+and source URLs stay closed: a new account asking for the same project or
+the same tarball gets `403 requested by <login>, who is blocked` — a fresh
+login does not open the door again. A maintainer cannot block themself
+or another maintainer; the latter is a governance pull request removing
+the name from `factory/MAINTAINERS.toml`.
+
+**A blocked package** (`POST /factory/packages/<name>/block`) leaves every
+ring the same way, its tasks are cancelled and its registration is
+`rejected`; the project URL answers `403` to any new request until the
+block is lifted.
+
+**Lifting** (`…/unblock`, a reason again) is by **another** maintainer,
+never the one who blocked — the same two-person rule as the approval.
+Lifting a contributor restores nothing: their workers register again,
+their packages are requested again, and everything goes through the gate
+and the review as if for the first time.
+
+Every block and every lift is a signed record in the public bucket —
+`contributors/<login>/block-<stamp>.json`, `…/unblock-<stamp>.json`,
+`factory/<name>/<request>/decision-<stamp>.json` — with who, when and
+why; `GET /api/v1/factory/blocks` lists what is in force.
 
 ## The project's workers
 
@@ -196,7 +232,8 @@ reviewed by the group's maintainers, never auto-merged.
 
 Role changes are `role` events, approvals are rows a maintainer signed with
 their login (`GET /api/v1/factory/approvals`), trust decisions are `trust`
-events. The file's history on GitHub is the history of who decided what.
+events, blocks and their lifting are signed records in the public bucket
+(*Blocking*). The file's history on GitHub is the history of who decided what.
 
 ### Track record, per group
 

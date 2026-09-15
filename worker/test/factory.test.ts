@@ -414,3 +414,70 @@ describe("a package request", () => {
     expect(await backfillRequests(env)).toBe("");
   });
 });
+
+describe("blocking", () => {
+  const checklist = { official: true, license: true, unshipped: true, evidence: true };
+  it("a maintainer blocks a package: it leaves every ring it is in, its builds stop, its project is refused; another maintainer lifts it", async () => {
+    // 'mine' is published in edge (the earlier story); block it.
+    expect((await call("POST", "/factory/packages/mine/block", { reason: "ships a token stealer" }, "omc_alice")).status).toBe(403);
+    expect((await call("POST", "/factory/packages/mine/block", { reason: "x" }, "omc_m2")).status).toBe(400);
+    // The publish job put it in edge (pkg-repo publish creates the release in reality): seeded here as the ring's head.
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO releases (ring, seq, note) VALUES ('edge', 1, 'seed')"),
+      env.DB.prepare("INSERT INTO ring_heads (ring, release_id) SELECT 'edge', id FROM releases WHERE ring = 'edge' AND seq = 1"),
+      env.DB.prepare("INSERT INTO ring_packages (ring, package_id) SELECT 'edge', id FROM packages WHERE sha256 = ?").bind("e".repeat(64)),
+    ]);
+    const before = (await env.DB.prepare("SELECT COUNT(*) AS n FROM ring_packages rp JOIN packages p ON p.id = rp.package_id WHERE p.name = 'mine' AND rp.ring = 'edge'").first<{ n: number }>())!.n;
+    expect(before).toBe(1);
+    const blocked = await call("POST", "/factory/packages/mine/block", { reason: "ships a token stealer" }, "omc_m2");
+    expect(blocked.status, JSON.stringify(blocked.json)).toBe(200);
+    expect(blocked.json).toMatchObject({ blocked: "mine", by: "m2", rings: [{ ring: "edge", release: expect.any(Number) }] });
+    expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM ring_packages rp JOIN packages p ON p.id = rp.package_id WHERE p.name = 'mine'").first<{ n: number }>())!.n).toBe(0);
+    expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM build_tasks WHERE kind = 'render' AND status = 'queued' AND json_extract(params, '$.ring') = 'edge'").first<{ n: number }>())!.n).toBe(2);
+    expect(await env.DB.prepare("SELECT status, blocked_by FROM factory_packages WHERE name = 'mine'").first()).toMatchObject({ status: "rejected", blocked_by: "m2" });
+    expect((await call("POST", "/factory/packages/mine/block", { reason: "again" }, "omc_m2")).status).toBe(409);
+    // The record, signed when the pool signs; the door closed to the owner and to a new request of the same project.
+    const rec = blocked.json.record.replace(`${env.POOL_URL}/`, "");
+    expect(await env.PACKAGES.head(rec)).not.toBeNull();
+    expect(rec).toMatch(/^factory\/mine\/\d+\/decision-\d+T\d+\.json$/);
+    expect((await call("POST", "/factory/packages/mine/build", {}, "omc_m1")).json.error).toMatch(/blocked by a maintainer/);
+    expect((await call("POST", "/factory/packages", { url: "https://github.com/alice/mine", description: "Mine, again", license: "MIT", checklist }, "omc_alice")).status).toBe(403);
+    // The one who blocked cannot lift it; another maintainer can.
+    expect((await call("POST", "/factory/packages/mine/unblock", { reason: "false alarm" }, "omc_m2")).status).toBe(403);
+    const lifted = await call("POST", "/factory/packages/mine/unblock", { reason: "false alarm" }, "omc_m1");
+    expect(lifted.status).toBe(200);
+    expect(await env.DB.prepare("SELECT blocked_at FROM factory_packages WHERE name = 'mine'").first()).toEqual({ blocked_at: null });
+    expect((await call("GET", "/factory/blocks")).json.packages).toEqual([]);
+  });
+
+  it("a maintainer blocks a contributor: nothing more from them, their workers revoked, their packages rejected — and their sources stay closed to other accounts", async () => {
+    // bob requests something, registers a worker, then gets blocked by m1.
+    await env.DB.prepare(`INSERT INTO contributors (login, token_hash, role, areas) VALUES ('bob', ?, 'contributor', '[]')`).bind(await sha256Hex("omc_bob")).run();
+    const req = await call("POST", "/factory/packages", { url: "https://evil.example/tool", source: "https://evil.example/tool-1.0.tar.gz", version: "1.0", description: "A tool of dubious intent", license: "MIT", arches: ["aarch64"], checklist }, "omc_bob");
+    expect(req.status, JSON.stringify(req.json)).toBe(201);
+    const w = await call("POST", "/factory/workers", { name: "box", arch: "aarch64" }, "omc_bob");
+    expect(w.status).toBe(201);
+    expect((await call("POST", "/factory/contributors/bob/block", { reason: "spam requests" }, "omc_alice")).status).toBe(403);
+    expect((await call("POST", "/factory/contributors/m2/block", { reason: "no reason at all" }, "omc_m1")).status).toBe(409); // a maintainer is a governance PR
+    expect((await call("POST", "/factory/contributors/m1/block", { reason: "no reason at all" }, "omc_m1")).status).toBe(400);
+    const blocked = await call("POST", "/factory/contributors/bob/block", { reason: "spam requests" }, "omc_m1");
+    expect(blocked.status, JSON.stringify(blocked.json)).toBe(200);
+    expect(blocked.json).toMatchObject({ blocked: "bob", by: "m1", packages: ["tool"], workers_revoked: [w.json.worker] });
+    expect(await env.PACKAGES.head(blocked.json.record.replace(`${env.POOL_URL}/`, ""))).not.toBeNull();
+    expect(await env.DB.prepare("SELECT status FROM factory_packages WHERE name = 'tool'").first()).toEqual({ status: "rejected" });
+    expect(await env.DB.prepare("SELECT revoked_at IS NOT NULL AS revoked FROM build_workers WHERE id = ?").bind(w.json.worker).first()).toEqual({ revoked: 1 });
+    // Every door: request, build, a worker — refused with the reason.
+    expect((await call("POST", "/factory/packages", { url: "https://evil.example/other", source: "https://evil.example/o.tar.gz", version: "1", description: "Another tool of intent", license: "MIT", checklist }, "omc_bob")).json.error).toMatch(/blocked by a maintainer: spam requests/);
+    expect((await call("POST", "/factory/workers", { name: "box2", arch: "aarch64" }, "omc_bob")).status).toBe(403);
+    expect((await call("GET", "/factory/blocks")).json.contributors).toEqual([expect.objectContaining({ login: "bob", blocked_by: "m1", blocked_reason: "spam requests" })]);
+    // A fresh account asking for the same project, or the same source: no.
+    await env.DB.prepare(`INSERT INTO contributors (login, token_hash, role, areas) VALUES ('bob2', ?, 'contributor', '[]')`).bind(await sha256Hex("omc_bob2")).run();
+    const again = await call("POST", "/factory/packages", { name: "tool2", url: "https://evil.example/tool", source: "https://evil.example/tool-1.0.tar.gz", version: "1.0", description: "A tool of dubious intent", license: "MIT", checklist }, "omc_bob2");
+    expect(again.status).toBe(403);
+    expect(again.json.error).toMatch(/requested by bob, who is blocked/);
+    // Lifting: not by the one who blocked.
+    expect((await call("POST", "/factory/contributors/bob/unblock", { reason: "talked it over" }, "omc_m1")).status).toBe(403);
+    expect((await call("POST", "/factory/contributors/bob/unblock", { reason: "talked it over" }, "omc_m2")).status).toBe(200);
+    expect((await call("GET", "/factory/blocks")).json.contributors).toEqual([]);
+  });
+});

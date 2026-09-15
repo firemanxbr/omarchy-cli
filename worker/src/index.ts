@@ -67,6 +67,7 @@ import { groupsOf, GOVERNANCE_FILE } from "./governance";
 import { handleQueueJob } from "./jobs";
 import { isMaintainer } from "./routes/contributors";
 import { handleReviewList, handleApprove, handleReject, handleApprovals, handleProjectBuild } from "./routes/review";
+import { handleBlockContributor, handleUnblockContributor, handleBlockPackage, handleUnblockPackage, handleBlocks } from "./routes/blocks";
 import { handleAuthStart, handleAuthCallback, handleLogout } from "./routes/auth";
 import { handleSignPool } from "./routes/pool";
 import { signingEnabled, publicKey } from "./signing";
@@ -223,6 +224,13 @@ async function factoryRoutes(method: string, path: string, url: URL, request: Re
   let m: RegExpMatchArray | null;
   // Contributors.
   if (method === "POST" && path === "/factory/register") return handleRegister(request, env);
+  // Maintainers: the brake — a contributor or a package blocked, or the block lifted by another maintainer.
+  if ((m = path.match(/^\/factory\/(contributors|packages)\/([A-Za-z0-9@._+-]+)\/(block|unblock)$/)) && method === "POST") {
+    const c = await contributorOf(request, env);
+    if (!c) return json({ error: "a maintainer's contributor token is required" }, 401);
+    if (m[1] === "contributors") return m[3] === "block" ? handleBlockContributor(c, m[2], request, env) : handleUnblockContributor(c, m[2], request, env);
+    return m[3] === "block" ? handleBlockPackage(c, m[2], request, env) : handleUnblockPackage(c, m[2], request, env);
+  }
   if (path === "/factory/packages" || path.startsWith("/factory/packages/") || path === "/factory/workers" || path.startsWith("/factory/workers/")) {
     const c = await contributorOf(request, env);
     if (!c) return json({ error: "a contributor token is required (POST /factory/register with a GitHub token)" }, 401);
@@ -354,6 +362,7 @@ async function api(method: string, path: string, url: URL, request: Request, env
   if (method === "GET" && path === "/search") return handleSearch(url, env);
   if (method === "GET" && path === "/security") return handleSecurity(url, env);
   if (method === "GET" && path === "/factory") return handleFactory(env, url);
+  if (method === "GET" && path === "/factory/blocks") return handleBlocks(env);
   if (method === "GET" && path === "/factory/built") return handleBuilt(env);
   if (method === "GET" && path === "/factory/packages") return handleListPackages(env);
   if (method === "GET" && path === "/factory/trust") return handleTrustList(env);
