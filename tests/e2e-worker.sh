@@ -349,9 +349,12 @@ rb=$(curl -s -X POST "$OMARCHY_API/api/v1/factory/jobs" "${mauth[@]}" -d '{"kind
      ('mine', 'community', 'aarch64', '1.0-1', 'draft:https://github.com/e2e/mine@latest', 'contributor', 100, 0, 'community', 'e2e', 'build', 'staged', 'staging/e2e/mine/1/');
    UPDATE factory_groups SET maintainers = '[\"e2e\",\"other\"]' WHERE name = 'community'" >/dev/null)
 mine=$(curl -s "$OMARCHY_API/api/v1/factory/review" | python3 -c 'import json,sys; print([t["id"] for t in json.load(sys.stdin)["staged"] if t["name"]=="mine"][0])')
-[[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/tasks/$mine/approve" "${mauth[@]}" -d '{}')" == 403 ]] || { echo "a maintainer must not approve their own package when another maintainer exists"; exit 1; }
+# A contributor's build is evidence: approving it is refused before anything else. The owner rule shows on "build":
+# a maintainer never has the project build their own package — with another maintainer around or as the sole one.
+[[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/tasks/$mine/approve" "${mauth[@]}" -d '{}')" == 409 ]] || { echo "a contributor's build must never be approvable"; exit 1; }
+[[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/tasks/$mine/build" "${mauth[@]}" -d '{}')" == 403 ]] || { echo "a maintainer must not have the project build their own package when another maintainer exists"; exit 1; }
 (cd "$ROOT/worker" && npx wrangler d1 execute omarchy-repo --local --persist-to "$WRANGLER_STATE" --command "UPDATE factory_groups SET maintainers = '[\"e2e\"]' WHERE name = 'community'" >/dev/null)
-[[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/tasks/$mine/approve" "${mauth[@]}" -d '{}')" == 403 ]] || { echo "the sole maintainer must not approve their own package either"; exit 1; }
+[[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/tasks/$mine/build" "${mauth[@]}" -d '{}')" == 403 ]] || { echo "the sole maintainer must not have the project build their own package either"; exit 1; }
 # Somebody else's package: a contributor's build is never approved — it is evidence. A maintainer has the project
 # build it (review:<task>, the project's own recipe, its agent, a worker it trusts); the approval comes on that build.
 (cd "$ROOT/worker" && npx wrangler d1 execute omarchy-repo --local --persist-to "$WRANGLER_STATE" --command "UPDATE build_tasks SET owner = 'someone-else' WHERE id = $mine" >/dev/null)
