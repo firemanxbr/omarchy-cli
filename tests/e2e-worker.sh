@@ -332,7 +332,7 @@ grep -q '"task":' <<<"$qj" || { echo "a maintainer could not queue a job: $qj"; 
 rb=$(curl -s -X POST "$OMARCHY_API/api/v1/factory/jobs" "${mauth[@]}" -d '{"kind":"rollback","params":{"ring":"stable","to":"1"}}'); grep -q '"kind":"rollback"' <<<"$rb" || { echo "a maintainer could not queue a rollback: $rb"; exit 1; }
 [[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/events" "${mauth[@]}" -d '{"kind":"note","status":"ok","summary":"a maintainer wrote this"}')" == 201 ]] || { echo "a maintainer must be able to write a journal note"; exit 1; }
 [[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/pool/gc" "${mauth[@]}")" == 401 ]] || { echo "a maintainer token must not write to the pool directly (jobs do)"; exit 1; }
-# Nobody approves their own package — unless they are the group's only maintainer (bootstrap, recorded).
+# Nobody approves their own package — and the group's only maintainer is no exception (docs/GOVERNANCE.md).
 (cd "$ROOT/worker" && npx wrangler d1 execute omarchy-repo --local --persist-to "$WRANGLER_STATE" --command \
   "INSERT INTO build_tasks (name, \"group\", arch, version, pkgbuild_ref, reason, priority, publish, trust, owner, kind, status, staged_prefix) VALUES
      ('mine', 'community', 'aarch64', '1.0-1', 'draft:https://github.com/e2e/mine@latest', 'contributor', 100, 0, 'community', 'e2e', 'build', 'staged', 'staging/e2e/mine/1/');
@@ -340,11 +340,16 @@ rb=$(curl -s -X POST "$OMARCHY_API/api/v1/factory/jobs" "${mauth[@]}" -d '{"kind
 mine=$(curl -s "$OMARCHY_API/api/v1/factory/review" | python3 -c 'import json,sys; print([t["id"] for t in json.load(sys.stdin)["staged"] if t["name"]=="mine"][0])')
 [[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/tasks/$mine/approve" "${mauth[@]}" -d '{}')" == 403 ]] || { echo "a maintainer must not approve their own package when another maintainer exists"; exit 1; }
 (cd "$ROOT/worker" && npx wrangler d1 execute omarchy-repo --local --persist-to "$WRANGLER_STATE" --command "UPDATE factory_groups SET maintainers = '[\"e2e\"]' WHERE name = 'community'" >/dev/null)
-boot=$(curl -s -X POST "$OMARCHY_API/api/v1/factory/tasks/$mine/approve" "${mauth[@]}" -d '{}'); grep -q '"rebuild_task"' <<<"$boot" || { echo "the sole maintainer must be able to approve (bootstrap): $boot"; exit 1; }
-apr=$(curl -s "$OMARCHY_API/api/v1/factory/approvals"); grep -q "bootstrap: e2e is the sole maintainer" <<<"$apr" || { echo "the bootstrap approval must say so: $(head -c 300 <<<"$apr")"; exit 1; }
-# The track record per group on the profile: e2e brought 'mine' (staged, then let in) and signed the approval.
+[[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$OMARCHY_API/api/v1/factory/tasks/$mine/approve" "${mauth[@]}" -d '{}')" == 403 ]] || { echo "the sole maintainer must not approve their own package either"; exit 1; }
+# Somebody else's package: the approval is a decision on the record, and nothing of the contributor's is queued —
+# the project builds the recipe a maintainer merges into factory/pkgbuilds (the enqueue job).
+(cd "$ROOT/worker" && npx wrangler d1 execute omarchy-repo --local --persist-to "$WRANGLER_STATE" --command "UPDATE build_tasks SET owner = 'someone-else' WHERE id = $mine" >/dev/null)
+dec=$(curl -s -X POST "$OMARCHY_API/api/v1/factory/tasks/$mine/approve" "${mauth[@]}" -d '{"note":"reads well"}'); grep -q '"recipe":"factory/pkgbuilds/community/mine/PKGBUILD"' <<<"$dec" && ! grep -q '"rebuild_task"' <<<"$dec" || { echo "an approval must record the decision and queue nothing: $dec"; exit 1; }
+[[ "$(cd "$ROOT/worker" && npx wrangler d1 execute omarchy-repo --local --persist-to "$WRANGLER_STATE" --json --command "SELECT COUNT(*) AS n FROM build_tasks WHERE kind = 'build' AND pkgbuild_ref LIKE 'staging:%'" | jq -r '.[0].results[0].n')" == 0 ]] || { echo "no build may start from a contributor's staged artifact"; exit 1; }
+apr=$(curl -s "$OMARCHY_API/api/v1/factory/approvals"); grep -q '"by":"e2e"' <<<"$apr" && grep -q '"note":"reads well"' <<<"$apr" || { echo "the approval must be on the record: $(head -c 300 <<<"$apr")"; exit 1; }
+# The track record per group on the profile: e2e signed the approval; the package was somebody else's.
 rec=$(curl -s "$OMARCHY_API/api/v1/users/e2e?after=approval")   # a fresh key: the profile is edge-cached for a minute
-python3 -c 'import json,sys; r=[g for g in json.load(sys.stdin)["record"] if g["group"]=="community"][0]; assert r["contributed"]["approved"]==1 and r["contributed"]["staged"]==1 and r["maintained"]["approvals"]==1 and r["score"]==6, r' <<<"$rec" || { echo "the profile record is off: $(python3 -c 'import json,sys; print(json.load(sys.stdin)["record"])' <<<"$rec")"; exit 1; }
+python3 -c 'import json,sys; r=[g for g in json.load(sys.stdin)["record"] if g["group"]=="community"][0]; assert r["contributed"]["approved"]==0 and r["maintained"]["approvals"]==1 and r["score"]==2, r' <<<"$rec" || { echo "the profile record is off: $(python3 -c 'import json,sys; print(json.load(sys.stdin)["record"])' <<<"$rec")"; exit 1; }
 rpage=$(curl -s "$OMARCHY_API/review"); grep -q "Review" <<<"$rpage" || { echo "review page not served"; exit 1; }
 # A signature for bytes the pool does not serve under that filename is refused.
 [[ "$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$OMARCHY_API/api/v1/pool/$(printf 'a%.0s' {1..64})/sig?filename=xz-5.8.4-1-x86_64.pkg.tar.zst&arch=x86_64" -H "authorization: Bearer $OMARCHY_TOKEN" --data-binary "@$E2E/pkgs/xz-5.8.4-1-x86_64.pkg.tar.zst.sig")" == 409 ]] || { echo "a mismatching signature must be refused"; exit 1; }

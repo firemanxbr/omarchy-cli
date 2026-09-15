@@ -383,6 +383,18 @@ export async function handleComplete(id: number, request: Request, env: Env, act
       .bind(now(), b.sha256, b.filename, b.version ?? null, b.version ?? null, b.duration_ms ?? null, (b.log_tail ?? "").slice(-4000), prefix, id)
       .run();
     await env.DB.prepare("UPDATE build_workers SET last_seen = ?, current_task = NULL, builds_done = builds_done + 1 WHERE id = ?").bind(now(), who).run();
+    // A newer build of the same package and architecture supersedes the
+    // staged ones before it: one row per package in the review queue, the
+    // audits of the old ones cancelled with them (their evidence stays).
+    const older = await env.DB.prepare("SELECT id FROM build_tasks WHERE kind = 'build' AND trust = 'community' AND status = 'staged' AND name = ? AND arch = ? AND id < ?")
+      .bind(task.name, task.arch, id)
+      .all<{ id: number }>();
+    for (const o of older.results) {
+      await env.DB.batch([
+        env.DB.prepare("UPDATE build_tasks SET status = 'cancelled', error = ? WHERE id = ?").bind(`superseded by task ${id}${b.version ? " (" + b.version + ")" : ""}`, o.id),
+        env.DB.prepare("UPDATE build_tasks SET status = 'cancelled', error = 'the build it audited was superseded' WHERE kind = 'audit' AND status = 'queued' AND json_extract(params, '$.task') = ?").bind(o.id),
+      ]);
+    }
     await env.DB.prepare("UPDATE factory_packages SET status = 'staged', detail = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE name = ?")
       .bind(`${b.version ?? ""} built for ${task.arch} by ${who}; waiting for a maintainer`, task.name).run();
     await env.DB.prepare("UPDATE build_requests SET status = 'review', detail = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE name = ? AND status IN ('requested', 'drafting', 'validating')")
@@ -416,6 +428,17 @@ export async function handleComplete(id: number, request: Request, env: Env, act
     .bind(now(), indexed.sha256, b.filename, b.version ?? null, b.duration_ms ?? null, (b.log_tail ?? "").slice(-4000), id)
     .run();
   await env.DB.prepare("UPDATE build_workers SET last_seen = ?, current_task = NULL, builds_done = builds_done + 1 WHERE id = ?").bind(now(), who).run();
+  if (task.publish !== 0) {
+    // What users get. A contributor's registration of this name is now
+    // published, and the approval that led here keeps the task — the seal
+    // and the track record follow that link (docs/GOVERNANCE.md).
+    const answered = await env.DB.prepare("SELECT id FROM approvals WHERE name = ? AND arch = ? AND decision = 'approved' AND rebuild_task IS NULL ORDER BY id DESC LIMIT 1").bind(task.name, task.arch).first<{ id: number }>();
+    await env.DB.batch([
+      env.DB.prepare("UPDATE factory_packages SET status = 'published', detail = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE name = ?")
+        .bind(`${b.version ?? ""} for ${task.arch} built by the project (task ${id}), signed, in edge`, task.name),
+      ...(answered ? [env.DB.prepare("UPDATE approvals SET rebuild_task = ? WHERE id = ?").bind(id, answered.id)] : []),
+    ]);
+  }
   await event(env, "build", "ok", `${task.name} ${b.version ?? ""} built for ${task.arch} by ${who}${b.duration_ms ? " in " + Math.round(b.duration_ms / 60000) + " min" : ""}${task.publish === 0 ? " (dry run, not published)" : ""}`, { task: id, arch: task.arch, sha256: indexed.sha256, filename: b.filename, worker: who, attempts: task.attempts, duration_ms: b.duration_ms ?? null });
   // The seal, next to the object: the chain that produced it, signed by the pool.
   let attested = false;

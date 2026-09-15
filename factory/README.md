@@ -65,29 +65,35 @@ PKGBUILD reviewed and merged ──▶ pool: build_requests / build_tasks (D1)
    (`factory/bin/audit-pkgbuild`, `factory/prompts/audit.md`) and attaches
    `audit.json` / `audit.md` to the evidence. The Review page shows the
    verdict (`ok`, `warn`, `block`); nothing acts on it, the maintainer does.
-6. **A maintainer approves.** On the Review page, a maintainer of the group
-   (`factory/MAINTAINERS.toml`) approves or rejects with the evidence in
-   front of them. Approval queues a **project build** of the same PKGBUILD
-   on a worker the project trusts; what users get is the project's build,
-   signed by the pool. The project's own recipes take the other door: a pull
-   request adding `factory/pkgbuilds/<group>/<name>/PKGBUILD`, reviewed by
-   the group's maintainers, queued by the hourly `enqueue` job on merge.
-7. **After that: bumps are evidence too.** Once a day the brain asks GitHub
+6. **A maintainer approves — never their own package.** On the Review page,
+   a maintainer of the group (`factory/MAINTAINERS.toml`) approves or
+   rejects with the evidence in front of them. The approval is the decision
+   on the record; it queues nothing and copies nothing.
+7. **A maintainer writes the recipe.** With the evidence as the lesson —
+   the contributor's PKGBUILD, the log, the metrics, the audit — a
+   maintainer (not the owner) writes the project's own
+   `factory/pkgbuilds/<group>/<name>/PKGBUILD` and opens the pull request.
+   The merge is what the project builds: the hourly `enqueue` job queues it
+   from `main`, a worker the project trusts builds it, the pool signs it and
+   publishes it into `edge`, and the build is linked to the approval it
+   answers (the seal shows the chain). The project's own recipes take the
+   same door without a staged build first.
+8. **After that: bumps are evidence too.** Once a day the brain asks GitHub
    for each approved package's latest release and queues a community build
-   from the approved PKGBUILD with `pkgver` moved to the tag
+   from the contributor's staged PKGBUILD with `pkgver` moved to the tag
    (`bump:<task>@<tag>`) — for the owner's worker first, for any `--shared`
    worker after 14 days — and a maintainer reviews it like the first time.
    30 days without a build and the package is *unmaintained* until someone
    takes it (docs/GOVERNANCE.md). Recipes in `factory/pkgbuilds/` are bumped
    by `factory-update.yml`: one pull request per package, reviewed, never
    auto-merged.
-8. **A worker builds it.** Any worker of that architecture claims the task,
+9. **A worker builds it.** Any worker of that architecture claims the task,
    holds a lease, builds in its fresh container, publishes the result
    into `edge` as source `factory` — the pool signs it with its own key —
    and renders the edge databases. From there
    it is a package like any other: health checks, the soak, `rc`, `stable`,
    the security layer, `omarchy-cli`.
-9. **If it fails**, the task returns to the queue with the log tail; after
+10. **If it fails**, the task returns to the queue with the log tail; after
    three attempts it is marked failed and the Factory page shows why. A
    worker that dies mid-build loses its lease and the task is requeued by the
    pool's scheduler within ten minutes.
@@ -149,11 +155,13 @@ key a template covers Rust, Go, CMake, Meson, autotools and release
 binaries) — and uploads the package, the PKGBUILD, `PKGINFO` and the build
 log to `staging/<you>/<package>/<task>/`. The task is then **staged**: the
 Factory page lists it, the log and the PKGBUILD are public, the package is
-for maintainers. Nothing you build reaches users until a maintainer of the
-group approves it on the [Review](../../../../review) page — then a
-project worker rebuilds the same PKGBUILD and publishes it into `edge` as
-source `factory`, signed by the pool; your build was the evidence, the
-project's build is the product. A rejection comes with a note you see on your Contribute
+for maintainers. Nothing you build reaches users: a maintainer of the
+group approves it on the [Review](../../../../review) page, then writes
+the project's own recipe from what your build taught — the PKGBUILD, the
+log, the metrics — and merges it into `factory/pkgbuilds`; a project
+worker builds *that* and publishes it into `edge` as source `factory`,
+signed by the pool. Your build was the evidence, the maintainer's recipe
+is the product. A rejection comes with a note you see on your Contribute
 page.
 
 What a build can and cannot do, learned from the first contributor's day
@@ -239,17 +247,17 @@ the dashboard's *Run a worker* page, *The three roles*): **pool** — a
 project-trusted registration that takes only the pool's jobs (sync, render,
 promote, rollback, health, security, enqueue, gc, verify); **review** — a
 project-trusted registration that takes only the maintainers' work, the
-rebuild of approved packages and the audit of staged builds, with an agent
-key; **community** — a community registration, shared, that builds anyone's
+build of the recipes on `main` and the audit of staged builds, with an
+agent key; **community** — a community registration, shared, that builds anyone's
 registered packages and drafts PKGBUILDs for package requests with an agent
 key. A role narrows what the trust allows and the container refuses a
 registration that does not match. Two of each, one per architecture, run on
 the project's own host (`factory/host/`, RUNBOOK *The Studio host*).
 
 **Whose compute.** Contributors build on their own workers (or a shared
-community worker someone else runs); project builds — the rebuild after an
-approval, the packages in `factory/pkgbuilds` — run on machines the project
-trusts. No GitHub runner ever builds a package: the project's compute is
+community worker someone else runs); project builds — the recipes in
+`factory/pkgbuilds`, the maintainers' own and the ones written from
+contributors' evidence — run on machines the project trusts. No GitHub runner ever builds a package: the project's compute is
 not for building everyone's software, and GitHub Actions runs CI and the
 release only — no worker, not even for the pool's own jobs: when the
 project's host is down they wait, and the Factory page says so.

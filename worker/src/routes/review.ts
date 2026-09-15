@@ -1,13 +1,14 @@
 import { json, type Env } from "../index";
 import { maintains, type Contributor } from "./contributors";
-import { groupsOf } from "../governance";
 
 /**
  * Review: what maintainers do with staged builds.
  *
  *   GET  /factory/review                    staged community builds with their evidence and the audit's verdict (public)
- *   POST /factory/tasks/:id/approve {note?} maintainer of the package's area → a project build of the
- *                                           same PKGBUILD is queued; its result is signed and published
+ *   POST /factory/tasks/:id/approve {note?} a maintainer of the package's group, never its owner → the decision
+ *                                           is recorded; nothing of the contributor's is copied. The project
+ *                                           builds the recipe a maintainer writes from the evidence and merges
+ *                                           into factory/pkgbuilds/<group>/<name>/ (the hourly enqueue job)
  *   POST /factory/tasks/:id/reject  {note}  maintainer → the package goes back to registered with the reason
  *   GET  /factory/approvals                 the record (public)
  */
@@ -90,39 +91,33 @@ export async function handleApprove(c: Contributor, id: number, request: Request
   if (!t) return json({ error: "no such task" }, 404);
   if (t.status !== "staged") return json({ error: `task ${id} is ${t.status}, not staged` }, 409);
   if (!canReview(c, t.group)) return json({ error: `a maintainer of ${t.group} is required` }, 403);
-  // Conflict of interest: nobody approves their own package. While a group
-  // has a single maintainer there is nobody else — the bootstrap exception,
-  // recorded as such on the approval (docs/GOVERNANCE.md).
-  let bootstrap = false;
-  if (t.owner === c.login) {
-    const g = (await groupsOf(env)).find((x) => x.name === t.group);
-    if ((g?.maintainers.length ?? 0) > 1) return json({ error: `${c.login} brought ${t.name}; another maintainer of ${t.group} must approve it` }, 403);
-    bootstrap = true;
-  }
+  // Conflict of interest: nobody approves their own package, and a group
+  // with a single maintainer is no exception — that maintainer's own
+  // packages wait for a second one (docs/GOVERNANCE.md).
+  if (t.owner === c.login) return json({ error: `${c.login} brought ${t.name}; another maintainer of ${t.group} must approve it — a group with one maintainer cannot approve that maintainer's own packages` }, 403);
   const already = await env.DB.prepare("SELECT id FROM approvals WHERE task_id = ? AND decision = 'approved'").bind(id).first();
   if (already) return json({ error: "already approved" }, 409);
-  // The project rebuilds the same PKGBUILD: the staged one, fetched by the
-  // worker from this task's evidence. Signed and published by the project.
-  const rebuild = await env.DB.prepare(
-    `INSERT INTO build_tasks (name, "group", arch, version, pkgbuild_ref, reason, priority, publish, trust, owner, kind) VALUES (?, ?, ?, ?, ?, ?, 30, 1, 'project', ?, 'build') RETURNING id`,
-  )
-    .bind(t.name, t.group, t.arch, t.version, `staging:${id}`, `approved by ${c.login}`, t.owner)
-    .first<{ id: number }>();
-  const note = [bootstrap ? `bootstrap: ${c.login} is the sole maintainer of ${t.group} and approved their own package` : "", b.note ?? ""].filter(Boolean).join(" — ") || null;
-  await env.DB.prepare(`INSERT INTO approvals (task_id, name, "group", arch, version, decision, by, note, rebuild_task) VALUES (?, ?, ?, ?, ?, 'approved', ?, ?, ?)`)
-    .bind(id, t.name, t.group, t.arch, t.version, c.login, note, rebuild?.id ?? null)
+  // The decision, on the record. Nothing of the contributor's is copied —
+  // not the package, not the PKGBUILD: the project builds the recipe a
+  // maintainer writes from this evidence and merges into the repository,
+  // queued from main by the hourly enqueue job. When that build lands,
+  // handleComplete links it to this approval (the seal and the track
+  // record read the link) and publishes the registration.
+  const recipe = `factory/pkgbuilds/${t.group}/${t.name}/PKGBUILD`;
+  await env.DB.prepare(`INSERT INTO approvals (task_id, name, "group", arch, version, decision, by, note, rebuild_task) VALUES (?, ?, ?, ?, ?, 'approved', ?, ?, NULL)`)
+    .bind(id, t.name, t.group, t.arch, t.version, c.login, b.note ?? null)
     .run();
   await env.DB.prepare("UPDATE factory_packages SET status = 'approved', detail = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE name = ?")
-    .bind(`${t.version ?? ""} for ${t.arch} approved by ${c.login}; the project is rebuilding it`, t.name)
+    .bind(`${t.version ?? ""} for ${t.arch} approved by ${c.login}; waiting for a maintainer's recipe in ${recipe}`, t.name)
     .run();
   await env.DB.prepare("UPDATE build_requests SET status = 'approved', approved_by = ?, approved_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), detail = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE name = ? AND status != 'approved'")
-    .bind(c.login, `approved by ${c.login}; project rebuild task ${rebuild?.id}`, t.name)
+    .bind(c.login, `approved by ${c.login}; the project builds ${recipe} once it is on main`, t.name)
     .run();
   await cancelPendingAudit(env, id);
   await env.DB.prepare("INSERT INTO events (kind, ring, source, status, summary, payload) VALUES ('approve', 'edge', 'factory', 'ok', ?, ?)")
-    .bind(`${t.name} ${t.version ?? ""} (${t.arch}) approved by ${c.login}${b.note ? " — " + b.note.slice(0, 120) : ""}; project rebuild queued as task ${rebuild?.id}`, JSON.stringify({ task: id, rebuild: rebuild?.id, name: t.name, arch: t.arch, by: c.login, owner: t.owner, note: b.note ?? null }))
+    .bind(`${t.name} ${t.version ?? ""} (${t.arch}) approved by ${c.login}${b.note ? " — " + b.note.slice(0, 120) : ""}; the project builds it once ${recipe} is on main`, JSON.stringify({ task: id, name: t.name, arch: t.arch, by: c.login, owner: t.owner, note: b.note ?? null, recipe }))
     .run();
-  return json({ task: id, decision: "approved", rebuild_task: rebuild?.id, by: c.login });
+  return json({ task: id, decision: "approved", by: c.login, recipe });
 }
 
 export async function handleReject(c: Contributor, id: number, request: Request, env: Env): Promise<Response> {
