@@ -148,17 +148,21 @@ __CHARTS__
     var stable = d.rings.filter(function (r) { return r.ring === "stable"; })[0] || {};
     var byArch = function (r, arch) { return (r.sources || []).filter(function (s) { return s.arch === arch; }).reduce(function (n, s) { return n + s.packages; }, 0); };
     var lastSync = latest(d.events, "sync");
-    var synced = (d.coverage || []).filter(function (c) { return c.upstream_total != null; }).length, expected = (d.coverage || []).length;
+    // The factory is not a mirror: what it builds has no upstream to be short of.
+    var mirrors = (d.coverage || []).filter(function (c) { return c.source !== "factory"; });
+    var missing = mirrors.filter(function (c) { return c.upstream_total == null; }).map(function (c) { return c.source; });
+    var S = d.series || {}, today = new Date().toISOString().slice(0, 10);
+    var imp = (S.imports_daily || []).filter(function (r) { return r.day === today; })[0];
     var sh = latest(d.latest, "health", "stable", "x86_64"), sha = latest(d.latest, "health", "stable", "aarch64");
     // The audience (audience.ts): yesterday's distinct addresses that fetched a ring database — no accounts, no cookies, nothing kept per request.
     var aud = d.audience || [], y = aud.length ? aud[aud.length - 1] : null;
     setTiles("#tiles", [
-      ["Packages in stable", num(stable.package_count), num(byArch(stable, "x86_64")) + " x86_64 · " + num(byArch(stable, "aarch64")) + " aarch64"],
-      ["Stable release", stable.release ? "#" + stable.release.seq : "—", stable.release ? ago(stable.release.created_at) + " · health " + (sh ? sh.status : "n/a") + " / " + (sha ? sha.status : "n/a") : "no release yet"],
-      ["Sources mirrored", synced + " / " + expected, "Arch · Arch Linux ARM · Omarchy · Asahi"],
-      ["Open advisories in stable", '<span id="t-sec">…</span>', '<span id="t-sec-s">matching the five feeds…</span>'],
-      ["Machines on the pool", y ? "≈ " + num(y.machines) + (y.machines >= 10000 ? "+" : "") : "—", y ? "yesterday · " + ["stable", "rc", "edge"].map(function (r) { return r + " " + num((y.by_ring || {})[r] || 0); }).join(" · ") + " · " + num(y.requests) + " fetches" : "counted once a day"],
-      ["Last sync", lastSync ? ago(lastSync.created_at) : "never", lastSync ? esc(lastSync.summary) : "waiting for the first run"]
+      ["Packages in stable", num(stable.package_count), num(byArch(stable, "x86_64")) + " x86_64 · " + num(byArch(stable, "aarch64")) + " aarch64", "", "/packages?ring=stable"],
+      ["Stable release", stable.release ? "#" + stable.release.seq : "—", stable.release ? ago(stable.release.created_at) + " · health " + (sh ? sh.status : "n/a") + " / " + (sha ? sha.status : "n/a") : "no release yet", "", "/journal#releases"],
+      ["Sources mirrored", (mirrors.length - missing.length) + " / " + mirrors.length, missing.length ? "not yet: " + missing.join(", ") : "Arch · Arch Linux ARM · Omarchy · Asahi", "", "/status"],
+      ["Open advisories in stable", '<span id="t-sec">…</span>', '<span id="t-sec-s">matching the five feeds…</span>', "", "/security"],
+      ["Machines on the pool", y ? "≈ " + num(y.machines) + (y.machines >= 10000 ? "+" : "") : "—", y ? "yesterday · " + ["stable", "rc", "edge"].map(function (r) { return r + " " + num((y.by_ring || {})[r] || 0); }).join(" · ") + " · " + num(y.requests) + " fetches" : "counted once a day", "", "/pipeline"],
+      ["Into edge today", imp ? "+" + num(imp.packages) : "+0", (imp ? bytes(imp.bytes) + " · " + num(imp.runs) + " syncs" : "no sync yet today") + (lastSync ? " · last " + ago(lastSync.created_at) : ""), "", "/journal?kind=sync"]
     ]);
     drawStart();
 
@@ -179,7 +183,7 @@ __CHARTS__
     $("#proof-rollback").innerHTML = rollbacks.length ? 'last rollback <b>' + ago(rollbacks[0].created_at) + '</b> · ' + esc(rollbacks[0].ring || "") + ' · automatic' : 'none in the recent journal — <b>0</b> of the last ' + (d.events || []).length + ' events';
 
     // Coverage: one row per source, the sources both architectures serve first, so core is core on either side.
-    var covBy = {}; (d.coverage || []).filter(function (c) { return !c.optional; }).forEach(function (c) { covBy[c.source] = covBy[c.source] || {}; covBy[c.source][c.arch] = c; });
+    var covBy = {}; mirrors.filter(function (c) { return !c.optional; }).forEach(function (c) { covBy[c.source] = covBy[c.source] || {}; covBy[c.source][c.arch] = c; });
     var covNames = Object.keys(covBy).sort(function (a, b) { var na = Object.keys(covBy[a]).length, nb = Object.keys(covBy[b]).length; return nb - na || (a < b ? -1 : 1); });
     var covCell = function (c, a) {
       if (!c) return '<div class="bar none" data-tip="not served on ' + a + '"></div><div class="p num dim">—</div>';
@@ -188,7 +192,6 @@ __CHARTS__
     };
     $("#c-coverage").innerHTML = '<div class="cov-row head"><div></div><div class="k">x86_64</div><div></div><div class="k">aarch64</div><div></div></div>' +
       covNames.map(function (n) { return '<div class="cov-row"><div class="l">' + esc(n) + '</div>' + covCell(covBy[n].x86_64, "x86_64") + covCell(covBy[n].aarch64, "aarch64") + '</div>'; }).join("");
-    var S = d.series || {};
     $("#c-pool").innerHTML = area((S.metrics || []).map(function (r) { return { t: Date.parse(r.created_at), v: Number(r.bytes || 0) }; }), bytes, 200);
     var m0 = (S.metrics || [])[0], m1 = (S.metrics || [])[(S.metrics || []).length - 1];
     $("#c-pool-mini").innerHTML = '<div><b>' + num(d.pool.objects) + '</b>objects</div><div><b>' + (m0 && m1 ? "+" + num(Math.max(0, Number(m1.objects) - Number(m0.objects))) : "—") + '</b>this week</div><div><b>' + bytes(d.pool.bytes) + '</b>stored once</div>';

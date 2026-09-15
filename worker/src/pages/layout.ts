@@ -222,7 +222,7 @@ const CSS = String.raw`
   header .account .avatar { width: 22px; height: 22px; font-size: 10.5px; margin-right: 8px; vertical-align: middle; }
   header nav a small { color: var(--dim); font-size: 11px; margin-left: 5px; letter-spacing: .06em; text-transform: uppercase; }
   footer .fbadge { display: inline-flex; align-items: center; } footer .fbadge svg { display: block; height: 20px; width: auto; } footer .fbadge:hover svg { filter: brightness(1.1); }
-  footer .more { display: inline-flex; gap: 10px 14px; flex-wrap: wrap; } footer .more span { color: var(--dim); }
+  footer .more { display: inline-flex; gap: 10px 14px; flex-wrap: wrap; } footer .more a.active { color: var(--green); }
   .hero { display: grid; gap: 14px; margin: 0 0 32px; max-width: 900px; }
   .hero h1 { font-size: 34px; line-height: 1.15; max-width: 22ch; }
   .hero.compact { margin-bottom: 22px; } .hero.compact h1 { font-size: 28px; }
@@ -572,7 +572,8 @@ const HELPERS = String.raw`
   // A person as a chip: the icon carries the role (green = maintainer), the whole chip is the link to the profile.
   function personChip(login, role, extra) { return '<a class="person" href="/user/' + encodeURIComponent(login) + '" title="' + esc(login) + ' · ' + esc(role) + '">' + avatarIcon(login, role) + '<b>' + esc(login) + '</b>' + (extra ? ' <span class="r">' + extra + '</span>' : '') + '</a>'; }
   function tile(k, v, s, cls) { return '<div class="tile"><div class="k">' + k + '</div><div class="v num' + (cls ? " " + cls : "") + '">' + v + '</div><div class="s">' + s + '</div></div>'; }
-  function setTiles(sel, list) { var el = $(sel); if (!el) return; list.forEach(function (t, i) { var cell = el.children[i]; if (!cell) { cell = document.createElement("div"); cell.className = "tile"; el.appendChild(cell); } setTile(cell, '<div class="k">' + t[0] + '</div><div class="v num' + (t[3] ? " " + t[3] : "") + '">' + t[1] + '</div><div class="s">' + t[2] + '</div>'); }); while (el.children.length > list.length) el.removeChild(el.lastChild); }
+  // A tile with a fifth element is a link: the number, and the page that proves it.
+  function setTiles(sel, list) { var el = $(sel); if (!el) return; list.forEach(function (t, i) { var cell = el.children[i], tag = t[4] ? "A" : "DIV"; if (!cell || cell.tagName !== tag) { var made = document.createElement(tag); made.className = "tile"; if (cell) { made.innerHTML = cell.innerHTML; el.replaceChild(made, cell); } else el.appendChild(made); cell = made; } if (t[4]) cell.href = t[4]; setTile(cell, '<div class="k">' + t[0] + '</div><div class="v num' + (t[3] ? " " + t[3] : "") + '">' + t[1] + '</div><div class="s">' + t[2] + '</div>'); }); while (el.children.length > list.length) el.removeChild(el.lastChild); }
   // Every fetch a page starts goes through busy(): the bar at the top stays
   // on while at least one is in flight.
   function busy(p) {
@@ -708,12 +709,13 @@ ${o.body}
 
 <footer>
   <a class="fbadge" href="https://omarchy.org/" title="Built for Omarchy">${BUILT_FOR_OMARCHY}</a>
-  <span class="more"><span>more:</span>${more}</span>
+  <span class="more">${more}</span>
   <a class="gh" href="https://github.com/firemanxbr/omarchy-pool" title="omarchy-pool on GitHub">${GITHUB_ICON} GitHub</a>
 </footer>
 
 <script>
 (function () {
+  document.querySelectorAll("footer .more a").forEach(function (a) { if (a.getAttribute("href") === location.pathname) a.classList.add("active"); });
 ${HELPERS.split("__POOL_URL__").join(pool)}
 ${o.script ?? ""}
 })();
