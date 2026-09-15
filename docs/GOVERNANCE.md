@@ -5,13 +5,17 @@ Two roles, one file, decisions by pull request.
 - Anyone who signs in with GitHub is a **contributor**: requests packages,
   runs workers on their own machines, follows their builds. Nothing to ask,
   nothing spent by the project.
-- The logins listed under a group in [`factory/MAINTAINERS.toml`](../factory/MAINTAINERS.toml)
-  are the **maintainers** of that group. Nobody is above that — no owner,
-  no superuser, no API that grants a role: the project belongs to its
-  maintainers and contributors, and the pool reads the file on `main` every
-  ten minutes and
-  applies it (`worker/src/governance.ts`); every change is a `role` line in
-  the journal.
+- The logins listed in [`factory/MAINTAINERS.toml`](../factory/MAINTAINERS.toml)
+  are the **maintainers** — one list, no areas: every maintainer reviews
+  everything. Nobody is above that — no owner, no superuser, no API that
+  grants a role: the project belongs to its maintainers and contributors,
+  and the pool reads the file on `main` every ten minutes and applies it
+  (`worker/src/governance.ts`); every change is a `role` line in the
+  journal.
+
+This is a **community pool**. Nothing in it is official Omarchy, no
+package here is endorsed by the Omarchy project, and the dashboard says
+so wherever a package is shown.
 
 ## Contributors and maintainers
 
@@ -61,14 +65,35 @@ maintainer does. The builder cannot write those two files, and the audit
 cannot write anything else; a build decided before the audit ran cancels
 it. No project worker with a key, no audit: the column says *waiting*.
 
-## Groups
+## Categories, not groups
 
-A group is an area of interest — `omarchy` (what Omarchy ships or depends
-on), `community` (everything else) today. Every package registers into one;
-its maintainers approve what is built for it and review
-`factory/pkgbuilds/<group>/`. The live list, with descriptions and
-maintainers, is on the dashboard's [Governance](https://omarchy-pool.firemanxbr.org/docs/governance)
-page and at `GET /api/v1/factory/groups`.
+There are no groups: no package belongs to an area whose maintainers own
+it, and no maintainer reviews only a part of the pool. What a package *is
+about* — for a person browsing — is its **category**, one of a fixed list
+(`worker/src/categories.ts`): `terminal`, `editors`, `development`,
+`browsers`, `communication`, `media`, `graphics`, `office`, `games`,
+`system`, `networking`, `security`, `fonts`, `themes`, `libraries`,
+`other`.
+
+- **The project's agent proposes it.** When it audits a staged build it
+  names a category in its report, from pkgdesc, the upstream project and
+  what the package installs. The registration takes the proposal only
+  while nobody settled one (a `category` line in the journal says so).
+- **A maintainer settles it** — on the Review page, under the package
+  name, or with `POST /api/v1/factory/packages/<name>/category`
+  `{"category"}` — at review, or any time after; the change is a
+  `category` line in the journal with who and from what. A settled
+  category is never overwritten by a later audit.
+- It travels with the package: `GET /api/v1/factory/packages`, the
+  package page (*who stands behind it*), the profile's package list and
+  the seal (`category`). It says where to look, never who may approve.
+
+The project's recipes live flat, `factory/pkgbuilds/<name>/`, owned by
+every maintainer (`CODEOWNERS`, generated from the governance file); the
+sizing recipes — measured by hand, never queued — under `factory/sizing/`.
+The live list of maintainers is on the dashboard's
+[Governance](https://omarchy-pool.firemanxbr.org/docs/governance) page and
+at `GET /api/v1/factory/maintainers`.
 
 ## What a maintainer does
 
@@ -81,12 +106,13 @@ page and at `GET /api/v1/factory/groups`.
   and the publish job: the project's package into `edge`, signed by the
   pool, the registration `published`, the seal written next to the
   object. **Never their own package**: a maintainer who brought a package
-  is its contributor, and another maintainer of the group has it built
-  and approves it (conflict of interest, refused by the pool). A group
-  with a single maintainer is no exception: that maintainer's own
-  packages wait for a second one — which is why a group needs two.
-- Reviews pull requests touching `factory/pkgbuilds/<group>/` (a new recipe
-  of the project's own, a version bump).
+  is its contributor, and another maintainer has it built and approves it
+  (conflict of interest, refused by the pool). A project with a single
+  maintainer is no exception: that maintainer's own packages wait for a
+  second one — which is why the project needs two.
+- Settles each package's category (*Categories, not groups*).
+- Reviews pull requests touching `factory/pkgbuilds/` (a new recipe of the
+  project's own, a version bump).
 - Trusts workers as project workers (`POST /factory/workers/:id/trust`).
 - Blocks a contributor or a package when the evidence says so, with the
   reason on the record (*Blocking*, below).
@@ -149,8 +175,8 @@ container that is not a review worker never audits.
 1. **Contribute first.** Every maintainer was a contributor: packages
    registered, builds staged, reviews taken part in. The record is public on
    the Factory page.
-2. **A maintainer proposes you** — a pull request adding your login to a
-   group in `factory/MAINTAINERS.toml`, saying why. It is a decision people
+2. **A maintainer proposes you** — a pull request adding your login to
+   `factory/MAINTAINERS.toml`, saying why. It is a decision people
    make, not a database write.
 3. **Another maintainer approves.** The file (and `CODEOWNERS`, generated
    from it) is owned by every maintainer and `main` requires a code-owner
@@ -158,8 +184,8 @@ container that is not a review worker never audits.
    auto-merged. The merge is the promotion: within ten minutes the pool
    applies it and the next sign-in shows the role.
 
-Adding or retiring a group, or a maintainer stepping down, is the same pull
-request with the same review. Run `factory/bin/check-governance --write` in
+A maintainer stepping down is the same pull request with the same
+review. Run `factory/bin/check-governance --write` in
 that pull request to regenerate `CODEOWNERS`; CI fails when the two
 disagree.
 
@@ -222,11 +248,11 @@ staged PKGBUILD with `pkgver` moved to the tag; evidence again, never the
 product). The owner's worker has **14 days**; after that any `--shared`
 worker may build it. **30 days** without a build and the package is
 *unmaintained*: no more bumps until its owner builds again, or a
-maintainer of the group removes the registration so someone else can take
-the name. The project's recipes (`factory/pkgbuilds/<group>/`, the
-maintainers' own and the ones written from contributors' evidence) are
-bumped by pull request — `factory-update.yml` opens one per package —
-reviewed by the group's maintainers, never auto-merged.
+maintainer removes the registration so someone else can take the name.
+The project's recipes (`factory/pkgbuilds/<name>/`, the maintainers' own
+and the ones written from contributors' evidence) are bumped by pull
+request — `factory-update.yml` opens one per package — reviewed by a
+maintainer, never auto-merged.
 
 ## The record
 
@@ -235,21 +261,21 @@ their login (`GET /api/v1/factory/approvals`), trust decisions are `trust`
 events, blocks and their lifting are signed records in the public bucket
 (*Blocking*). The file's history on GitHub is the history of who decided what.
 
-### Track record, per group
+### Track record
 
 A profile (`/user/<login>`, `GET /api/v1/users/<login>` → `record`) sums
-that record per group, so it says where a person has done the work — not
-who they are. Per group, as a contributor: distinct packages a maintainer
-let in, builds that produced evidence (staged), of which bumps, builds
-their workers did for other people (donated compute), rejections. As a
-maintainer: approvals, rejections, and approvals whose project rebuild
-then failed. One number per group, so that the formula is public and dull:
+that record, so it says how much work a person has done here — not who
+they are. As a contributor: distinct packages a maintainer let in, builds
+that produced evidence (staged), of which bumps, builds their workers did
+for other people (donated compute), rejections. As a maintainer:
+approvals, rejections, and approvals whose project rebuild then failed.
+One number, so that the formula is public and dull:
 
 ```
 score = 3·let in + staged + bumps + for others − 2·rejected      (contributed)
       + 2·approvals + rejections − 3·rebuilds failed              (maintained)
 ```
 
-It orders the groups on a profile and nothing else: no rank, no badge, no
+It is one number on a profile and nothing else: no rank, no badge, no
 threshold. Becoming a maintainer is still a pull request another
 maintainer approves, with this record as one thing they look at.

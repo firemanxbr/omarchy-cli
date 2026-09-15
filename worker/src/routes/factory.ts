@@ -3,6 +3,7 @@ import { writeAttestation } from "./seal";
 import { isRepoArch } from "../r2";
 import type { WorkerIdentity } from "./contributors";
 import { issueJobToken, scopesFor, type JobClaims } from "../jobtoken";
+import { isCategory } from "../categories";
 import { recordEvidence, vetSummary } from "../record";
 
 /**
@@ -20,7 +21,7 @@ import { recordEvidence, vetSummary } from "../record";
  * A lease that expires (worker died, build hung) goes back to the queue on
  * the scheduler's next tick. Maintainers (their token) or the enqueue job:
  *
- *   POST /factory/enqueue               {name, group, arches?, pkgbuild_ref, reason, version?, priority?}
+ *   POST /factory/enqueue               {name, arches?, pkgbuild_ref, reason, version?, priority?}
  *   POST /factory/tasks/:id/cancel
  *
  * Read:
@@ -33,7 +34,6 @@ const WORKER_ALIVE_MINUTES = 10;
 interface TaskRow {
   id: number;
   name: string;
-  group: string;
   arch: string;
   version: string | null;
   pkgbuild_ref: string;
@@ -125,7 +125,7 @@ function nothingToBuild(skipped: { arch: string; source: string; version: string
 }
 
 /** Queue one task per architecture unless an identical one is already queued or running. */
-async function enqueue(env: Env, t: { name: string; group: string; arches: string[]; pkgbuild_ref: string; reason: string; version?: string | null; priority?: number; publish?: boolean }): Promise<number[]> {
+async function enqueue(env: Env, t: { name: string; arches: string[]; pkgbuild_ref: string; reason: string; version?: string | null; priority?: number; publish?: boolean }): Promise<number[]> {
   const ids: number[] = [];
   for (const arch of t.arches) {
     const dup = await env.DB.prepare(
@@ -138,9 +138,9 @@ async function enqueue(env: Env, t: { name: string; group: string; arches: strin
       continue;
     }
     const row = await env.DB.prepare(
-      `INSERT INTO build_tasks (name, "group", arch, version, pkgbuild_ref, reason, priority, publish) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+      `INSERT INTO build_tasks (name, arch, version, pkgbuild_ref, reason, priority, publish) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id`,
     )
-      .bind(t.name, t.group, arch, t.version ?? null, t.pkgbuild_ref, t.reason, t.priority ?? 100, t.publish === false ? 0 : 1)
+      .bind(t.name, arch, t.version ?? null, t.pkgbuild_ref, t.reason, t.priority ?? 100, t.publish === false ? 0 : 1)
       .first<{ id: number }>();
     if (row) ids.push(row.id);
   }
@@ -150,12 +150,12 @@ async function enqueue(env: Env, t: { name: string; group: string; arches: strin
 // ---------- maintainers / pipeline ----------
 
 export async function handleEnqueue(request: Request, env: Env): Promise<Response> {
-  const b = (await request.json()) as { name?: string; group?: string; arches?: unknown; pkgbuild_ref?: string; reason?: string; version?: string; priority?: number; override?: boolean; publish?: boolean };
-  if (!b.name || !b.group || !b.pkgbuild_ref || !b.reason) return json({ error: "name, group, pkgbuild_ref and reason are required" }, 400);
+  const b = (await request.json()) as { name?: string; arches?: unknown; pkgbuild_ref?: string; reason?: string; version?: string; priority?: number; override?: boolean; publish?: boolean };
+  if (!b.name || !b.pkgbuild_ref || !b.reason) return json({ error: "name, pkgbuild_ref and reason are required" }, 400);
   const arches = parseArches(b.arches);
   const { build, skipped } = splitByUpstream(await providedBy(env, b.name), arches, b.override);
   if (!build.length) return nothingToBuild(skipped);
-  const tasks = await enqueue(env, { name: b.name, group: b.group, arches: build, pkgbuild_ref: b.pkgbuild_ref, reason: b.reason, version: b.version ?? null, priority: b.priority, publish: b.publish });
+  const tasks = await enqueue(env, { name: b.name, arches: build, pkgbuild_ref: b.pkgbuild_ref, reason: b.reason, version: b.version ?? null, priority: b.priority, publish: b.publish });
   const note = (skipped.length ? `; ${skipped.map((s) => `${s.arch} skipped, ${s.source} ships ${s.version}`).join(", ")}` : "") + (b.publish === false ? "; dry run, nothing will be published" : "");
   await event(env, "enqueue", "ok", `${b.name}${b.version ? " " + b.version : ""}: ${tasks.length} build task(s) queued for ${build.join(", ")} (${b.reason})${note}`, { name: b.name, arches: build, skipped, pkgbuild_ref: b.pkgbuild_ref, reason: b.reason, tasks });
   return json({ tasks, arches: build, skipped }, 201);
@@ -301,7 +301,7 @@ export async function handleClaim(request: Request, env: Env, actor: Actor): Pro
     token_expires_at: new Date(expires * 1000).toISOString(),
     lease_minutes: LEASE_MINUTES,
     repo: "https://github.com/firemanxbr/omarchy-pool",
-    pkgbuild_path: task.kind === "build" && !(task.pkgbuild_ref.includes(":") || task.pkgbuild_ref.startsWith("draft")) ? `factory/pkgbuilds/${task.group}/${task.name}` : null,
+    pkgbuild_path: task.kind === "build" && !(task.pkgbuild_ref.includes(":") || task.pkgbuild_ref.startsWith("draft")) ? `factory/pkgbuilds/${task.name}` : null,
     // Where a staged result goes — a contributor's build, or the project's review build: PUT these back with the job token.
     upload: task.trust === "community" || params.review !== undefined ? `/api/v1/factory/tasks/${task.id}/artifacts/<filename>` : null,
   });
@@ -370,6 +370,14 @@ export async function handleComplete(id: number, request: Request, env: Env, act
       // The second agent's report joins the evidence on the record.
       const audited = await env.DB.prepare("SELECT name, staged_prefix FROM build_tasks WHERE id = ?").bind(Number(p.task)).first<{ name: string; staged_prefix: string | null }>();
       if (audited?.staged_prefix) await recordEvidence(env, audited.name, await requestOf(env, audited.name), Number(p.task), audited.staged_prefix, ["audit.json", "audit.md"]);
+      // Its proposal for the category (categories.ts) settles nothing: the
+      // registration takes it only while no maintainer set one, and a
+      // maintainer may change it at review or any time after.
+      const proposed = (b.result as { category?: unknown } | undefined)?.category;
+      if (audited && isCategory(proposed)) {
+        const set = await env.DB.prepare("UPDATE factory_packages SET category = ? WHERE name = ? AND category IS NULL").bind(proposed, audited.name).run();
+        if (set.meta.changes) await event(env, "category", "ok", `${audited.name}: ${proposed}, proposed by the project's agent (audit of task ${p.task}); a maintainer settles it at review`, { name: audited.name, category: proposed, task: Number(p.task), by: "agent" });
+      }
     }
     await event(env, "job", "ok", `${task.kind}${label ? " " + label : ""}: ${b.summary ?? "done"} by ${who}${b.duration_ms ? " in " + Math.round(b.duration_ms / 1000) + " s" : ""}`, { task: id, kind: task.kind, params: p, worker: who, result: b.result ?? null, duration_ms: b.duration_ms ?? null });
     return json({ task: id, status: "done" });
@@ -419,9 +427,9 @@ export async function handleComplete(id: number, request: Request, env: Env, act
     // as a job of its own so the contributor's worker never holds the
     // key or writes the report; the maintainer still decides.
     await env.DB.prepare(
-      `INSERT INTO build_tasks (name, "group", arch, version, pkgbuild_ref, reason, priority, status, publish, trust, owner, kind, params) VALUES (?, ?, ?, ?, ?, ?, 40, 'queued', 0, 'project', NULL, 'audit', ?)`,
+      `INSERT INTO build_tasks (name, arch, version, pkgbuild_ref, reason, priority, status, publish, trust, owner, kind, params) VALUES (?, ?, ?, ?, ?, 40, 'queued', 0, 'project', NULL, 'audit', ?)`,
     )
-      .bind(task.name, task.group, task.arch, b.version ?? null, `staging:${id}`, `staged as task ${id}`, JSON.stringify({ task: id, name: task.name, group: task.group, owner: task.owner, arch: task.arch }))
+      .bind(task.name, task.arch, b.version ?? null, `staging:${id}`, `staged as task ${id}`, JSON.stringify({ task: id, name: task.name, owner: task.owner, arch: task.arch }))
       .run();
     return json({ task: id, status: "staged", staged_prefix: prefix });
   }

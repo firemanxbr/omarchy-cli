@@ -115,7 +115,7 @@ async function recentJobs(env: Env, kind: string, params: Record<string, string>
 
 export async function createJob(env: Env, job: { kind: string; params: Record<string, string>; arch: string }, reason = "scheduled"): Promise<number> {
   const row = await env.DB.prepare(
-    `INSERT INTO build_tasks (name, "group", arch, pkgbuild_ref, reason, priority, status, publish, trust, kind, params) VALUES (?, 'pool', ?, '-', ?, 50, 'queued', 1, 'project', ?, ?) RETURNING id`,
+    `INSERT INTO build_tasks (name, arch, pkgbuild_ref, reason, priority, status, publish, trust, kind, params) VALUES (?, ?, '-', ?, 50, 'queued', 1, 'project', ?, ?) RETURNING id`,
   )
     .bind(job.kind, job.arch, reason, job.kind, JSON.stringify(job.params))
     .first<{ id: number }>();

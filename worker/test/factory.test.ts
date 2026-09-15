@@ -38,8 +38,8 @@ beforeAll(async () => {
       ('w1', 'aarch64', 'm1', ?, 'shared', 'project', 'm1', '2000-01-01T00:00:00Z'),
       ('w2', 'aarch64', 'm1', ?, 'shared', 'project', 'm1', '2000-01-01T00:00:00Z'),
       ('w3', 'aarch64', 'alice', ?, 'dedicated', 'community', NULL, '2000-01-01T00:00:00Z')`).bind(await h("omw_w1"), await h("omw_w2"), await h("omw_w3")),
-    env.DB.prepare(`INSERT INTO factory_groups (name, description, maintainers) VALUES ('community', 'everything else', '["m1"]')`),
-    env.DB.prepare(`INSERT INTO contributors (login, token_hash, role, areas) VALUES ('m1', ?, 'maintainer', '["community"]'), ('m2', ?, 'maintainer', '["community"]'), ('alice', ?, 'contributor', '[]')`).bind(await h("omc_m1"), await h("omc_m2"), await h("omc_alice")),
+    env.DB.prepare(`INSERT INTO factory_maintainers (login) VALUES ('m1')`),
+    env.DB.prepare(`INSERT INTO contributors (login, token_hash, role) VALUES ('m1', ?, 'maintainer'), ('m2', ?, 'maintainer'), ('alice', ?, 'contributor')`).bind(await h("omc_m1"), await h("omc_m2"), await h("omc_alice")),
   ]);
 });
 
@@ -53,8 +53,8 @@ describe("claims and leases", () => {
   });
 
   it("a maintainer enqueues a project build; a project worker takes it with a lease and a job token; a failure requeues it", async () => {
-    expect((await call("POST", "/factory/enqueue", { name: "tool", group: "community", pkgbuild_ref: "abc123", reason: "test", arches: ["aarch64"] })).status).toBe(401);
-    const q = await call("POST", "/factory/enqueue", { name: "tool", group: "community", pkgbuild_ref: "abc123", reason: "test", arches: ["aarch64"], version: "1.0-1" }, "omc_m1");
+    expect((await call("POST", "/factory/enqueue", { name: "tool", pkgbuild_ref: "abc123", reason: "test", arches: ["aarch64"] })).status).toBe(401);
+    const q = await call("POST", "/factory/enqueue", { name: "tool", pkgbuild_ref: "abc123", reason: "test", arches: ["aarch64"], version: "1.0-1" }, "omc_m1");
     expect(q.status, JSON.stringify(q.json)).toBe(201);
     expect(q.json.tasks).toHaveLength(1);
     const id = q.json.tasks[0].id ?? q.json.tasks[0];
@@ -65,7 +65,7 @@ describe("claims and leases", () => {
     expect(c.json.task.id).toBe(id);
     expect(c.json.task.status).toBe("leased");
     expect(c.json.token).toMatch(/^omj\./);
-    expect(c.json.pkgbuild_path).toBe("factory/pkgbuilds/community/tool");
+    expect(c.json.pkgbuild_path).toBe("factory/pkgbuilds/tool");
     // The task is leased: nobody else gets it; the job token heartbeats and moves the lease.
     expect((await call("POST", "/factory/claim", { arch: "aarch64" }, "omw_w2")).status).toBe(204);
     expect((await call("POST", `/factory/tasks/${id}/heartbeat`, {}, "omw_w2")).status).toBe(409);
@@ -109,7 +109,7 @@ describe("a community build, its audit and the review", () => {
   let req: number;
 
   it("the owner's worker stages the evidence with its job token; the builder cannot write the audit", async () => {
-    await env.DB.prepare(`INSERT INTO build_tasks (name, "group", arch, version, pkgbuild_ref, reason, priority, publish, trust, owner, kind) VALUES ('mine', 'community', 'aarch64', '1.0-1', 'draft:https://github.com/alice/mine@latest', 'contributor', 100, 0, 'community', 'alice', 'build')`).run();
+    await env.DB.prepare(`INSERT INTO build_tasks (name, arch, version, pkgbuild_ref, reason, priority, publish, trust, owner, kind) VALUES ('mine', 'aarch64', '1.0-1', 'draft:https://github.com/alice/mine@latest', 'contributor', 100, 0, 'community', 'alice', 'build')`).run();
     // Project workers never build a contributor's package.
     expect((await call("POST", "/factory/claim", { arch: "aarch64" }, "omw_w1")).status).toBe(204);
     // A draft is the agent's work: a worker with no agent, or one whose probe failed, gets nothing; one whose agent answered gets it.
@@ -130,7 +130,7 @@ describe("a community build, its audit and the review", () => {
     expect(c.json.upload).toBe(`/api/v1/factory/tasks/${task}/artifacts/<filename>`);
     // The package this build is for: requested (record #), so the evidence has a place on the record.
     req = (await env.DB.prepare(`INSERT INTO package_requests (name, owner, project, source, version, description, license, arches, checklist, record, sha256) VALUES ('mine', 'alice', 'https://github.com/alice/mine', 'https://github.com/alice/mine/archive/refs/tags/v1.0.tar.gz', 'v1.0', 'Mine, a tool', 'MIT', '["aarch64"]', '{}', 'factory/mine/0/request.json', 'x') RETURNING id`).first<{ id: number }>())!.id;
-    await env.DB.prepare(`INSERT INTO factory_packages (name, owner, url, "group", arches, status, request_id, project) VALUES ('mine', 'alice', 'https://github.com/alice/mine', 'community', '["aarch64"]', 'building', ?, 'https://github.com/alice/mine')`).bind(req).run();
+    await env.DB.prepare(`INSERT INTO factory_packages (name, owner, url, arches, status, request_id, project) VALUES ('mine', 'alice', 'https://github.com/alice/mine', '["aarch64"]', 'building', ?, 'https://github.com/alice/mine')`).bind(req).run();
     for (const f of ["PKGBUILD", "build.log", "PKGINFO", "tests.log", "mine-1.0-1-aarch64.pkg.tar.zst"]) {
       expect((await call("PUT", `/factory/tasks/${task}/artifacts/${f}`, undefined, jobToken, `evidence ${f}`)).status).toBe(201);
     }
@@ -176,17 +176,33 @@ describe("a community build, its audit and the review", () => {
     expect((await call("PUT", `/factory/tasks/${task}/artifacts/PKGBUILD`, undefined, c.json.token, "x")).status).toBe(400);
     expect((await call("PUT", `/factory/tasks/${task}/artifacts/audit.json`, undefined, c.json.token, '{"verdict":"warn"}')).status).toBe(201);
     expect((await call("PUT", `/factory/tasks/${task}/artifacts/audit.md`, undefined, c.json.token, "# Audit: warn")).status).toBe(201);
-    const done = await call("POST", `/factory/tasks/${c.json.task.id}/complete`, { summary: "warn", result: { verdict: "warn", summary: "SKIP checksum", model: "test", findings: [{ severity: "high", area: "supply-chain" }] } }, c.json.token);
+    const done = await call("POST", `/factory/tasks/${c.json.task.id}/complete`, { summary: "warn", result: { verdict: "warn", summary: "SKIP checksum", model: "test", category: "terminal", findings: [{ severity: "high", area: "supply-chain" }] } }, c.json.token);
     expect(done.json.status).toBe("done");
     const review = await call("GET", "/factory/review");
     expect(review.json.staged.find((t: any) => t.id === task).audit).toMatchObject({ status: "done", verdict: "warn", findings: 1, high: 1, model: "test" });
     // The report joins the evidence on the record.
     expect(await env.PACKAGES.head(`factory/mine/${req}/build-${task}/audit.md`)).not.toBeNull();
+    // The agent's category is a proposal: the registration took it because none was set, and the review row shows it.
+    expect(review.json.staged.find((t: any) => t.id === task).category).toBe("terminal");
+  });
+
+  it("a maintainer settles the category — any maintainer, from the fixed list — and a second audit does not undo it", async () => {
+    expect((await call("POST", "/factory/packages/mine/category", { category: "editors" }, "omc_alice")).status).toBe(403);
+    expect((await call("POST", "/factory/packages/mine/category", { category: "desktop-stuff" }, "omc_m1")).status).toBe(400);
+    expect((await call("POST", "/factory/packages/nothing/category", { category: "editors" }, "omc_m1")).status).toBe(404);
+    const set = await call("POST", "/factory/packages/mine/category", { category: "editors" }, "omc_m1");
+    expect(set.json).toMatchObject({ package: "mine", category: "editors", was: "terminal", by: "m1" });
+    expect((await env.DB.prepare("SELECT category FROM factory_packages WHERE name = 'mine'").first())!.category).toBe("editors");
+    expect((await env.DB.prepare("SELECT summary FROM events WHERE kind = 'category' ORDER BY id DESC LIMIT 1").first())!.summary).toBe("mine: editors (was terminal), settled by m1");
+    // What the agent proposes later is only a proposal: a settled category stays.
+    await env.DB.prepare("UPDATE factory_packages SET category = 'editors' WHERE name = 'mine'").run();
+    const again = await env.DB.prepare("UPDATE factory_packages SET category = 'games' WHERE name = 'mine' AND category IS NULL").run();
+    expect(again.meta.changes).toBe(0);
   });
 
   it("a newer build of the same package supersedes the staged one before it", async () => {
     // alice's worker builds mine again (a fix): the earlier staged row is cancelled with its pending audit, and the review queue shows one.
-    await env.DB.prepare(`INSERT INTO build_tasks (name, "group", arch, version, pkgbuild_ref, reason, priority, publish, trust, owner, kind) VALUES ('mine', 'community', 'aarch64', '1.0-2', 'draft:https://github.com/alice/mine@latest', 'contributor', 100, 0, 'community', 'alice', 'build')`).run();
+    await env.DB.prepare(`INSERT INTO build_tasks (name, arch, version, pkgbuild_ref, reason, priority, publish, trust, owner, kind) VALUES ('mine', 'aarch64', '1.0-2', 'draft:https://github.com/alice/mine@latest', 'contributor', 100, 0, 'community', 'alice', 'build')`).run();
     const c = await call("POST", "/factory/claim", { arch: "aarch64", agent: "openai/gpt-5", agent_status: "ok" }, "omw_w3");
     expect(c.status).toBe(200);
     const again = c.json.task.id;
@@ -210,7 +226,7 @@ describe("a community build, its audit and the review", () => {
     const own = await call("POST", `/factory/tasks/${task}/build`, {}, "omc_m1");
     expect(own.status).toBe(403);
     expect(own.json.error).toMatch(/another maintainer/);
-    await env.DB.prepare(`UPDATE factory_groups SET maintainers = '["m1","m2"]' WHERE name = 'community'`).run();
+    await env.DB.prepare(`INSERT OR IGNORE INTO factory_maintainers (login) VALUES ('m2')`).run();
     const asked = await call("POST", `/factory/tasks/${task}/build`, { note: "reads well" }, "omc_m2");
     expect(asked.status, JSON.stringify(asked.json)).toBe(200);
     expect(asked.json).toMatchObject({ from: task, by: "m2", task: expect.any(Number) });
@@ -257,11 +273,11 @@ describe("a community build, its audit and the review", () => {
   });
 
   it("a maintainer — never the owner, no exception — approves the project's build; a publish job carries it into the pool; the seal tells the chain", async () => {
-    await env.DB.prepare(`UPDATE factory_groups SET maintainers = '["m1"]' WHERE name = 'community'`).run();
+    await env.DB.prepare(`DELETE FROM factory_maintainers WHERE login = 'm2'`).run();
     const sole = await call("POST", `/factory/tasks/${projectTask}/approve`, {}, "omc_m1");
     expect(sole.status).toBe(403);
-    expect(sole.json.error).toMatch(/one maintainer cannot approve/);
-    await env.DB.prepare(`UPDATE factory_groups SET maintainers = '["m1","m2"]' WHERE name = 'community'`).run();
+    expect(sole.json.error).toMatch(/with one maintainer, that maintainer.s own packages wait/);
+    await env.DB.prepare(`INSERT OR IGNORE INTO factory_maintainers (login) VALUES ('m2')`).run();
     const other = await call("POST", `/factory/tasks/${projectTask}/approve`, { note: "looks right" }, "omc_m2");
     expect(other.status, JSON.stringify(other.json)).toBe(200);
     expect(other.json).toMatchObject({ task: projectTask, decision: "approved", by: "m2", publish: expect.any(Number) });
@@ -314,8 +330,8 @@ describe("a community build, its audit and the review", () => {
 describe("a recipe's failure", () => {
   it("fails at once when the worker says it is final, and the package says why; the infrastructure's is retried", async () => {
     await env.DB.batch([
-      env.DB.prepare(`INSERT INTO factory_packages (name, owner, url, "group", arches, status) VALUES ('broken', 'alice', 'https://github.com/alice/broken', 'community', '["aarch64"]', 'waiting')`),
-      env.DB.prepare(`INSERT INTO build_tasks (name, "group", arch, version, pkgbuild_ref, reason, priority, publish, trust, owner, kind) VALUES ('broken', 'community', 'aarch64', '1.0-1', 'https://github.com/alice/broken@HEAD:PKGBUILD', 'contributor', 100, 0, 'community', 'alice', 'build')`),
+      env.DB.prepare(`INSERT INTO factory_packages (name, owner, url, arches, status) VALUES ('broken', 'alice', 'https://github.com/alice/broken', '["aarch64"]', 'waiting')`),
+      env.DB.prepare(`INSERT INTO build_tasks (name, arch, version, pkgbuild_ref, reason, priority, publish, trust, owner, kind) VALUES ('broken', 'aarch64', '1.0-1', 'https://github.com/alice/broken@HEAD:PKGBUILD', 'contributor', 100, 0, 'community', 'alice', 'build')`),
     ]);
     // A download that broke: back in the queue, as before.
     let c = await call("POST", "/factory/claim", { arch: "aarch64" }, "omw_w3");
@@ -338,8 +354,8 @@ describe("a recipe's failure", () => {
 describe("an expired lease", () => {
   it("puts the package back to waiting with the task, and to registered with the reason when the attempts are spent", async () => {
     await env.DB.batch([
-      env.DB.prepare(`INSERT INTO factory_packages (name, owner, url, "group", arches, status) VALUES ('orphan', 'alice', 'https://github.com/alice/orphan', 'community', '["aarch64"]', 'waiting')`),
-      env.DB.prepare(`INSERT INTO build_tasks (name, "group", arch, version, pkgbuild_ref, reason, priority, publish, trust, owner, kind, max_attempts) VALUES ('orphan', 'community', 'aarch64', '1.0-1', 'https://github.com/alice/orphan@HEAD:PKGBUILD', 'contributor', 100, 0, 'community', 'alice', 'build', 2)`),
+      env.DB.prepare(`INSERT INTO factory_packages (name, owner, url, arches, status) VALUES ('orphan', 'alice', 'https://github.com/alice/orphan', '["aarch64"]', 'waiting')`),
+      env.DB.prepare(`INSERT INTO build_tasks (name, arch, version, pkgbuild_ref, reason, priority, publish, trust, owner, kind, max_attempts) VALUES ('orphan', 'aarch64', '1.0-1', 'https://github.com/alice/orphan@HEAD:PKGBUILD', 'contributor', 100, 0, 'community', 'alice', 'build', 2)`),
     ]);
     const status = async () => (await env.DB.prepare("SELECT status, detail FROM factory_packages WHERE name = 'orphan'").first<{ status: string; detail: string | null }>())!;
     // The worker took it and died: the lease runs out.
@@ -400,8 +416,8 @@ describe("a package request", () => {
 
   it("gives a registration made before requests existed its record, from the staged PKGBUILD", async () => {
     await env.DB.batch([
-      env.DB.prepare(`INSERT INTO factory_packages (name, owner, url, "group", arches, detected, status, created_at) VALUES ('older', 'alice', 'https://github.com/alice/recipes', 'community', '["aarch64"]', '{"latest_tag":"v9"}', 'staged', '2026-09-14T10:00:00Z')`),
-      env.DB.prepare(`INSERT INTO build_tasks (name, "group", arch, version, pkgbuild_ref, reason, priority, publish, trust, owner, kind, status, staged_prefix) VALUES ('older', 'community', 'aarch64', '1.2-1', 'https://github.com/alice/recipes@HEAD:older/PKGBUILD', 'contributor', 100, 0, 'community', 'alice', 'build', 'staged', 'staging/alice/older/1/')`),
+      env.DB.prepare(`INSERT INTO factory_packages (name, owner, url, arches, detected, status, created_at) VALUES ('older', 'alice', 'https://github.com/alice/recipes', '["aarch64"]', '{"latest_tag":"v9"}', 'staged', '2026-09-14T10:00:00Z')`),
+      env.DB.prepare(`INSERT INTO build_tasks (name, arch, version, pkgbuild_ref, reason, priority, publish, trust, owner, kind, status, staged_prefix) VALUES ('older', 'aarch64', '1.2-1', 'https://github.com/alice/recipes@HEAD:older/PKGBUILD', 'contributor', 100, 0, 'community', 'alice', 'build', 'staged', 'staging/alice/older/1/')`),
     ]);
     const task = (await env.DB.prepare("SELECT id FROM build_tasks WHERE name = 'older'").first<{ id: number }>())!.id;
     await env.STAGING.put(`staging/alice/older/${task}/PKGBUILD`, "pkgname=older\npkgdesc=\"An older tool\"\nurl=\"https://github.com/upstream/older\"\nlicense=('Apache-2.0')\n");
@@ -452,7 +468,7 @@ describe("blocking", () => {
 
   it("a maintainer blocks a contributor: nothing more from them, their workers revoked, their packages rejected — and their sources stay closed to other accounts", async () => {
     // bob requests something, registers a worker, then gets blocked by m1.
-    await env.DB.prepare(`INSERT INTO contributors (login, token_hash, role, areas) VALUES ('bob', ?, 'contributor', '[]')`).bind(await sha256Hex("omc_bob")).run();
+    await env.DB.prepare(`INSERT INTO contributors (login, token_hash, role) VALUES ('bob', ?, 'contributor')`).bind(await sha256Hex("omc_bob")).run();
     const req = await call("POST", "/factory/packages", { url: "https://evil.example/tool", source: "https://evil.example/tool-1.0.tar.gz", version: "1.0", description: "A tool of dubious intent", license: "MIT", arches: ["aarch64"], checklist }, "omc_bob");
     expect(req.status, JSON.stringify(req.json)).toBe(201);
     const w = await call("POST", "/factory/workers", { name: "box", arch: "aarch64" }, "omc_bob");
@@ -471,7 +487,7 @@ describe("blocking", () => {
     expect((await call("POST", "/factory/workers", { name: "box2", arch: "aarch64" }, "omc_bob")).status).toBe(403);
     expect((await call("GET", "/factory/blocks")).json.contributors).toEqual([expect.objectContaining({ login: "bob", blocked_by: "m1", blocked_reason: "spam requests" })]);
     // A fresh account asking for the same project, or the same source: no.
-    await env.DB.prepare(`INSERT INTO contributors (login, token_hash, role, areas) VALUES ('bob2', ?, 'contributor', '[]')`).bind(await sha256Hex("omc_bob2")).run();
+    await env.DB.prepare(`INSERT INTO contributors (login, token_hash, role) VALUES ('bob2', ?, 'contributor')`).bind(await sha256Hex("omc_bob2")).run();
     const again = await call("POST", "/factory/packages", { name: "tool2", url: "https://evil.example/tool", source: "https://evil.example/tool-1.0.tar.gz", version: "1.0", description: "A tool of dubious intent", license: "MIT", checklist }, "omc_bob2");
     expect(again.status).toBe(403);
     expect(again.json.error).toMatch(/requested by bob, who is blocked/);

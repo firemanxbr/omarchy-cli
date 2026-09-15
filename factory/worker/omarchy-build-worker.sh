@@ -74,10 +74,10 @@ agent_probe_if_due() {
 
 # ---------------------------------------------------------------- inside ---
 # Runs as root in a fresh Arch container with /task mounted: /task/meta.sh
-# (name, group, ref, arch, pool), /task/out for the result. Logs to stdout.
+# (name, ref, arch, pool), /task/out for the result. Logs to stdout.
 #
 # `ref` says where the PKGBUILD comes from:
-#   <commit>                   factory/pkgbuilds/<group>/<name> in omarchy-pool at that commit
+#   <commit>                   factory/pkgbuilds/<name> (or factory/sizing/<name>) in omarchy-pool at that commit
 #   <url>@<tag>:<path>         the contributor's own repository at a tag (path is the PKGBUILD or its directory)
 #   draft:<url>@<tag|latest>   drafted here by factory/bin/draft-pkgbuild (the contributor's agent key, if any)
 #   bump:<task>@<tag>          the PKGBUILD approved in <task>, pkgver moved to <tag>, checksums refreshed (a community build: evidence)
@@ -134,8 +134,8 @@ add_pool_repos() { # arch pool
   fi
 }
 
-fetch_pkgbuild() { # name group ref → /build/pkg holds the PKGBUILD directory
-  local name="$1" group="$2" ref="$3"
+fetch_pkgbuild() { # name ref → /build/pkg holds the PKGBUILD directory
+  local name="$1" ref="$2"
   rm -rf /build/pkg /build/src
   if [[ "$ref" == staging:* ]]; then
     echo "==> refused: a build never starts from a contributor's staged artifact (task ${ref#staging:}); the project writes its own (review:<task>, docs/GOVERNANCE.md)" >&2
@@ -187,10 +187,13 @@ fetch_pkgbuild() { # name group ref → /build/pkg holds the PKGBUILD directory
     git -C /build/src remote add origin "$REPO_URL"
     git -C /build/src fetch -q --depth 1 origin "$ref"
     git -C /build/src checkout -q FETCH_HEAD
-    [[ -f "/build/src/factory/pkgbuilds/$group/$name/PKGBUILD" ]] || { echo "no PKGBUILD at factory/pkgbuilds/$group/$name in $ref"; exit 3; }
+    # The project's recipes, or a sizing recipe (measured by hand, never queued by reconcile).
+    local from="/build/src/factory/pkgbuilds/$name"
+    [[ -f "$from/PKGBUILD" ]] || from="/build/src/factory/sizing/$name"
+    [[ -f "$from/PKGBUILD" ]] || { echo "no PKGBUILD at factory/pkgbuilds/$name (or factory/sizing/$name) in $ref"; exit 3; }
     # Build outside the checkout: build tools walk up the tree (cargo finds the
     # pool's own workspace Cargo.toml above factory/).
-    cp -a "/build/src/factory/pkgbuilds/$group/$name" /build/pkg
+    cp -a "$from" /build/pkg
   fi
   [[ -f /build/pkg/PKGBUILD ]] || { echo "no PKGBUILD found for $ref"; exit 3; }
 }
@@ -360,10 +363,10 @@ vet_package() { # name → 0 pass (maybe warnings), 5 fail; writes vet.json and 
 
 # Build with the drafter correcting itself from the log — the contributor's
 # agent doing the heavy lifting, on the contributor's machine.
-build_with_retries() { # name group ref
-  local name="$1" group="$2" ref="$3" attempt=1 max=1
+build_with_retries() { # name ref
+  local name="$1" ref="$2" attempt=1 max=1
   [[ ( "$ref" == draft:* || "$ref" == review:* ) && -n "$(agent_label)" ]] && max=3
-  fetch_pkgbuild "$name" "$group" "$ref"
+  fetch_pkgbuild "$name" "$ref"
   while :; do
     if run_makepkg > /build/attempt.log 2>&1; then
       cat /build/attempt.log
@@ -389,13 +392,13 @@ build_with_retries() { # name group ref
 }
 
 inside() {
-  local name group ref arch pool review_url review_source review_version review_desc review_license
+  local name ref arch pool review_url review_source review_version review_desc review_license
   # shellcheck source=/dev/null
   source /task/meta.sh
   prepare_container
   add_pool_repos "$arch" "$pool"
   local status=0
-  build_with_retries "$name" "$group" "$ref" || status=$?
+  build_with_retries "$name" "$ref" || status=$?
   # The gate's verdict travels with the result, pass or fail.
   mkdir -p /task/out; [[ -f "$VET_JSON" ]] && cp "$VET_JSON" "$VET_LOG" /task/out/ 2>/dev/null
   (( status == 0 )) || exit "$status"
@@ -421,7 +424,7 @@ container_worker() {
   prepare_container
   add_pool_repos "$ARCH" "$OMARCHY_POOL"
   agent_probe
-  local idle=0 out code body task id name group ref version
+  local idle=0 out code body task id name ref version
   while :; do
     if [[ "$DRAIN" == 1 ]]; then log "draining: nothing claimed since the stop signal; exiting"; exit 0; fi
     agent_probe_if_due
@@ -437,12 +440,12 @@ container_worker() {
     break
   done
   task="$body"
-  id="$(jq -r .task.id <<<"$task")"; name="$(jq -r .task.name <<<"$task")"; group="$(jq -r .task.group <<<"$task")"; ref="$(jq -r .task.pkgbuild_ref <<<"$task")"
+  id="$(jq -r .task.id <<<"$task")"; name="$(jq -r .task.name <<<"$task")"; ref="$(jq -r .task.pkgbuild_ref <<<"$task")"
   log "task $id: $name for $ARCH ($ref)"
   heartbeat_loop "$id" & local beat=$!; disown "$beat"
   local started=$SECONDS status=0
   set +e
-  ( set -e; build_with_retries "$name" "$group" "$ref" ) > /build/build.log 2>&1
+  ( set -e; build_with_retries "$name" "$ref" ) > /build/build.log 2>&1
   status=$?
   set -e
   local took=$(( (SECONDS - started) * 1000 )) tail; tail="$(tail -n 80 /build/build.log | jq -Rs .)"

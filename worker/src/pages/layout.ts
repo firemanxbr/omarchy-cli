@@ -171,6 +171,7 @@ const CSS = String.raw`
   .pager input { background: var(--bg-deep); border: 1px solid var(--line); color: var(--text); padding: 5px 9px; font: inherit; font-size: 12.5px; min-width: 200px; }
   .pager select { background: var(--bg-deep); border: 1px solid var(--line); color: var(--text); padding: 5px 6px; font: inherit; font-size: 12.5px; }
   .pager .count { margin-left: auto; }
+  select.cat { background: var(--bg-deep); border: 1px solid var(--line); color: var(--text); padding: 2px 4px; font: inherit; font-size: 12px; margin-top: 3px; }
 
   table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
   th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
@@ -227,6 +228,7 @@ const CSS = String.raw`
   header .brand { white-space: nowrap; } header .account { flex: none; } header nav { gap: 18px; }
   header .account .avatar { width: 22px; height: 22px; font-size: 10.5px; margin-right: 8px; vertical-align: middle; }
   header nav a small { color: var(--dim); font-size: 11px; margin-left: 5px; letter-spacing: .06em; text-transform: uppercase; }
+  footer .fleft { display: inline-flex; align-items: center; gap: 12px; flex-wrap: wrap; } footer .fnote { font-size: 12px; color: var(--dim); }
   footer .fbadge { display: inline-flex; align-items: center; } footer .fbadge svg { display: block; height: 20px; width: auto; } footer .fbadge:hover svg { filter: brightness(1.1); }
   footer .more { display: inline-flex; gap: 10px 14px; flex-wrap: wrap; } footer .more a.active { color: var(--green); }
   .hero { display: grid; gap: 14px; margin: 0 0 32px; max-width: 900px; }
@@ -678,7 +680,7 @@ export const DOCS: { key: DocKey; href: string; label: string; blurb: string }[]
   { key: "get-started", href: "/docs/get-started", label: "Get started", blurb: "Point pacman at a ring: the key, the Server line, the upgrade." },
   { key: "workers", href: "/docs/workers", label: "Run a worker", blurb: "One image on GitHub Packages, with Docker Desktop or Podman: your own packages, donated compute, the project's builds — the registration decides." },
   { key: "how-it-works", href: "/docs/how-it-works", label: "How it works", blurb: "The pool, the rings, promotion by evidence, the factory, signing." },
-  { key: "governance", href: "/docs/governance", label: "Governance", blurb: "Contributors and maintainers, groups, and how a pull request is the only way to become a maintainer." },
+  { key: "governance", href: "/docs/governance", label: "Governance", blurb: "Contributors and maintainers, categories, and how a pull request is the only way to become a maintainer." },
   { key: "api", href: "/api", label: "API", blurb: "Every endpoint the dashboard and the tools use." },
 ];
 
@@ -736,7 +738,7 @@ ${o.body}
 </main>
 
 <footer>
-  <a class="fbadge" href="https://omarchy.org/" title="Built for Omarchy">${BUILT_FOR_OMARCHY}</a>
+  <span class="fleft"><a class="fbadge" href="https://omarchy.org/" title="Built for Omarchy">${BUILT_FOR_OMARCHY}</a><span class="fnote">a community pool — not official Omarchy</span></span>
   <span class="more">${more}</span>
   <a class="gh" href="https://github.com/firemanxbr/omarchy-pool" title="omarchy-pool on GitHub">${GITHUB_ICON} GitHub</a>
 </footer>

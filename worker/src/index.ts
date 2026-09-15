@@ -27,7 +27,7 @@
  *   PUT  /api/v1/security/advisories|matches       vulnerability data from the Security workflow
  *   POST /api/v1/security/prune?before=
  *   GET  /api/v1/factory · POST /factory/{claim,requests,enqueue,jobs} · /factory/tasks/:id/{heartbeat,complete,fail,cancel,approve,reject,artifacts/<file>}
- *   GET  /api/v1/factory/{packages,built,review,approvals,groups,trust,workers/self,me} · GET /api/v1/users/:login · GET /api/v1/cost
+ *   GET  /api/v1/factory/{packages,built,review,approvals,maintainers,trust,workers/self,me} · GET /api/v1/users/:login · GET /api/v1/cost
  *                                                  the factory's brain: package requests, build tasks, pull-based workers
  *   GET  /api/v1/graph?targets=a,b&ring=stable
  *   POST /api/v1/events   GET /api/v1/events       activity log
@@ -57,13 +57,13 @@ import {
 } from "./routes/factory";
 import { authorize, authorizeRelease, authorizeArtifacts, authorizeJobOrMaintainer, maintainerOf } from "./auth";
 import {
-  contributorOf, workerOf, handleRegister, handleMe, handleRequestPackage, handleDeletePackage, handleBuildPackage, handleRegisterWorker,
+  contributorOf, workerOf, handleRegister, handleMe, handleRequestPackage, handleDeletePackage, handleSetCategory, handleBuildPackage, handleRegisterWorker,
   handleRevokeWorker, handleListPackages, handleStagingPut, handleStagingMultipart, handleStagingList, handleStagingGet,
 } from "./routes/contributors";
 import type { Actor } from "./routes/factory";
 import { jobOf } from "./jobtoken";
 import { handleTrustWorker, handleTrustList, handleNewToken } from "./routes/contributors";
-import { groupsOf, GOVERNANCE_FILE } from "./governance";
+import { maintainersOf, GOVERNANCE_FILE } from "./governance";
 import { handleQueueJob } from "./jobs";
 import { isMaintainer } from "./routes/contributors";
 import { handleReviewList, handleApprove, handleReject, handleApprovals, handleProjectBuild } from "./routes/review";
@@ -174,7 +174,7 @@ export default {
       if (path === "/auth/logout") return handleLogout(url, request, env);
       if (path === "/auth/me" && method === "GET") {
         const c = await contributorOf(request, env);
-        return c ? json({ login: c.login, name: c.name, avatar_url: c.avatar_url, role: c.role, areas: c.areas }, 200, { "cache-control": "no-store" }) : json({ error: "not signed in" }, 401, { "cache-control": "no-store" });
+        return c ? json({ login: c.login, name: c.name, avatar_url: c.avatar_url, role: c.role }, 200, { "cache-control": "no-store" }) : json({ error: "not signed in" }, 401, { "cache-control": "no-store" });
       }
       // Documentation: one section, its chapters under /docs; the old addresses redirect.
       if (path === "/docs" || path === "/docs/") return html(docsHtml(env.POOL_URL, version(env)));
@@ -237,6 +237,7 @@ async function factoryRoutes(method: string, path: string, url: URL, request: Re
     if (method === "POST" && path === "/factory/packages") return handleRequestPackage(c, request, env);
     if ((m = path.match(/^\/factory\/packages\/([a-z0-9@._+-]+)\/build$/)) && method === "POST") return handleBuildPackage(c, m[1], request, env);
     if ((m = path.match(/^\/factory\/packages\/([a-z0-9@._+-]+)$/)) && method === "DELETE") return handleDeletePackage(c, m[1], env);
+    if ((m = path.match(/^\/factory\/packages\/([a-z0-9@._+-]+)\/category$/)) && method === "POST") return handleSetCategory(c, m[1], request, env);
     if (method === "POST" && path === "/factory/workers") return handleRegisterWorker(c, request, env);
     if ((m = path.match(/^\/factory\/workers\/([A-Za-z0-9_.-]+)$/)) && method === "DELETE") return handleRevokeWorker(c, m[1], env);
     if ((m = path.match(/^\/factory\/workers\/([A-Za-z0-9_.-]+)\/trust$/)) && method === "POST") return handleTrustWorker(c, m[1], request, env);
@@ -367,9 +368,9 @@ async function api(method: string, path: string, url: URL, request: Request, env
   if (method === "GET" && path === "/factory/packages") return handleListPackages(env);
   if (method === "GET" && path === "/factory/trust") return handleTrustList(env);
   if ((m = path.match(/^\/users\/([A-Za-z0-9-]{1,39})$/)) && method === "GET") return handleUser(m[1], env);
-  if (method === "GET" && path === "/factory/groups") {
+  if (method === "GET" && path === "/factory/maintainers") {
     const synced = await env.DB.prepare("SELECT updated_at FROM settings WHERE key = 'governance_sha256'").first<{ updated_at: string }>();
-    return json({ groups: await groupsOf(env), source: GOVERNANCE_FILE, synced_at: synced?.updated_at ?? null }, 200, { "cache-control": "public, max-age=60" });
+    return json({ maintainers: await maintainersOf(env), source: GOVERNANCE_FILE, synced_at: synced?.updated_at ?? null }, 200, { "cache-control": "public, max-age=60" });
   }
   if (method === "GET" && path === "/factory/review") return handleReviewList(env);
   if (method === "GET" && path === "/factory/approvals") return handleApprovals(env);

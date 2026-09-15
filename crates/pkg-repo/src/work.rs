@@ -117,8 +117,6 @@ pub struct Task {
     pub arch: String,
     pub trust: String,
     #[serde(default)]
-    pub group: String,
-    #[serde(default)]
     pub pkgbuild_ref: String,
     #[serde(default)]
     pub params: serde_json::Value,
@@ -1114,11 +1112,6 @@ fn build_job(opts: &WorkOptions, job: &Api, task: &Task) -> Result<Outcome> {
     let dir = opts.work_dir.join(format!("task-{}", task.id));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(dir.join("out"))?;
-    let group = if task.group.is_empty() {
-        "community".to_owned()
-    } else {
-        task.group.clone()
-    };
     let pkgbuild_ref = task.pkgbuild_ref.clone();
     // Inside the container "localhost" is the container: a local pool (wrangler
     // dev) is reached through the runtime's host alias.
@@ -1134,9 +1127,8 @@ fn build_job(opts: &WorkOptions, job: &Api, task: &Task) -> Result<Outcome> {
         .get("review")
         .and_then(serde_json::Value::as_i64);
     let mut meta = format!(
-        "name={}\ngroup={}\nref={}\narch={}\npool={}\nexport OMARCHY_API={}\n",
+        "name={}\nref={}\narch={}\npool={}\nexport OMARCHY_API={}\n",
         shell_quote(&task.name),
-        shell_quote(&group),
         shell_quote(&pkgbuild_ref),
         shell_quote(&task.arch),
         shell_quote(&from_container(&opts.pool)),

@@ -12,7 +12,7 @@ import { sha256Hex } from "./contributors";
  *
  *   GET /auth/github            → GitHub (state in a short-lived cookie)
  *   GET /auth/github/callback   → cookie omc, redirect to ?next (same origin)
- *   GET /auth/me                → {login, role, areas} or 401
+ *   GET /auth/me                → {login, role} or 401
  *   GET|POST /auth/logout       → session invalidated, cookie cleared
  *
  * Needs GITHUB_OAUTH_CLIENT_ID (var) and GITHUB_OAUTH_CLIENT_SECRET (secret)
@@ -73,13 +73,13 @@ export async function handleAuthCallback(url: URL, request: Request, env: Env): 
   // which signing in must not replace. A first sign-in registers the
   // contributor with a token they can replace from the Contributors page.
   const token = `oms_${[...b].map((x) => x.toString(16).padStart(2, "0")).join("")}`;
-  const { role, areas } = await roleFor(env, u.login);
+  const role = await roleFor(env, u.login);
   await env.DB.prepare(
-    `INSERT INTO contributors (login, name, avatar_url, token_hash, session_hash, role, areas) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO contributors (login, name, avatar_url, token_hash, session_hash, role) VALUES (?, ?, ?, ?, ?, ?)
      ON CONFLICT (login) DO UPDATE SET name = excluded.name, avatar_url = excluded.avatar_url, session_hash = excluded.session_hash,
-       role = excluded.role, areas = excluded.areas, last_seen = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`,
+       role = excluded.role, last_seen = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`,
   )
-    .bind(u.login, u.name ?? null, u.avatar_url ?? null, await sha256Hex(`unset:${crypto.randomUUID()}`), await sha256Hex(token), role, JSON.stringify(areas))
+    .bind(u.login, u.name ?? null, u.avatar_url ?? null, await sha256Hex(`unset:${crypto.randomUUID()}`), await sha256Hex(token), role)
     .run();
   const headers = new Headers({ location: next });
   headers.append("set-cookie", cookie("omc", token, 30 * 86400, url.protocol === "https:"));

@@ -85,6 +85,8 @@ def markdown(report):
             lines.append(f"| {cell('severity')} | {cell('area')} | {cell('where')} | {cell('what')} | {cell('fix')} |")
     else:
         lines.append("No findings.")
+    if report.get("category"):
+        lines += ["", f"Category proposed: **{report['category']}** — a maintainer settles it."]
     lines += ["", f"_Reviewed by {report['model']} on a project worker; the maintainer decides._", ""]
     return "\n".join(lines)
 

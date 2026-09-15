@@ -1,5 +1,5 @@
 import { json, type Env } from "../index";
-import { maintains, type Contributor } from "./contributors";
+import { isMaintainer, type Contributor } from "./contributors";
 
 /**
  * Review: what maintainers do with staged builds (docs/GOVERNANCE.md).
@@ -19,7 +19,6 @@ import { maintains, type Contributor } from "./contributors";
 interface Staged {
   id: number;
   name: string;
-  group: string;
   arch: string;
   version: string | null;
   owner: string | null;
@@ -35,8 +34,8 @@ interface Staged {
 
 export async function handleReviewList(env: Env): Promise<Response> {
   const staged = await env.DB.prepare(
-    `SELECT t.id, t.name, t."group", t.arch, t.version, t.owner, t.status, t.trust, t.params, t.staged_prefix, t.result_sha256, t.result_filename, t.duration_ms, t.finished_at, t.pkgbuild_ref, t.result,
-            p.url, p.detected,
+    `SELECT t.id, t.name, t.arch, t.version, t.owner, t.status, t.trust, t.params, t.staged_prefix, t.result_sha256, t.result_filename, t.duration_ms, t.finished_at, t.pkgbuild_ref, t.result,
+            p.url, p.detected, p.category,
             (SELECT decision FROM approvals a WHERE a.task_id = t.id ORDER BY a.id DESC LIMIT 1) AS decision,
             (SELECT by FROM approvals a WHERE a.task_id = t.id ORDER BY a.id DESC LIMIT 1) AS decided_by,
             (SELECT u.status FROM build_tasks u WHERE u.kind = 'audit' AND json_extract(u.params, '$.task') = t.id ORDER BY u.id DESC LIMIT 1) AS audit_status,
@@ -108,8 +107,8 @@ async function cancelPendingAudit(env: Env, taskId: number): Promise<void> {
   await env.DB.prepare("UPDATE build_tasks SET status = 'cancelled', error = 'the build was decided before the audit ran' WHERE kind = 'audit' AND status = 'queued' AND json_extract(params, '$.task') = ?").bind(taskId).run();
 }
 
-function canReview(c: Contributor, group: string): boolean {
-  return maintains(c, group);
+function canReview(c: Contributor): boolean {
+  return isMaintainer(c);
 }
 
 /** The owner of a package — the contributor who requested it — from the registration; the task's owner as the fallback. */
@@ -130,7 +129,7 @@ export async function handleProjectBuild(c: Contributor, id: number, request: Re
   const t = await env.DB.prepare("SELECT * FROM build_tasks WHERE id = ?").bind(id).first<Staged & { trust: string }>();
   if (!t) return json({ error: "no such task" }, 404);
   if (t.trust !== "community" || t.status !== "staged") return json({ error: `task ${id} is ${t.trust === "project" ? "the project's own build" : t.status}; the project builds from a contributor's staged build` }, 409);
-  if (!canReview(c, t.group)) return json({ error: `a maintainer of ${t.group} is required` }, 403);
+  if (!canReview(c)) return json({ error: "a maintainer is required" }, 403);
   const owner = await ownerOf(env, t.name, t.owner);
   if (owner === c.login) return json({ error: `${c.login} brought ${t.name}; another maintainer must review it` }, 403);
   const inFlight = await env.DB.prepare("SELECT id, status FROM build_tasks WHERE kind = 'build' AND trust = 'project' AND json_extract(params, '$.review') = ? AND status IN ('queued', 'leased', 'staged')").bind(id).first<{ id: number; status: string }>();
@@ -138,9 +137,9 @@ export async function handleProjectBuild(c: Contributor, id: number, request: Re
   const pkg = await env.DB.prepare("SELECT request_id, project, source, release, description, license FROM factory_packages WHERE name = ?").bind(t.name).first<{ request_id: number | null; project: string | null; source: string | null; release: string | null; description: string | null; license: string | null }>();
   const params = { review: id, request: pkg?.request_id ?? null, project: pkg?.project ?? null, source: pkg?.source ?? null, version: pkg?.release ?? t.version, description: pkg?.description ?? null, license: pkg?.license ?? null, owner, by: c.login, note: b.note ?? null };
   const row = await env.DB.prepare(
-    `INSERT INTO build_tasks (name, "group", arch, version, pkgbuild_ref, reason, priority, publish, trust, owner, kind, params) VALUES (?, ?, ?, ?, ?, ?, 30, 0, 'project', ?, 'build', ?) RETURNING id`,
+    `INSERT INTO build_tasks (name, arch, version, pkgbuild_ref, reason, priority, publish, trust, owner, kind, params) VALUES (?, ?, ?, ?, ?, 30, 0, 'project', ?, 'build', ?) RETURNING id`,
   )
-    .bind(t.name, t.group, t.arch, t.version, `review:${id}`, `project build asked by ${c.login}`, owner, JSON.stringify(params))
+    .bind(t.name, t.arch, t.version, `review:${id}`, `project build asked by ${c.login}`, owner, JSON.stringify(params))
     .first<{ id: number }>();
   await env.DB.prepare("UPDATE factory_packages SET detail = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE name = ?")
     .bind(`${t.version ?? ""} for ${t.arch}: the project is building it (task ${row?.id}), asked by ${c.login}`, t.name)
@@ -159,12 +158,12 @@ export async function handleApprove(c: Contributor, id: number, request: Request
   // What users get is the project's build: a contributor's build cannot be
   // approved — it is evidence, and "Build it by the project" comes first.
   if (t.trust !== "project") return json({ error: `task ${id} is a contributor's build — evidence, never what users get. Have the project build it first (POST /factory/tasks/${id}/build), then approve the project's build` }, 409);
-  if (!canReview(c, t.group)) return json({ error: `a maintainer of ${t.group} is required` }, 403);
-  // Conflict of interest: nobody approves their own package, and a group
+  if (!canReview(c)) return json({ error: "a maintainer is required" }, 403);
+  // Conflict of interest: nobody approves their own package, and a project
   // with a single maintainer is no exception — that maintainer's own
   // packages wait for a second one (docs/GOVERNANCE.md).
   const owner = await ownerOf(env, t.name, t.owner);
-  if (owner === c.login) return json({ error: `${c.login} brought ${t.name}; another maintainer of ${t.group} must approve it — a group with one maintainer cannot approve that maintainer's own packages` }, 403);
+  if (owner === c.login) return json({ error: `${c.login} brought ${t.name}; another maintainer must approve it — with one maintainer, that maintainer's own packages wait` }, 403);
   const already = await env.DB.prepare("SELECT id FROM approvals WHERE task_id = ? AND decision = 'approved'").bind(id).first();
   if (already) return json({ error: "already approved" }, 409);
   // The decision, on the record, and the publish job: a project worker
@@ -174,12 +173,12 @@ export async function handleApprove(c: Contributor, id: number, request: Request
   const files = (await env.DB.prepare("SELECT key FROM staging_objects WHERE task_id = ? AND key LIKE '%.pkg.tar.zst'").bind(id).all<{ key: string }>()).results.map((r) => r.key.slice(r.key.lastIndexOf("/") + 1));
   if (!files.length) return json({ error: "the project's build left no package in staging" }, 409);
   const publish = await env.DB.prepare(
-    `INSERT INTO build_tasks (name, "group", arch, version, pkgbuild_ref, reason, priority, publish, trust, owner, kind, params) VALUES (?, ?, ?, ?, '-', ?, 20, 1, 'project', NULL, 'publish', ?) RETURNING id`,
+    `INSERT INTO build_tasks (name, arch, version, pkgbuild_ref, reason, priority, publish, trust, owner, kind, params) VALUES (?, ?, ?, '-', ?, 20, 1, 'project', NULL, 'publish', ?) RETURNING id`,
   )
-    .bind(t.name, t.group, t.arch, t.version, `approved by ${c.login}`, JSON.stringify({ task: id, name: t.name, arch: t.arch, version: t.version, files, by: c.login }))
+    .bind(t.name, t.arch, t.version, `approved by ${c.login}`, JSON.stringify({ task: id, name: t.name, arch: t.arch, version: t.version, files, by: c.login }))
     .first<{ id: number }>();
-  await env.DB.prepare(`INSERT INTO approvals (task_id, name, "group", arch, version, decision, by, note, rebuild_task) VALUES (?, ?, ?, ?, ?, 'approved', ?, ?, ?)`)
-    .bind(id, t.name, t.group, t.arch, t.version, c.login, b.note ?? null, id)
+  await env.DB.prepare(`INSERT INTO approvals (task_id, name, arch, version, decision, by, note, rebuild_task) VALUES (?, ?, ?, ?, 'approved', ?, ?, ?)`)
+    .bind(id, t.name, t.arch, t.version, c.login, b.note ?? null, id)
     .run();
   await env.DB.prepare("UPDATE factory_packages SET status = 'approved', detail = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE name = ?")
     .bind(`${t.version ?? ""} for ${t.arch} approved by ${c.login}; publishing the project's build (job ${publish?.id})`, t.name)
@@ -197,9 +196,9 @@ export async function handleReject(c: Contributor, id: number, request: Request,
   const t = await env.DB.prepare("SELECT * FROM build_tasks WHERE id = ?").bind(id).first<Staged>();
   if (!t) return json({ error: "no such task" }, 404);
   if (t.status !== "staged") return json({ error: `task ${id} is ${t.status}, not staged` }, 409);
-  if (!canReview(c, t.group)) return json({ error: `a maintainer of ${t.group} is required` }, 403);
-  await env.DB.prepare(`INSERT INTO approvals (task_id, name, "group", arch, version, decision, by, note) VALUES (?, ?, ?, ?, ?, 'rejected', ?, ?)`)
-    .bind(id, t.name, t.group, t.arch, t.version, c.login, b.note)
+  if (!canReview(c)) return json({ error: "a maintainer is required" }, 403);
+  await env.DB.prepare(`INSERT INTO approvals (task_id, name, arch, version, decision, by, note) VALUES (?, ?, ?, ?, 'rejected', ?, ?)`)
+    .bind(id, t.name, t.arch, t.version, c.login, b.note)
     .run();
   await env.DB.prepare("UPDATE build_tasks SET status = 'cancelled', error = ? WHERE id = ?").bind(`rejected by ${c.login}: ${b.note.slice(0, 500)}`, id).run();
   await cancelPendingAudit(env, id);

@@ -34,6 +34,7 @@ only, no prose around it:
 {
   "verdict": "ok" | "warn" | "block",
   "summary": "one sentence a maintainer reads first",
+  "category": "terminal" | "editors" | "development" | "browsers" | "communication" | "media" | "graphics" | "office" | "games" | "system" | "networking" | "security" | "fonts" | "themes" | "libraries" | "other",
   "findings": [
     {"severity": "high" | "medium" | "low", "area": "supply-chain" | "security" | "packaging" | "correctness" | "licence",
      "where": "PKGBUILD line or log excerpt", "what": "the problem", "fix": "what to change"}
@@ -43,3 +44,7 @@ only, no prose around it:
 `block` means a maintainer should not approve as is (supply-chain or
 security findings of high severity); `warn` means approve with the
 findings in mind; `ok` means nothing worth a change.
+
+`category` is what the package is about for a person browsing the pool —
+from pkgdesc, the upstream project and what the package installs — one of
+the words listed, nothing else. It is a proposal: a maintainer settles it.

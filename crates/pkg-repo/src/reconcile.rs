@@ -1,6 +1,6 @@
 //! The `enqueue` job: reconciles the PKGBUILDs on `main` with what the
 //! factory has built. Every (package, architecture, version) under
-//! `factory/pkgbuilds/<group>/<name>/` without a task yet is queued at that
+//! `factory/pkgbuilds/<name>/` without a task yet is queued at that
 //! commit — the merge of a reviewed PKGBUILD is what a maintainer decided,
 //! this only tells the brain. It replaced factory-enqueue.yml: no GitHub
 //! secret, a per-job token instead.
@@ -59,7 +59,6 @@ fn checkout_main(work_dir: &Path) -> Result<(PathBuf, String)> {
 /// What each PKGBUILD declares, sourced with its functions neutralised in a
 /// throwaway container (a bash 4 the host may not have; nothing runs here).
 struct Meta {
-    group: String,
     name: String,
     arches: Vec<String>,
     version: String,
@@ -76,7 +75,7 @@ fn pkgbuild_meta(repo: &Path, arch: &str) -> Result<Vec<Meta>> {
         ("docker.io/library/archlinux:base", "linux/amd64")
     };
     let script = r#"set -u; shopt -s expand_aliases nullglob
-for f in /repo/factory/pkgbuilds/*/*/PKGBUILD; do (
+for f in /repo/factory/pkgbuilds/*/PKGBUILD; do (
   for fn in prepare build check package pkgver; do eval "$fn() { :; }"; done
   source "$f" >/dev/null 2>&1 || true
   d=${f%/PKGBUILD}; d=${d#/repo/factory/pkgbuilds/}
@@ -99,9 +98,10 @@ for f in /repo/factory/pkgbuilds/*/*/PKGBUILD; do (
         if f.len() < 5 || f[2].is_empty() {
             continue;
         }
-        let Some((group, name)) = f[0].split_once('/') else {
+        let name = f[0];
+        if name.is_empty() || name.contains('/') {
             continue;
-        };
+        }
         let mut arches: Vec<String> = Vec::new();
         for a in f[1].split_whitespace() {
             match a {
@@ -119,7 +119,6 @@ for f in /repo/factory/pkgbuilds/*/*/PKGBUILD; do (
             format!("{}:{}-{}", f[4], f[2], f[3])
         };
         metas.push(Meta {
-            group: group.to_owned(),
             name: name.to_owned(),
             arches,
             version,
@@ -151,10 +150,6 @@ pub fn run(api: &Api, work_dir: &Path, arch: &str) -> Result<Report> {
         ..Report::default()
     };
     for m in pkgbuild_meta(&repo, arch)? {
-        // The sizing recipes are measured by hand, never queued.
-        if m.group == "sizing" {
-            continue;
-        }
         let missing: Vec<&String> = m
             .arches
             .iter()
@@ -165,14 +160,13 @@ pub fn run(api: &Api, work_dir: &Path, arch: &str) -> Result<Report> {
             continue;
         }
         let body = serde_json::json!({
-            "name": m.name, "group": m.group, "pkgbuild_ref": commit, "version": m.version,
+            "name": m.name, "pkgbuild_ref": commit, "version": m.version,
             "arches": missing, "reason": "pkgbuild-changed", "publish": true,
         });
         match api.post_json("/factory/enqueue", &body) {
             Ok(_) => {
                 report.queued.push(format!(
-                    "{}/{} {} ({})",
-                    m.group,
+                    "{} {} ({})",
                     m.name,
                     m.version,
                     missing
@@ -185,7 +179,7 @@ pub fn run(api: &Api, work_dir: &Path, arch: &str) -> Result<Report> {
             Err(RepoError::Api { status: 409, body }) => {
                 report
                     .skipped
-                    .push(format!("{}/{}: {}", m.group, m.name, body.trim()));
+                    .push(format!("{}: {}", m.name, body.trim()));
             }
             Err(e) => return Err(e.into()),
         }

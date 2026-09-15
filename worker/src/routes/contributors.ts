@@ -1,5 +1,6 @@
 import { json, type Env } from "../index";
-import { groupsOf, roleFor, GOVERNANCE_FILE } from "../governance";
+import { maintainersOf, roleFor, GOVERNANCE_FILE } from "../governance";
+import { CATEGORIES, isCategory } from "../categories";
 import { isRepoArch } from "../r2";
 import { providedBy } from "./factory";
 import { cookieOf } from "./auth";
@@ -49,7 +50,6 @@ export interface Contributor {
   name: string | null;
   avatar_url: string | null;
   role: string;
-  areas: string[];
   /** Set by a maintainer (docs/GOVERNANCE.md): no requests, no builds, workers revoked. */
   blocked?: { at: string; reason: string | null } | null;
 }
@@ -62,15 +62,15 @@ export interface Contributor {
 export async function contributorOf(request: Request, env: Env): Promise<Contributor | null> {
   const token = bearer(request);
   const session = token ? "" : (cookieOf(request, "omc") ?? "");
-  let row: { login: string; name: string | null; avatar_url: string | null; role: string; areas: string | null; blocked_at: string | null; blocked_reason: string | null } | null = null;
+  let row: { login: string; name: string | null; avatar_url: string | null; role: string; blocked_at: string | null; blocked_reason: string | null } | null = null;
   if (token.startsWith("omc_")) {
-    row = await env.DB.prepare("SELECT login, name, avatar_url, role, areas, blocked_at, blocked_reason FROM contributors WHERE token_hash = ?").bind(await sha256Hex(token)).first();
+    row = await env.DB.prepare("SELECT login, name, avatar_url, role, blocked_at, blocked_reason FROM contributors WHERE token_hash = ?").bind(await sha256Hex(token)).first();
   } else if (session.startsWith("oms_")) {
-    row = await env.DB.prepare("SELECT login, name, avatar_url, role, areas, blocked_at, blocked_reason FROM contributors WHERE session_hash = ?").bind(await sha256Hex(session)).first();
+    row = await env.DB.prepare("SELECT login, name, avatar_url, role, blocked_at, blocked_reason FROM contributors WHERE session_hash = ?").bind(await sha256Hex(session)).first();
   }
   if (!row) return null;
   await env.DB.prepare("UPDATE contributors SET last_seen = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE login = ?").bind(row.login).run();
-  return { login: row.login, name: row.name, avatar_url: row.avatar_url, role: row.role, areas: row.areas ? JSON.parse(row.areas) : [], blocked: row.blocked_at ? { at: row.blocked_at, reason: row.blocked_reason } : null };
+  return { login: row.login, name: row.name, avatar_url: row.avatar_url, role: row.role, blocked: row.blocked_at ? { at: row.blocked_at, reason: row.blocked_reason } : null };
 }
 
 /** The answer a blocked contributor gets from every door that changes something. */
@@ -110,15 +110,15 @@ export async function handleRegister(request: Request, env: Env): Promise<Respon
   const u = (await res.json()) as { login: string; name?: string; avatar_url?: string; type?: string };
   if (!u.login || u.type === "Bot") return json({ error: "a user account is required" }, 400);
   const token = newToken("omc");
-  const { role, areas } = await roleFor(env, u.login);
+  const role = await roleFor(env, u.login);
   await env.DB.prepare(
-    `INSERT INTO contributors (login, name, avatar_url, token_hash, role, areas) VALUES (?, ?, ?, ?, ?, ?)
+    `INSERT INTO contributors (login, name, avatar_url, token_hash, role) VALUES (?, ?, ?, ?, ?)
      ON CONFLICT (login) DO UPDATE SET name = excluded.name, avatar_url = excluded.avatar_url, token_hash = excluded.token_hash,
-       role = excluded.role, areas = excluded.areas, last_seen = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`,
+       role = excluded.role, last_seen = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`,
   )
-    .bind(u.login, u.name ?? null, u.avatar_url ?? null, await sha256Hex(token), role, JSON.stringify(areas))
+    .bind(u.login, u.name ?? null, u.avatar_url ?? null, await sha256Hex(token), role)
     .run();
-  return json({ login: u.login, role, areas, token, note: "Keep this token; registering again replaces it. Use it as `Authorization: Bearer …` for /factory/packages and /factory/workers." }, 201);
+  return json({ login: u.login, role, token, note: "Keep this token; registering again replaces it. Use it as `Authorization: Bearer …` for /factory/packages and /factory/workers." }, 201);
 }
 
 /** A signed-in contributor mints (or replaces) the CLI / worker token; the browser session stays. */
@@ -313,16 +313,14 @@ export async function handleRequestPackage(c: Contributor, request: Request, env
     detected, pool: version(env).version,
   });
   await env.DB.prepare("UPDATE package_requests SET record = ?, sha256 = ? WHERE id = ?").bind(record.key, record.sha256, req.id).run();
-  const groups = (await groupsOf(env)).map((g) => g.name);
-  const group = groups.includes("community") ? "community" : (groups[0] ?? "community");
   const row = await env.DB.prepare(
-    `INSERT INTO factory_packages (name, owner, url, "group", arches, release, pkgbuild_path, detected, request_id, project, source, description, license, status, detail)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'registered', ?)
+    `INSERT INTO factory_packages (name, owner, url, arches, release, pkgbuild_path, detected, request_id, project, source, description, license, status, detail)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'registered', ?)
      ON CONFLICT (name) DO UPDATE SET url = excluded.url, arches = excluded.arches, release = excluded.release, pkgbuild_path = excluded.pkgbuild_path, detected = excluded.detected,
        request_id = excluded.request_id, project = excluded.project, source = excluded.source, description = excluded.description, license = excluded.license,
        status = 'registered', detail = excluded.detail, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') RETURNING *`,
   )
-    .bind(name, c.login, parsed.project, group, JSON.stringify(build), tag, detected.has_pkgbuild ? "PKGBUILD" : null, JSON.stringify(detected), req.id, parsed.project, source, description, license, `requested ${tag} by ${c.login}; press Build to build it`)
+    .bind(name, c.login, parsed.project, JSON.stringify(build), tag, detected.has_pkgbuild ? "PKGBUILD" : null, JSON.stringify(detected), req.id, parsed.project, source, description, license, `requested ${tag} by ${c.login}; press Build to build it`)
     .first();
   await env.DB.prepare("INSERT INTO events (kind, ring, source, status, summary, payload) VALUES ('request', NULL, 'factory', 'ok', ?, ?)")
     .bind(`${name} ${tag} requested by ${c.login} from ${parsed.project} (${license}; ${build.join(", ")}) — record ${req.id}`, JSON.stringify({ request: req.id, name, owner: c.login, project: parsed.project, source, version: tag, license, arches: build, skipped: upstream, record: recordUrl(env, record.key) }))
@@ -330,12 +328,12 @@ export async function handleRequestPackage(c: Contributor, request: Request, env
   return json({ package: row, request: { id: req.id, record: recordUrl(env, record.key), signature: record.signed ? recordUrl(env, `${record.key}.sig`) : null, sha256: record.sha256 }, skipped: upstream, next: `POST /api/v1/factory/packages/${name}/build queues it; a worker of yours, or one the project shares, builds it into your staging workspace.` }, byName ? 200 : 201);
 }
 
-/** The owner frees the name (unless approved or published); a maintainer of its group frees any, an unmaintained one included. */
+/** The owner frees the name (unless approved or published); a maintainer frees any, an unmaintained one included. */
 export async function handleDeletePackage(c: Contributor, name: string, env: Env): Promise<Response> {
-  const pkg = await env.DB.prepare("SELECT owner, \"group\", status FROM factory_packages WHERE name = ?").bind(name).first<{ owner: string; group: string; status: string }>();
+  const pkg = await env.DB.prepare("SELECT owner, status FROM factory_packages WHERE name = ?").bind(name).first<{ owner: string; status: string }>();
   if (!pkg) return json({ error: "not registered" }, 404);
   const mine = pkg.owner === c.login && pkg.status !== "approved" && pkg.status !== "published";
-  if (!mine && !maintains(c, pkg.group)) return json({ error: "not yours, or already approved (a maintainer of the group can remove it)" }, 403);
+  if (!mine && !isMaintainer(c)) return json({ error: "not yours, or already approved (a maintainer can remove it)" }, 403);
   await env.DB.batch([
     env.DB.prepare("UPDATE build_tasks SET status = 'cancelled', error = ? WHERE name = ? AND trust = 'community' AND status = 'queued'").bind(`registration removed by ${c.login}`, name),
     env.DB.prepare("DELETE FROM factory_packages WHERE name = ?").bind(name),
@@ -348,7 +346,7 @@ export async function handleBuildPackage(c: Contributor, name: string, request: 
   const blocked = blockedResponse(c);
   if (blocked) return blocked;
   const b = (await request.json().catch(() => ({}))) as { arches?: unknown; reason?: string; release?: string };
-  const pkg = await env.DB.prepare("SELECT * FROM factory_packages WHERE name = ? AND owner = ?").bind(name, c.login).first<{ name: string; group: string; arches: string; url: string; release: string | null; pkgbuild_path: string | null; detected: string | null; blocked_at: string | null; blocked_reason: string | null }>();
+  const pkg = await env.DB.prepare("SELECT * FROM factory_packages WHERE name = ? AND owner = ?").bind(name, c.login).first<{ name: string; arches: string; url: string; release: string | null; pkgbuild_path: string | null; detected: string | null; blocked_at: string | null; blocked_reason: string | null }>();
   if (!pkg) return json({ error: "request the package first (POST /factory/packages)" }, 404);
   if (pkg.blocked_at) return json({ error: `${name} is blocked by a maintainer: ${pkg.blocked_reason ?? ""}`.trim() }, 403);
   const queued = await env.DB.prepare("SELECT COUNT(*) AS n FROM build_tasks WHERE owner = ? AND status IN ('queued', 'leased')").bind(c.login).first<{ n: number }>();
@@ -364,9 +362,9 @@ export async function handleBuildPackage(c: Contributor, name: string, request: 
     const dup = await env.DB.prepare("SELECT id FROM build_tasks WHERE name = ? AND arch = ? AND pkgbuild_ref = ? AND status IN ('queued', 'leased') LIMIT 1").bind(name, arch, ref).first<{ id: number }>();
     if (dup) { ids.push(dup.id); continue; }
     const row = await env.DB.prepare(
-      `INSERT INTO build_tasks (name, "group", arch, version, pkgbuild_ref, reason, priority, publish, trust, owner, shared_after) VALUES (?, ?, ?, ?, ?, ?, 100, 0, 'community', ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+14 days')) RETURNING id`,
+      `INSERT INTO build_tasks (name, arch, version, pkgbuild_ref, reason, priority, publish, trust, owner, shared_after) VALUES (?, ?, ?, ?, ?, 100, 0, 'community', ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+14 days')) RETURNING id`,
     )
-      .bind(name, pkg.group, arch, version, ref, b.reason ?? "contributor", c.login)
+      .bind(name, arch, version, ref, b.reason ?? "contributor", c.login)
       .first<{ id: number }>();
     if (row) ids.push(row.id);
   }
@@ -536,9 +534,24 @@ export function isMaintainer(c: Contributor): boolean {
   return c.role === "maintainer";
 }
 
-/** May this contributor act for a group — approve its builds, review its packages? */
-export function maintains(c: Contributor, group: string): boolean {
-  return isMaintainer(c) && c.areas.includes(group);
+/**
+ * A maintainer settles a package's category (categories.ts) — at review, or
+ * any time after; the agent's proposal, if any, is what it replaces. A
+ * `category` line in the journal says who and from what.
+ */
+export async function handleSetCategory(c: Contributor, name: string, request: Request, env: Env): Promise<Response> {
+  if (!isMaintainer(c)) return json({ error: "a maintainer's token is required" }, 403);
+  const b = (await request.json().catch(() => ({}))) as { category?: unknown };
+  if (!isCategory(b.category)) return json({ error: `category must be one of ${CATEGORIES.join(", ")}` }, 400);
+  const pkg = await env.DB.prepare("SELECT category FROM factory_packages WHERE name = ?").bind(name).first<{ category: string | null }>();
+  if (!pkg) return json({ error: "not registered" }, 404);
+  if (pkg.category === b.category) return json({ package: name, category: b.category, by: c.login, unchanged: true });
+  await env.DB.batch([
+    env.DB.prepare("UPDATE factory_packages SET category = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE name = ?").bind(b.category, name),
+    env.DB.prepare("INSERT INTO events (kind, ring, source, status, summary, payload) VALUES ('category', NULL, 'factory', 'ok', ?, ?)")
+      .bind(`${name}: ${b.category} (was ${pkg.category ?? "unset"}), settled by ${c.login}`, JSON.stringify({ name, category: b.category, was: pkg.category, by: c.login })),
+  ]);
+  return json({ package: name, category: b.category, was: pkg.category, by: c.login });
 }
 
 /** A maintainer promotes a worker to project trust (or back): a recorded action, revocable. */
@@ -559,6 +572,6 @@ export async function handleTrustWorker(c: Contributor, id: string, request: Req
 /** Workers the project trusts and the people who may approve: the dashboard's trust page. */
 export async function handleTrustList(env: Env): Promise<Response> {
   const workers = await env.DB.prepare("SELECT id, owner, arch, mode, trust, trusted_by, trusted_at, agent, last_seen, revoked_at FROM build_workers WHERE trust = 'project' OR owner IS NULL ORDER BY trust DESC, last_seen DESC LIMIT 100").all();
-  const people = await env.DB.prepare("SELECT login, name, role, areas, last_seen FROM contributors WHERE role = 'maintainer' ORDER BY login").all();
-  return json({ workers: workers.results, maintainers: people.results.map((p) => ({ ...p, areas: p.areas ? JSON.parse(p.areas as string) : [] })), groups: await groupsOf(env), source: GOVERNANCE_FILE }, 200, { "cache-control": "public, max-age=30" });
+  const people = await env.DB.prepare("SELECT login, name, role, last_seen FROM contributors WHERE role = 'maintainer' ORDER BY login").all();
+  return json({ workers: workers.results, maintainers: people.results, listed: await maintainersOf(env), source: GOVERNANCE_FILE }, 200, { "cache-control": "public, max-age=30" });
 }

@@ -1,9 +1,8 @@
 # Generated from factory/MAINTAINERS.toml by factory/bin/check-governance --write;
-# CI fails when the two disagree. Every maintainer owns the governance file and
-# this one; each group's maintainers own its PKGBUILDs. With main requiring a
-# code-owner review, a change here is a decision another maintainer approves.
+# CI fails when the two disagree. Every maintainer owns the governance file,
+# this one and the project's recipes. With main requiring a code-owner review,
+# a change here is a decision another maintainer approves.
 factory/MAINTAINERS.toml  @firemanxbr
 .github/CODEOWNERS        @firemanxbr
-factory/pkgbuilds/sizing/ @firemanxbr
-factory/pkgbuilds/community/ @firemanxbr
-factory/pkgbuilds/omarchy/ @firemanxbr
+factory/pkgbuilds/        @firemanxbr
+factory/sizing/           @firemanxbr

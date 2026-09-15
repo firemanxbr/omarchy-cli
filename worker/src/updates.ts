@@ -20,7 +20,6 @@ interface Pkg {
   name: string;
   owner: string;
   url: string;
-  group: string;
   arches: string;
   status: string;
 }
@@ -66,7 +65,7 @@ export async function checkUpdates(env: Env, now = new Date(), fetcher: typeof f
   }
 
   const pkgs = await env.DB.prepare(
-    `SELECT p.name, p.owner, p.url, p."group", p.arches, p.status FROM factory_packages p
+    `SELECT p.name, p.owner, p.url, p.arches, p.status FROM factory_packages p
       WHERE p.status != 'unmaintained' AND p.blocked_at IS NULL AND p.url LIKE 'https://github.com/%'
         AND EXISTS (SELECT 1 FROM approvals a WHERE a.name = p.name AND a.decision = 'approved')`,
   ).all<Pkg>();
@@ -93,8 +92,8 @@ export async function checkUpdates(env: Env, now = new Date(), fetcher: typeof f
     const arches = (JSON.parse(p.arches || "[]") as string[]).filter((a) => a === "x86_64" || a === "aarch64");
     await env.DB.batch([
       ...arches.map((arch) =>
-        env.DB.prepare(`INSERT INTO build_tasks (name, "group", arch, version, pkgbuild_ref, reason, priority, publish, trust, owner, kind, shared_after) VALUES (?, ?, ?, ?, ?, ?, 100, 0, 'community', ?, 'build', ?)`)
-          .bind(p.name, p.group, arch, `${want}-1`, `bump:${approved.task_id}@${tag}`, `bump to ${tag}`, p.owner, sharedAfter),
+        env.DB.prepare(`INSERT INTO build_tasks (name, arch, version, pkgbuild_ref, reason, priority, publish, trust, owner, kind, shared_after) VALUES (?, ?, ?, ?, ?, 100, 0, 'community', ?, 'build', ?)`)
+          .bind(p.name, arch, `${want}-1`, `bump:${approved.task_id}@${tag}`, `bump to ${tag}`, p.owner, sharedAfter),
       ),
       env.DB.prepare("UPDATE factory_packages SET status = 'waiting', detail = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE name = ?").bind(`${tag} released upstream; a build is queued for ${p.owner}'s worker (anyone's after ${SHARED_AFTER_DAYS} days)`, p.name),
       env.DB.prepare("INSERT INTO events (kind, ring, source, status, summary, payload) VALUES ('bump', NULL, 'factory', 'ok', ?, ?)").bind(`${p.name}: upstream ${tag} (approved ${approved.version ?? "?"}); build queued for ${p.owner}'s worker on ${arches.join(", ")}`, JSON.stringify({ name: p.name, tag, approved: approved.version, arches, owner: p.owner, shared_after: sharedAfter })),

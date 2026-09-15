@@ -256,11 +256,11 @@ __CHARTS__
   // The people: every contributor with a registered package or a worker, every maintainer named in factory/MAINTAINERS.toml.
   Promise.all([
     fetch("/api/v1/factory/packages").then(function (r) { return r.json(); }).catch(function () { return { packages: [] }; }),
-    fetch("/api/v1/factory/groups").then(function (r) { return r.json(); }).catch(function () { return { groups: [] }; }),
+    fetch("/api/v1/factory/maintainers").then(function (r) { return r.json(); }).catch(function () { return { maintainers: [] }; }),
     fetch("/api/v1/factory").then(function (r) { return r.json(); }).catch(function () { return { workers: [] }; })
   ]).then(function (res) {
-    var pkgs = res[0].packages || [], groups = res[1].groups || [], workers = res[2].workers || [];
-    var maintainers = {}; groups.forEach(function (g) { (g.maintainers || []).forEach(function (m) { maintainers[m] = true; }); });
+    var pkgs = res[0].packages || [], listed = res[1].maintainers || [], workers = res[2].workers || [];
+    var maintainers = {}; listed.forEach(function (m) { maintainers[m.login] = true; });
     var contributors = {}; pkgs.forEach(function (p) { if (p.owner && !maintainers[p.owner]) contributors[p.owner] = true; });
     workers.forEach(function (w) { if (w.owner && !maintainers[w.owner]) contributors[w.owner] = true; });
     var landed = pkgs.filter(function (p) { return p.status === "approved" || p.status === "published"; }).length;
