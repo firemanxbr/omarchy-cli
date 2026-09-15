@@ -72,7 +72,7 @@ const SCRIPT = String.raw`
          w.agent_status === "error" ? ' <span class="pill error" title="' + esc(w.agent_error || "") + '">not answering</span>' : ' <span class="pill none">not probed</span>');
       var readyCell = !w.alive ? '<span class="pill none">offline</span>' : w.ready ? '<span class="pill ok">ready</span>' : '<span class="pill error" title="' + esc(w.agent_error || (needsAgent ? "builds and audits need an agent that answers" : "")) + '">not ready</span>';
       var now = !w.alive ? '<span class="dim">—</span>' : w.current_task ? '<span class="pill warn">building #' + esc(String(w.current_task)) + '</span>' : '<span class="dim">idle · ' + esc(kinds.length ? kinds.join(", ") : (w.side === "omarchy" ? "jobs" : "builds")) + '</span>';
-      return '<tr><td><span class="mono">' + esc(w.id) + '</span>' + where + '</td><td>' + esc(w.arch) + '</td><td>' + (w.side === "omarchy" ? '<span class="pill ok">project</span>' : '<span class="pill none">community</span>') + '</td>' +
+      return '<tr><td>' + workerName(w) + where + '</td><td>' + esc(w.arch) + '</td><td>' + (w.side === "omarchy" ? '<span class="pill ok">project</span>' : '<span class="pill none">community</span>') + '</td>' +
         '<td>' + (w.owner ? '<a href="/user/' + encodeURIComponent(w.owner) + '">' + esc(w.owner) + '</a>' : '<span class="dim">—</span>') + '</td>' +
         '<td>' + agent + '</td><td>' + readyCell + '</td><td>' + now + '</td>' +
         '<td class="dim">' + ago(w.last_seen) + '</td><td class="num">' + num(w.builds_done || 0) + ' / ' + num(w.builds_failed || 0) + '</td></tr>';

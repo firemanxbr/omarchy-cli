@@ -81,7 +81,7 @@ const SCRIPT = String.raw`
     }).catch(function () { endSkeleton(); });
     busy(fetch(API + "/trust")).then(function (r) { return r.json(); }).then(function (d) {
       pager("#trust", (d.workers || []), function (w) {
-        return '<tr><td class="mono">' + esc(w.id) + (w.revoked_at ? ' <span class="pill none">revoked</span>' : '') + '</td><td>' + (w.owner ? person(w.owner) : "project") + '</td><td>' + esc(w.arch) + '</td><td>' + esc(w.trust) + '</td><td>' + (w.trusted_by ? person(w.trusted_by) : "—") + '</td><td>' + agentCell(w) + '</td><td>' + ago(w.last_seen) + '</td></tr>';
+        return '<tr><td>' + workerName(w) + (w.revoked_at ? ' <span class="pill none">revoked</span>' : '') + '</td><td>' + (w.owner ? person(w.owner) : "project") + '</td><td>' + esc(w.arch) + '</td><td>' + esc(w.trust) + '</td><td>' + (w.trusted_by ? person(w.trusted_by) : "—") + '</td><td>' + agentCell(w) + '</td><td>' + ago(w.last_seen) + '</td></tr>';
       }, { empty: 'no trusted worker yet' });
       pager("#people", (d.maintainers || []), function (p) {
         return '<tr><td><b>' + person(p.login) + '</b>' + (p.name ? ' <span class="muted">' + esc(p.name) + '</span>' : '') + '</td><td>' + esc(p.role) + '</td><td>' + esc((p.areas || []).join(", ") || "all") + '</td><td>' + ago(p.last_seen) + '</td></tr>';

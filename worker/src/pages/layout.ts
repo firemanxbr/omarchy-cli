@@ -576,6 +576,15 @@ const HELPERS = String.raw`
   // The same icon with no link of its own — for inside a link (a chip), where a nested anchor would split.
   function avatarIcon(login, role) { return '<span class="avatar' + (role === "maintainer" ? " m" : "") + '">' + esc(String(login).slice(0, 2)) + '</span>'; }
   // A person as a chip: the icon carries the role (green = maintainer), the whole chip is the link to the profile.
+  // A worker's id is "<owner>-<name>-<arch>-<4 random>" (POST /factory/workers): the tables
+  // show the name — the owner and the architecture have columns of their own — and keep the id on hover.
+  function workerName(w) {
+    var id = String(w.id || ""), s = id;
+    if (w.owner && s.indexOf(w.owner + "-") === 0) s = s.slice(w.owner.length + 1);
+    s = s.replace(/-[a-z0-9]{4}$/, "");
+    if (w.arch && s.endsWith("-" + w.arch)) s = s.slice(0, -(w.arch.length + 1));
+    return '<span class="mono" title="' + esc(id) + '">' + esc(s || id) + '</span>';
+  }
   function personChip(login, role, extra) { return '<a class="person" href="/user/' + encodeURIComponent(login) + '" title="' + esc(login) + ' · ' + esc(role) + '">' + avatarIcon(login, role) + '<b>' + esc(login) + '</b>' + (extra ? ' <span class="r">' + extra + '</span>' : '') + '</a>'; }
   function tile(k, v, s, cls) { return '<div class="tile"><div class="k">' + k + '</div><div class="v num' + (cls ? " " + cls : "") + '">' + v + '</div><div class="s">' + s + '</div></div>'; }
   // A tile with a fifth element is a link: the number, and the page that proves it.
