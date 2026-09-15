@@ -26,16 +26,20 @@ const BODY = String.raw`
   <section>
     <h2>Trust</h2>
     <p class="sub">Workers the project trusts to run pool jobs and project builds, and the people who may approve. A maintainer promotes a worker with <code>POST /api/v1/factory/workers/&lt;id&gt;/trust</code>; maintainers themselves are named by <code>factory/MAINTAINERS.toml</code> — see <a href="/docs/governance">Governance</a>.</p>
-    <div class="two"><div class="table-wrap"><table id="trust"><thead><tr><th>Worker</th><th>Owner</th><th>Arch</th><th>Trust</th><th>Granted by</th><th>Agent</th><th>Last seen</th></tr></thead><tbody></tbody></table></div>
-    <div class="table-wrap"><table id="people"><thead><tr><th>Maintainer</th><th>Role</th><th>Areas</th><th>Last seen</th></tr></thead><tbody></tbody></table></div></div>
+    <div class="two">
+      <div class="panel"><h3>Project workers <span class="dim" style="font-size:12px;font-weight:400">trusted by a maintainer</span></h3><div class="table-wrap" style="border:0"><table id="trust"><thead><tr><th>Worker</th><th>Owner</th><th>Arch</th><th>Granted by</th><th>Agent</th><th>Last seen</th></tr></thead><tbody></tbody></table></div></div>
+      <div class="panel"><h3>Maintainers <span class="dim" style="font-size:12px;font-weight:400">factory/MAINTAINERS.toml</span></h3><div class="table-wrap" style="border:0"><table id="people"><thead><tr><th>Maintainer</th><th>Areas</th><th>Last seen</th></tr></thead><tbody></tbody></table></div></div>
+    </div>
   </section>
 
   <section>
     <h2>Blocks</h2>
     <p class="sub">The brake. A blocked contributor gets nothing more in: no request, no build, no worker; their packages leave the rings and their sources stay closed to new accounts. A blocked package leaves every ring. The reason is on the record, and another maintainer lifts it — see <a href="/docs/governance">Governance</a>.</p>
     <form id="block-form" class="searchbar" hidden><input id="block-what" placeholder="contributor login, or package name" required> <input id="block-why" placeholder="why — the record and the contributor see this" required minlength="4"> <button type="submit">Block</button></form>
-    <div class="two"><div class="table-wrap"><table id="blocked-people"><thead><tr><th>Contributor</th><th>Since</th><th>By</th><th>Reason</th><th></th></tr></thead><tbody></tbody></table></div>
-    <div class="table-wrap"><table id="blocked-packages"><thead><tr><th>Package</th><th>Owner</th><th>Since</th><th>By</th><th>Reason</th><th></th></tr></thead><tbody></tbody></table></div></div>
+    <div class="two">
+      <div class="panel"><h3>Contributors</h3><div class="table-wrap" style="border:0"><table id="blocked-people"><thead><tr><th>Contributor</th><th>Since</th><th>By</th><th>Reason</th><th></th></tr></thead><tbody></tbody></table></div></div>
+      <div class="panel"><h3>Packages</h3><div class="table-wrap" style="border:0"><table id="blocked-packages"><thead><tr><th>Package</th><th>Owner</th><th>Since</th><th>By</th><th>Reason</th><th></th></tr></thead><tbody></tbody></table></div></div>
+    </div>
   </section>
 
   <section>
@@ -73,7 +77,7 @@ const SCRIPT = String.raw`
     });
   }
   function blocks() {
-    busy(fetch(API + "/blocks")).then(function (r) { return r.json(); }).then(function (d) {
+    busy(fetch(API + "/blocks")).then(function (r) { return r.ok ? r.json() : {}; }).catch(function () { return {}; }).then(function (d) {
       var mine = token || signedIn;
       pager("#blocked-people", (d.contributors || []), function (b) {
         return '<tr><td><b>' + person(b.login) + '</b></td><td>' + ago(b.blocked_at) + '</td><td>' + person(b.blocked_by) + '</td><td>' + esc(b.blocked_reason || "") + '</td><td>' + (mine && b.blocked_by !== login ? '<button type="button" data-unblock="contributors" data-what="' + esc(b.login) + '">Lift</button>' : '') + '</td></tr>';
@@ -81,7 +85,7 @@ const SCRIPT = String.raw`
       pager("#blocked-packages", (d.packages || []), function (b) {
         return '<tr><td><a href="/package/' + encodeURIComponent(b.name) + '"><b>' + esc(b.name) + '</b></a></td><td>' + person(b.owner) + '</td><td>' + ago(b.blocked_at) + '</td><td>' + person(b.blocked_by) + '</td><td>' + esc(b.blocked_reason || "") + '</td><td>' + (mine && b.blocked_by !== login ? '<button type="button" data-unblock="packages" data-what="' + esc(b.name) + '">Lift</button>' : '') + '</td></tr>';
       }, { empty: 'no package blocked' });
-    }).catch(function () {});
+    });
   }
   // The second agent's column: its verdict and one line, the report behind it.
   // The gate: the worker's own checks on the build (factory/README.md *The gate*), pass with its warnings named, or none for a build older than the gate.
@@ -104,7 +108,7 @@ const SCRIPT = String.raw`
     return '<span class="muted">—</span>';
   }
   function load() {
-    skeletonRows("#staged", 9, 3); skeletonRows("#trust", 7, 2); skeletonRows("#people", 4, 1); skeletonRows("#decisions", 7, 2);
+    skeletonRows("#staged", 9, 3); skeletonRows("#trust", 6, 2); skeletonRows("#people", 3, 1); skeletonRows("#decisions", 7, 2);
     busy(fetch(API + "/review")).then(function (r) { return r.json(); }).then(function (d) {
       pager("#staged", (d.staged || []), function (t) {
         var det = t.detected || {}, project = t.kind === "project";
@@ -125,11 +129,11 @@ const SCRIPT = String.raw`
       endSkeleton();
     }).catch(function () { endSkeleton(); });
     busy(fetch(API + "/trust")).then(function (r) { return r.json(); }).then(function (d) {
-      pager("#trust", (d.workers || []), function (w) {
-        return '<tr><td>' + workerName(w) + (w.revoked_at ? ' <span class="pill none">revoked</span>' : '') + '</td><td>' + (w.owner ? person(w.owner) : "project") + '</td><td>' + esc(w.arch) + '</td><td>' + esc(w.trust) + '</td><td>' + (w.trusted_by ? person(w.trusted_by) : "—") + '</td><td>' + agentCell(w) + '</td><td>' + ago(w.last_seen) + '</td></tr>';
+      pager("#trust", (d.workers || []).filter(function (w) { return !w.revoked_at; }), function (w) {
+        return '<tr><td>' + workerName(w) + '</td><td>' + (w.owner ? person(w.owner) : "project") + '</td><td>' + esc(w.arch) + '</td><td>' + (w.trusted_by ? person(w.trusted_by) : "—") + '</td><td>' + agentCell(w) + '</td><td>' + ago(w.last_seen) + '</td></tr>';
       }, { empty: 'no trusted worker yet' });
       pager("#people", (d.maintainers || []), function (p) {
-        return '<tr><td><b>' + person(p.login) + '</b>' + (p.name ? ' <span class="muted">' + esc(p.name) + '</span>' : '') + '</td><td>' + esc(p.role) + '</td><td>' + esc((p.areas || []).join(", ") || "all") + '</td><td>' + ago(p.last_seen) + '</td></tr>';
+        return '<tr><td><b>' + person(p.login) + '</b>' + (p.name ? ' <span class="muted">' + esc(p.name) + '</span>' : '') + '</td><td>' + esc((p.areas || []).join(", ") || "all") + '</td><td>' + ago(p.last_seen) + '</td></tr>';
       }, { empty: 'no maintainer named yet' });
       endSkeleton();
     }).catch(function () { endSkeleton(); });
