@@ -51,15 +51,16 @@ const BODY = String.raw`
     <div class="steps">
       <div class="step"><h3>1. Start it</h3><p>One container is one task: it asks the pool for a build of yours, builds it, uploads the package, the PKGBUILD and the log to your staging workspace, and exits. The restart policy starts the next one.</p>
 <pre># Docker Desktop
-docker run -d --name omarchy-worker --restart unless-stopped \
-  -e OMARCHY_WORKER_TOKEN=&lt;omw_…&gt; \
+docker run -d --name omarchy-worker --restart unless-stopped --stop-timeout 10800 \
+  -e OMARCHY_WORKER_TOKEN=&lt;omw_…&gt; -e GITHUB_TOKEN="$(gh auth token)" \
   ${IMG}:latest
 
 # Podman
-podman run -d --name omarchy-worker --restart unless-stopped \
-  -e OMARCHY_WORKER_TOKEN=&lt;omw_…&gt; \
+podman run -d --name omarchy-worker --restart unless-stopped --stop-timeout 10800 \
+  -e OMARCHY_WORKER_TOKEN=&lt;omw_…&gt; -e GITHUB_TOKEN="$(gh auth token)" \
   ${IMG}:latest</pre>
-      <p>Or keep the settings in a file with <a href="${REPO_URL}/blob/main/factory/image/compose.yml">compose.yml</a>: <code>OMARCHY_WORKER_TOKEN=… docker compose up -d</code> (<code>podman compose</code> works the same).</p></div>
+      <p>Or keep the settings in a file with <a href="${REPO_URL}/blob/main/factory/image/compose.yml">compose.yml</a>: <code>OMARCHY_WORKER_TOKEN=… GITHUB_TOKEN=… docker compose up -d</code> (<code>podman compose</code> works the same).</p>
+      <p><b>GITHUB_TOKEN</b>: the worker reads GitHub's API for every package it builds — the release, the files. Without a token GitHub allows 60 requests an hour from your address, and a queue of ten builds is ten failures; a fine-grained token with <em>no permissions at all</em> gives 5000. <b>--stop-timeout</b> (compose: <code>stop_grace_period</code>): a stop lets the build finish and report; killed mid-build, the task waits half an hour for its lease to expire. Change the settings between builds, not during one.</p></div>
       <div class="step"><h3>2. Give it work</h3><p>On <a href="/factory">the Factory</a>, register a package (the project's URL) and press <b>Build</b>. Your worker picks it up within a minute; the <em>Your builds</em> table follows it, and the <em>A worker of yours</em> table shows it alive. When the build is staged, a maintainer of the group sees it on <a href="/review">Review</a>.</p></div>
       <div class="step"><h3>3. Donate the machine, bring your agent</h3><p>Two switches, both yours to flip:</p>
 <pre># also build other contributors' packages (their bumps after 14 days, package requests at once)

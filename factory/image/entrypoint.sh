@@ -91,6 +91,10 @@ case "$mode" in
     ;;
   community)
     [[ "$role" != community || -n "$agent" ]] || echo "omarchy-worker: $id has no agent key — registered packages build, package requests (drafts) wait for a community worker with one" >&2
+    # The worker reads GitHub's API for every package it builds (the release,
+    # the files); without a token GitHub allows 60 requests an hour from this
+    # address, and ten builds in a row were ten "rate limit reached" failures.
+    [[ -n "${GITHUB_TOKEN:-}" ]] || echo "omarchy-worker: no GITHUB_TOKEN — GitHub allows 60 API requests an hour from this address; a fine-grained token with no permissions gives 5000 (gh auth token works)" >&2
     whose="${owner}'s"; [[ -n "$role" ]] && whose="$role"
     echo "omarchy-worker: $id — $whose worker ($arch); one task per container${WORKER_SHARED:+, shared}${agent:+, with an agent}" >&2
     export WORKER_ID="$id"

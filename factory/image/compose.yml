@@ -6,6 +6,11 @@ services:
   worker:
     image: ghcr.io/firemanxbr/omarchy-worker:latest
     restart: unless-stopped
+    # A stop is a drain: the worker finishes the task it holds, claims no
+    # new one and exits. Without the grace period `compose down` kills the
+    # build after ten seconds and the pool waits half an hour for the lease
+    # to expire before anyone else may take it.
+    stop_grace_period: 3h
     environment:
       OMARCHY_WORKER_TOKEN: ${OMARCHY_WORKER_TOKEN:?the worker token from the Contributors page, shown once}
       WORKER_LABELS: '{"where":"${WHERE:-my-machine}"}'
@@ -23,7 +28,9 @@ services:
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       XAI_API_KEY: ${XAI_API_KEY:-}
       FACTORY_MODEL: ${FACTORY_MODEL:-}
-      # Optional: raises GitHub API limits when drafting.
+      # GitHub's API: the release, the files of every package it builds. Without
+      # a token: 60 requests an hour from your address. A fine-grained token
+      # with no permissions at all is enough (`gh auth token` works).
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       # Project workers only: a directory with the SAME path on the host and in the container.
       # OMARCHY_WORK_DIR: ${HOME}/omarchy-worker

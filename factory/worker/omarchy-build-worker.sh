@@ -166,10 +166,14 @@ heartbeat_loop() { # task-id
 # What `makepkg --syncdeps` would install, installed by root instead: the
 # PKGBUILD's depends, makedepends and checkdepends (this architecture's
 # too), from .SRCINFO. Nothing to escalate from the build user.
+# Only the pkgbase section — what the build needs. The per-package sections
+# that follow (a split package's `package_x()` depends) can name siblings
+# this very build produces: ghostty-nautilus depends on ghostty, and asking
+# pacman for it before it exists is "target not found: ghostty" (2026-09-15).
 install_deps() {
-  local deps
+  local deps a; a="$(uname -m)"; [[ "$a" == arm64 ]] && a=aarch64
   deps="$(cd /build/pkg && as_builder makepkg --printsrcinfo 2>/dev/null \
-    | awk -F' = ' '/^[[:space:]]*(make|check)?depends(_[a-z0-9_]+)? = /{print $2}' | sort -u)"
+    | awk -F' = ' -v a="$a" '/^pkgname = /{exit} $1 ~ "^[[:space:]]*(make|check)?depends(_" a ")?$" {print $2}' | sort -u)"
   [[ -n "$deps" ]] || return 0
   # shellcheck disable=SC2086
   pacman -S --needed --noconfirm --asdeps -- $deps
@@ -266,11 +270,18 @@ container_worker() {
   if [[ $status -ne 0 ]]; then
     kill "$beat" 2>/dev/null || true
     local err; err="$(grep -m1 -E '^(==> ERROR|error|Error|fatal)' /build/build.log || tail -n1 /build/build.log)"
-    log "task $id: failed (exit $status) — ${err:0:200}"
+    # The pool retries a task for the infrastructure's sake — a download
+    # that broke, a mirror, a container killed under it. A recipe that
+    # fails, fails the same way in the next fresh container: the report
+    # says so (`final`) and the task fails now; the contributor fixes the
+    # PKGBUILD (or sets GITHUB_TOKEN) and queues a new build.
+    local final=true
+    if grep -qE 'Failure while downloading|curl: \([0-9]+\)|failed retrieving file|failed to synchronize|Could not resolve host|Connection (timed out|refused|reset)|Temporary failure in name resolution' /build/build.log; then final=false; fi
+    log "task $id: failed (exit $status$( [[ "$final" == true ]] && echo ", the recipe's — not retried" )) — ${err:0:200}"
     # Upload what there is for the record, then report.
     upload_staging "$id" /build/build.log build.log || true
     [[ -f /build/pkg/PKGBUILD ]] && upload_staging "$id" /build/pkg/PKGBUILD PKGBUILD || true
-    api POST "/factory/tasks/$id/fail" "$(jq -n --arg e "exit $status: ${err:0:500}" --argjson d "$took" --argjson t "$tail" '{error:$e,duration_ms:$d,log_tail:$t}')" >/dev/null || true
+    api POST "/factory/tasks/$id/fail" "$(jq -n --arg e "exit $status: ${err:0:500}" --argjson d "$took" --argjson t "$tail" --argjson f "$final" '{error:$e,duration_ms:$d,log_tail:$t,final:$f}')" >/dev/null || true
     exit 1
   fi
   shopt -s nullglob
