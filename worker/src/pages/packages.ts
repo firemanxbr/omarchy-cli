@@ -19,12 +19,12 @@ const SEARCH_BODY = String.raw`
     <div class="choice" id="pick-arch"></div>
   </form>
   <p class="sub" id="hint">Type at least two characters.</p>
-  <div class="tiles" id="pk-tiles"></div>
   <div class="two pk-grid">
-    <div class="table-wrap"><table id="results"><thead><tr><th>Package</th><th>Version</th><th>Source</th><th>By</th><th>Description</th><th class="num">Size</th></tr></thead><tbody></tbody></table></div>
+    <div class="pk-results"><div class="table-wrap"><table id="results"><thead><tr><th>Package</th><th>Version</th><th>Source</th><th>By</th><th>Description</th><th class="num">Size</th></tr></thead><tbody></tbody></table></div></div>
     <div class="panel" id="pk-detail"><h3>Pick a package</h3><p class="sub" style="margin:0">Click a row for its versions per ring, what it depends on, what depends on it, who made it and whether an advisory is open — or open the full page.</p></div>
   </div>
-  <section style="margin-top:32px"><div class="charts">
+  <div class="tiles five" id="pk-tiles"></div>
+  <section><div class="charts">
     <div class="chart"><h3>Packages per source <span id="pk-src-ring">stable</span></h3><div class="sub">what each upstream contributes to the ring, per architecture</div><div id="pk-sources"></div></div>
     <div class="chart"><h3>What the last stable changed <span id="pk-diff-when"></span></h3><div class="sub">against its parent — the diff every release carries</div><div id="pk-diff"></div></div>
   </div></section>
@@ -64,7 +64,7 @@ __CHARTS__
       var rows = d.packages || [];
       $("#hint").textContent = rows.length ? rows.length + (rows.length === 100 ? "+" : "") + " package(s) in " + ring + " · " + arch : "Nothing in " + ring + " · " + arch + " matches “" + term + "”.";
       pager("#results", rows, function (p) {
-        return '<tr data-name="' + esc(p.name) + '" style="cursor:pointer"><td><a class="pkname" href="/package/' + encodeURIComponent(p.name) + '?ring=' + ring + '&arch=' + arch + '" title="open the package page">' + esc(p.name) + ' <span class="go">→</span></a></td><td class="mono">' + esc(p.version) + '</td><td><span class="src">' + esc(p.source) + '</span></td><td>' + byCell(p) + '</td><td class="muted">' + esc(p.description || "") + '</td><td class="num">' + bytes(p.size_download) + '</td></tr>';
+        return '<tr data-name="' + esc(p.name) + '" style="cursor:pointer"><td><a class="pkname" href="/package/' + encodeURIComponent(p.name) + '?ring=' + ring + '&arch=' + arch + '" title="open the package page">' + esc(p.name) + ' <span class="go">→</span></a></td><td class="mono">' + esc(p.version) + '</td><td><span class="src">' + esc(p.source) + '</span></td><td>' + byCell(p) + '</td><td class="muted"><span class="clamp">' + esc(p.description || "") + '</span></td><td class="num">' + bytes(p.size_download) + '</td></tr>';
       }, { empty: "nothing matches", n: 25, text: function (p) { return p.name + " " + (p.description || "") + " " + p.source; } });
     }).catch(function (e) { $("#hint").textContent = "search failed: " + e; endSkeleton(); });
   }

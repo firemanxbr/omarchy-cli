@@ -21,7 +21,7 @@ const BODY = String.raw`
       <span class="hint">No account, no sign-up. Just your Omarchy.</span>
     </div>
     <form class="searchbar" action="/packages" method="get" style="margin:6px 0 0">
-      <div class="pool-search"><input type="search" name="q" id="pool-q" placeholder="find a package — pacman, ghostty, openssl…" aria-label="find a package">${SEARCH_ICON}</div>
+      <div class="pool-search"><input type="search" name="q" id="pool-q" placeholder="find a package — pacman, ghostty, openssl…" aria-label="find a package" autocomplete="off">${SEARCH_ICON}<div class="suggest" id="pool-suggest" hidden></div></div>
       <button type="submit" class="btn">Search</button>
       <span class="hint">every ring, both architectures</span>
     </form>
@@ -275,6 +275,36 @@ __CHARTS__
       t("/packages?q=factory", "Community packages", num(landed), "approved, built by the project");
   });
   liveStats(render, 60000);
+
+  // The search box answers as you type: the first matches in stable for
+  // x86_64, each a package page; the last line, and Enter, the full search
+  // with its rings and architectures. Nothing is sent below two characters.
+  (function () {
+    var box = $("#pool-q"), out = $("#pool-suggest"), timer = null, seq = 0;
+    if (!box || !out) return;
+    function hide() { out.hidden = true; out.innerHTML = ""; }
+    function show(term, rows) {
+      if (!rows.length) { out.innerHTML = '<div class="none">nothing in stable matches “' + esc(term) + '”</div>'; out.hidden = false; return; }
+      out.innerHTML = rows.slice(0, 8).map(function (p) {
+        return '<a href="/package/' + encodeURIComponent(p.name) + '?ring=stable&arch=x86_64"><b>' + esc(p.name) + '</b><span class="mono dim">' + esc(p.version) + '</span><span class="src">' + esc(p.source) + '</span><span class="d">' + esc(p.description || "") + '</span></a>';
+      }).join("") + '<a class="all" href="/packages?q=' + encodeURIComponent(term) + '&ring=stable&arch=x86_64">' + (rows.length >= 9 ? "More results" : "All " + rows.length + " results") + ' — every ring, both architectures →</a>';
+      out.hidden = false;
+    }
+    box.addEventListener("input", function () {
+      clearTimeout(timer);
+      var term = box.value.trim(), my = ++seq;
+      if (term.length < 2) { hide(); return; }
+      timer = setTimeout(function () {
+        fetch("/api/v1/search?q=" + encodeURIComponent(term) + "&ring=stable&arch=x86_64&limit=9").then(function (r) { return r.json(); }).then(function (d) {
+          if (my !== seq || box.value.trim() !== term) return;
+          show(term, d.packages || []);
+        }).catch(hide);
+      }, 200);
+    });
+    box.addEventListener("keydown", function (ev) { if (ev.key === "Escape") hide(); });
+    document.addEventListener("click", function (ev) { if (!out.contains(ev.target) && ev.target !== box) hide(); });
+    box.addEventListener("focus", function () { if (out.innerHTML) out.hidden = false; });
+  })();
 `;
 
 export function overviewHtml(poolUrl: string, version: RunningVersion): string {

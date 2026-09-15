@@ -244,6 +244,7 @@ const CSS = String.raw`
   .sub a, .lede a { color: var(--green); text-decoration: none; } .sub a:hover, .lede a:hover { text-decoration: underline; }
   .tile .v.ok { color: var(--green); } .tile .v.warn { color: var(--amber); }
   .tiles.six { grid-template-columns: repeat(auto-fit, minmax(min(172px, 100%), 1fr)); }
+  .tiles.five { grid-template-columns: repeat(auto-fit, minmax(min(188px, 100%), 1fr)); }
   .tiles.four { grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); margin: 16px 0; } .tiles.four .tile .v { font-size: 40px; line-height: 1.1; margin-top: 6px; }
   a.tile { color: inherit; text-decoration: none; display: block; } a.tile:hover { background: var(--panel-2); } a.tile:hover .v { color: var(--green); }
   .feed-box { border: 1px solid var(--line); background: var(--panel); padding: 16px 20px; }
@@ -257,6 +258,13 @@ const CSS = String.raw`
   .pool-search svg { position: absolute; left: 13px; top: 50%; transform: translateY(-50%); width: 17px; height: 17px; fill: none; stroke: var(--dim); stroke-width: 2; stroke-linecap: round; pointer-events: none; }
   .searchbar .pool-search input[type="search"] { width: 100%; padding: 11px 14px 11px 42px; font-size: 15px; }
   .pool-search:focus-within svg { stroke: var(--green); }
+  /* What the box answers as you type: a package a line, the full search last. */
+  .suggest { position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 30; background: var(--panel); border: 1px solid var(--line); box-shadow: 0 12px 32px rgba(0, 0, 0, .45); text-align: left; }
+  .suggest a { display: grid; grid-template-columns: minmax(120px, auto) auto auto minmax(0, 1fr); gap: 12px; align-items: center; padding: 9px 14px; color: var(--text); text-decoration: none; border-bottom: 1px solid var(--line); font-size: 13px; }
+  .suggest a:last-child { border-bottom: 0; } .suggest a:hover, .suggest a:focus { background: var(--panel-2); outline: none; }
+  .suggest a b { font-weight: 600; color: var(--green); } .suggest a .d { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .suggest a.all { display: block; color: var(--green); font-size: 12.5px; padding: 10px 14px; }
+  .suggest .none { padding: 10px 14px; color: var(--dim); font-size: 12.5px; }
 
   figure.diagram { margin: 0; border: 1px solid var(--line); background: var(--panel); padding: 14px 16px 10px; overflow-x: auto; }
   figure.diagram svg { display: block; width: 100%; height: auto; min-width: 760px; font-family: "JetBrains Mono", ui-monospace, monospace; }
@@ -423,7 +431,11 @@ const CSS = String.raw`
   .whorow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; color: var(--muted); margin: -4px 0 12px; } .whorow .avatar { width: 24px; height: 24px; font-size: 10.5px; }
   .pkname { font-weight: 600; color: var(--text); text-decoration: none; border-bottom: 1px dotted var(--dim); } .pkname:hover { color: var(--green); border-bottom-color: var(--green); } .pkname .go { color: var(--green); font-weight: 400; }
   .by { display: inline-flex; gap: 4px; } .by .avatar { width: 24px; height: 24px; font-size: 10.5px; }
-  .pk-grid { grid-template-columns: minmax(0, 1.6fr) minmax(280px, 1fr); }
+  .pk-grid { grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr); align-items: start; margin-top: 4px; }
+  /* The results: the page's search box is the search, so the table's own filter stays hidden; its size and count remain. A description is two lines at most; who made it stays on one. */
+  .pk-results .pager { margin: 0 0 6px; } .pk-results .pager input { display: none; }
+  .pk-results td:nth-child(4) { white-space: nowrap; } .pk-results .clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .pk-grid + .tiles { margin-top: 28px; }
   #results tr.sel td { background: var(--panel-2); }
 
   .docs { display: grid; grid-template-columns: 230px 1fr; gap: 24px; align-items: start; }
