@@ -290,11 +290,11 @@ const CSS = String.raw`
   .people-row .person { padding: 3px 8px 3px 3px; font-size: 12.5px; } .people-row .person .avatar { width: 22px; height: 22px; font-size: 10px; }
   .people-row a:not(.person) { margin-left: auto; }
   .cov { display: grid; gap: 7px; font-size: 12.5px; }
-  .cov-row { display: grid; grid-template-columns: 96px minmax(0, 1fr) 48px minmax(0, 1fr) 48px; gap: 10px; align-items: center; }
+  .cov-row { display: grid; grid-template-columns: 96px minmax(0, 1fr) 156px minmax(0, 1fr) 156px; gap: 10px; align-items: center; }
   .cov-row.head { margin-bottom: 2px; } .cov-row .k { margin: 0; }
   .cov-row .l { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .cov-row .bar { height: 10px; width: auto; background: var(--panel-2); border: 1px solid var(--line); position: relative; display: block; } .cov-row .bar i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--green); } .cov-row .bar i.partial { background: var(--amber); } .cov-row .bar.none { border-style: dashed; opacity: .5; }
-  .cov-row .p { text-align: right; color: var(--muted); }
+  .cov-row .bar { height: 8px; width: auto; background: var(--panel-2); border: 1px solid var(--line); position: relative; display: block; } .cov-row .bar i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--green); } .cov-row .bar i.partial { background: var(--amber); }
+  .cov-row .p { text-align: right; color: var(--muted); white-space: nowrap; }
   .open-grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 16px; }
   .ring-heads { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); margin: 12px 0 10px; }
   .ring-head { background: var(--panel-2); padding: 8px 10px; display: grid; gap: 1px; text-decoration: none; color: inherit; min-width: 0; } .ring-head:hover { background: var(--panel); }

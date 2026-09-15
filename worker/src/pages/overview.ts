@@ -185,13 +185,18 @@ __CHARTS__
     // Coverage: one row per source, the sources both architectures serve first, so core is core on either side.
     var covBy = {}; mirrors.filter(function (c) { return !c.optional; }).forEach(function (c) { covBy[c.source] = covBy[c.source] || {}; covBy[c.source][c.arch] = c; });
     var covNames = Object.keys(covBy).sort(function (a, b) { var na = Object.keys(covBy[a]).length, nb = Object.keys(covBy[b]).length; return nb - na || (a < b ? -1 : 1); });
-    var covCell = function (c, a) {
-      if (!c) return '<div class="bar none" data-tip="not served on ' + a + '"></div><div class="p num dim">—</div>';
-      var up = c.upstream_total, pct = up ? Math.min(100, Math.round(1000 * c.indexed / up) / 10) : 0, label = up == null ? "—" : pct + "%";
-      return '<div class="bar" data-tip="' + esc(c.source + " " + a + " · " + num(c.indexed) + " of " + num(up || 0) + " · " + label) + '"><i class="' + (pct >= 100 ? "" : "partial") + '" style="width:' + pct + '%"></i></div><div class="p num">' + label + '</div>';
+    // A cell is the count beside the share — 12,905/12,905 · 100% — so a full
+    // bar says how much it holds, not only that it is full. A source an
+    // architecture does not have (alarm, asahi: aarch64; multilib: x86_64)
+    // says so instead of showing an empty bar.
+    var covCell = function (c, a, other) {
+      if (!c) return '<div></div><div class="p dim">' + other + ' only</div>';
+      var up = c.upstream_total, pct = up ? Math.min(100, Math.round(1000 * c.indexed / up) / 10) : 0;
+      var label = up == null ? "not synced yet" : num(c.indexed) + "/" + num(up) + ' <span class="dim">·</span> ' + pct + "%";
+      return '<div class="bar" data-tip="' + esc(c.source + " " + a + " · " + num(c.indexed) + " of " + num(up || 0)) + '"><i class="' + (pct >= 100 ? "" : "partial") + '" style="width:' + pct + '%"></i></div><div class="p num">' + label + '</div>';
     };
     $("#c-coverage").innerHTML = '<div class="cov-row head"><div></div><div class="k">x86_64</div><div></div><div class="k">aarch64</div><div></div></div>' +
-      covNames.map(function (n) { return '<div class="cov-row"><div class="l">' + esc(n) + '</div>' + covCell(covBy[n].x86_64, "x86_64") + covCell(covBy[n].aarch64, "aarch64") + '</div>'; }).join("");
+      covNames.map(function (n) { return '<div class="cov-row"><div class="l">' + esc(n) + '</div>' + covCell(covBy[n].x86_64, "x86_64", "aarch64") + covCell(covBy[n].aarch64, "aarch64", "x86_64") + '</div>'; }).join("");
     $("#c-pool").innerHTML = area((S.metrics || []).map(function (r) { return { t: Date.parse(r.created_at), v: Number(r.bytes || 0) }; }), bytes, 200);
     var m0 = (S.metrics || [])[0], m1 = (S.metrics || [])[(S.metrics || []).length - 1];
     $("#c-pool-mini").innerHTML = '<div><b>' + num(d.pool.objects) + '</b>objects</div><div><b>' + (m0 && m1 ? "+" + num(Math.max(0, Number(m1.objects) - Number(m0.objects))) : "—") + '</b>this week</div><div><b>' + bytes(d.pool.bytes) + '</b>stored once</div>';
