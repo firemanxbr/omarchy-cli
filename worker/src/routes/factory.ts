@@ -458,16 +458,26 @@ export async function handleFail(id: number, request: Request, env: Env, actor: 
 
 /** Leases that expired go back to the queue (or fail when out of attempts). Called by the scheduler. */
 export async function requeueExpiredLeases(env: Env): Promise<number> {
-  const expired = await env.DB.prepare("SELECT id, name, arch, lease_owner, attempts, max_attempts FROM build_tasks WHERE status = 'leased' AND lease_expires_at < ?")
+  const expired = await env.DB.prepare("SELECT id, name, arch, lease_owner, attempts, max_attempts, trust, kind FROM build_tasks WHERE status = 'leased' AND lease_expires_at < ?")
     .bind(now())
-    .all<{ id: number; name: string; arch: string; lease_owner: string; attempts: number; max_attempts: number }>();
+    .all<{ id: number; name: string; arch: string; lease_owner: string; attempts: number; max_attempts: number; trust: string; kind: string }>();
   for (const t of expired.results) {
     const exhausted = t.attempts >= t.max_attempts;
+    const error = `lease by ${t.lease_owner} expired`;
     await env.DB.prepare("UPDATE build_tasks SET status = ?, finished_at = ?, error = ?, lease_owner = ?, lease_expires_at = NULL, priority = priority + 10 WHERE id = ? AND status = 'leased'")
-      .bind(exhausted ? "failed" : "queued", exhausted ? now() : null, `lease by ${t.lease_owner} expired`, exhausted ? t.lease_owner : null, t.id)
+      .bind(exhausted ? "failed" : "queued", exhausted ? now() : null, error, exhausted ? t.lease_owner : null, t.id)
       .run();
     await env.DB.prepare("UPDATE build_workers SET current_task = NULL WHERE id = ? AND current_task = ?").bind(t.lease_owner, t.id).run();
-    await event(env, "build", exhausted ? "error" : "warn", `${t.name} for ${t.arch}: lease by ${t.lease_owner} expired${exhausted ? " — giving up" : " — back in the queue"}`, { task: t.id, worker: t.lease_owner, attempts: t.attempts });
+    // The package follows its task, as it does when the worker reports the
+    // failure itself: back to waiting (queued again) or to registered with
+    // the reason. Left at "building", obsidian showed a build in progress
+    // for hours after its third lease had died (2026-09-15).
+    if (t.trust === "community" && t.kind === "build") {
+      await env.DB.prepare("UPDATE factory_packages SET status = ?, detail = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE name = ? AND status = 'building'")
+        .bind(exhausted ? "registered" : "waiting", exhausted ? `build failed on ${t.lease_owner}: ${error} (the worker stopped mid-build?)` : `${error}; queued again`, t.name)
+        .run();
+    }
+    await event(env, "build", exhausted ? "error" : "warn", `${t.name} for ${t.arch}: ${error}${exhausted ? " — giving up" : " — back in the queue"}`, { task: t.id, worker: t.lease_owner, attempts: t.attempts });
   }
   return expired.results.length;
 }

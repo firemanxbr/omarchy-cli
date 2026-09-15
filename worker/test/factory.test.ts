@@ -10,6 +10,7 @@ import { env, createExecutionContext, waitOnExecutionContext } from "cloudflare:
 import { beforeAll, describe, expect, it } from "vitest";
 import worker from "../src/index";
 import { sha256Hex } from "../src/routes/contributors";
+import { requeueExpiredLeases } from "../src/routes/factory";
 import { packageKey } from "../src/r2";
 
 const API = "http://pool.test/api/v1";
@@ -230,5 +231,32 @@ describe("a recipe's failure", () => {
     expect((await call("POST", "/factory/claim", { arch: "aarch64" }, "omw_w3")).status).toBe(204);
     const pkg = await env.DB.prepare("SELECT status, detail FROM factory_packages WHERE name = 'broken'").first<{ status: string; detail: string }>();
     expect(pkg).toMatchObject({ status: "registered", detail: "build failed on w3: exit 4: error: target not found: ghostty" });
+  });
+});
+
+describe("an expired lease", () => {
+  it("puts the package back to waiting with the task, and to registered with the reason when the attempts are spent", async () => {
+    await env.DB.batch([
+      env.DB.prepare(`INSERT INTO factory_packages (name, owner, url, "group", arches, status) VALUES ('orphan', 'alice', 'https://github.com/alice/orphan', 'community', '["aarch64"]', 'waiting')`),
+      env.DB.prepare(`INSERT INTO build_tasks (name, "group", arch, version, pkgbuild_ref, reason, priority, publish, trust, owner, kind, max_attempts) VALUES ('orphan', 'community', 'aarch64', '1.0-1', 'https://github.com/alice/orphan@HEAD:PKGBUILD', 'contributor', 100, 0, 'community', 'alice', 'build', 2)`),
+    ]);
+    const status = async () => (await env.DB.prepare("SELECT status, detail FROM factory_packages WHERE name = 'orphan'").first<{ status: string; detail: string | null }>())!;
+    // The worker took it and died: the lease runs out.
+    let c = await call("POST", "/factory/claim", { arch: "aarch64" }, "omw_w3");
+    expect(c.status).toBe(200);
+    const id = c.json.task.id;
+    expect((await status()).status).toBe("building");
+    await env.DB.prepare("UPDATE build_tasks SET lease_expires_at = '2000-01-01T00:00:00Z' WHERE id = ?").bind(id).run();
+    expect(await requeueExpiredLeases(env)).toBe(1);
+    expect(await env.DB.prepare("SELECT status FROM build_tasks WHERE id = ?").bind(id).first()).toMatchObject({ status: "queued" });
+    expect(await status()).toEqual({ status: "waiting", detail: "lease by w3 expired; queued again" });
+    // Again, and that was the last attempt.
+    c = await call("POST", "/factory/claim", { arch: "aarch64" }, "omw_w3");
+    expect(c.json.task.id).toBe(id);
+    await env.DB.prepare("UPDATE build_tasks SET lease_expires_at = '2000-01-01T00:00:00Z' WHERE id = ?").bind(id).run();
+    expect(await requeueExpiredLeases(env)).toBe(1);
+    expect(await env.DB.prepare("SELECT status, error FROM build_tasks WHERE id = ?").bind(id).first()).toMatchObject({ status: "failed", error: "lease by w3 expired" });
+    expect(await status()).toEqual({ status: "registered", detail: "build failed on w3: lease by w3 expired (the worker stopped mid-build?)" });
+    expect(await requeueExpiredLeases(env)).toBe(0);
   });
 });

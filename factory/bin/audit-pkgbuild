@@ -11,6 +11,7 @@ page. Exit 0 with a report, non-zero when no report could be produced.
 Usage: audit-pkgbuild --pkgbuild FILE --log FILE [--pkginfo FILE] --out DIR
 """
 import argparse
+import ast
 import json
 import os
 import re
@@ -22,20 +23,46 @@ import agent  # noqa: E402
 RULES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "prompts", "audit.md")
 
 
+def parse(text):
+    """The report in the answer, or None: bare JSON, JSON in a fence or in
+    prose, and a Python-style dict (single quotes, True/None — what a model
+    returns now and then; one audit died on it, 2026-09-15)."""
+    text = re.sub(r"^```\w*\n|\n```\s*$", "", text.strip())
+    m = re.search(r"\{.*\}", text, re.S)
+    for candidate in (text, m.group(0) if m else None):
+        if not candidate:
+            continue
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            pass
+        try:
+            value = ast.literal_eval(candidate)
+            if isinstance(value, dict):
+                return value
+        except (ValueError, SyntaxError):
+            pass
+    return None
+
+
 def ask(pkgbuild, log, pkginfo):
     user = "--- PKGBUILD ---\n" + pkgbuild + "\n\n--- build log (tail) ---\n" + log[-12000:] + "\n"
     if pkginfo:
         user += "\n--- .PKGINFO ---\n" + pkginfo[:4000] + "\n"
     user += "\nReturn the JSON report only."
-    text, model = agent.complete(open(RULES).read(), user, max_tokens=12000)
-    text = re.sub(r"^```\w*\n|\n```\s*$", "", text.strip())
-    try:
-        report = json.loads(text)
-    except json.JSONDecodeError:
-        m = re.search(r"\{.*\}", text, re.S)
-        if not m:
-            sys.exit("the model did not return a JSON report:\n" + text[:500])
-        report = json.loads(m.group(0))
+    # The budget covers the model's thinking too (Gemini counts it against
+    # the output): 12 000 left a block verdict on brave-origin-bin cut
+    # mid-finding, and a cut report is no report.
+    text, model = agent.complete(open(RULES).read(), user, max_tokens=32000)
+    report = parse(text)
+    if report is None:
+        # Once more, with the answer in front of it: the same report, as JSON.
+        print("audit: the answer was not a JSON report; asking again", file=sys.stderr)
+        again = user + "\n\nYour previous answer was not valid JSON:\n" + text[:3000] + "\n\nReturn the same report as strict JSON (double quotes, no comments, no prose), nothing else."
+        text, model = agent.complete(open(RULES).read(), again, max_tokens=32000)
+        report = parse(text)
+    if report is None:
+        sys.exit("the model did not return a JSON report:\n" + text[:500])
     if report.get("verdict") not in ("ok", "warn", "block"):
         sys.exit("the report has no verdict:\n" + text[:500])
     report["model"] = model

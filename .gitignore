@@ -5,3 +5,5 @@ worker/.wrangler
 worker/dist
 .DS_Store
 .claude/worktrees/
+__pycache__/
+*.pyc
