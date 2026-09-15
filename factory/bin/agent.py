@@ -168,5 +168,10 @@ def claude_code(binary, model, system, user, timeout):
     text = out.get("result") or ""
     if out.get("is_error") or run.returncode != 0:
         raise SystemExit(f"claude-code: {text.strip()[:500] or run.stderr.strip()[:500] or f'exit {run.returncode}'}")
-    used = list((out.get("modelUsage") or {}).keys())
-    return text, (used[0] if used else model)
+    # modelUsage lists every model the run touched — Claude Code keeps a
+    # small one for its own side work — so the answer's author is the one
+    # that wrote the most (the first audit through a subscription came back
+    # signed by the side model, 2026-09-15).
+    usage = out.get("modelUsage") or {}
+    author = max(usage, key=lambda m: (usage[m] or {}).get("outputTokens", 0), default=None)
+    return text, (author or model)

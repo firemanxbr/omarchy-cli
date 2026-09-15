@@ -22,7 +22,7 @@ record = {"args": args, "stdin": user, "cwd": os.getcwd(), "api_key_seen": "ANTH
 open(os.environ["FAKE_RECORD"], "w").write(json.dumps(record))
 mode = os.environ.get("FAKE_MODE", "ok")
 if mode == "ok":
-    print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "result": '{"verdict":"ok","summary":"fine","findings":[]}', "modelUsage": {"claude-sonnet-5": {}}, "total_cost_usd": 0.01}))
+    print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "result": '{"verdict":"ok","summary":"fine","findings":[]}', "modelUsage": {"claude-haiku-4-5-20251001": {"outputTokens": 12}, "claude-sonnet-5": {"outputTokens": 900}}, "total_cost_usd": 0.01}))
 elif mode == "limit":
     print(json.dumps({"type": "result", "subtype": "success", "is_error": True, "result": "You've hit your limit · resets 3pm", "modelUsage": {}}))
     sys.exit(1)
@@ -48,7 +48,7 @@ with tempfile.TemporaryDirectory() as tmp:
     assert a[a.index("--system-prompt") + 1] == "the rules" and a[a.index("--effort") + 1] == "low", a
     assert r["stdin"] == "the PKGBUILD and the log" and r["token"] == "sk-ant-oat01-test" and r["api_key_seen"] is False, r
     assert "omarchy-agent-" in r["cwd"] and not r["cwd"].startswith(ROOT), r["cwd"]  # an empty scratch directory, never the checkout
-    print("ok: flags, stdin, cwd, token in, API key out")
+    print("ok: flags, stdin, cwd, token in, API key out, the author is the model that wrote the answer")
 
     os.environ["FACTORY_MODEL"] = "claude-opus-5"
     agent.complete("s", "u")
