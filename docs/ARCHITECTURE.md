@@ -282,7 +282,11 @@ The client drives pacman rather than replacing it. What it adds:
   ring. Read-only: pacman runs them; `poc/crates/pkg-hooks` parses and
   matches;
 * mirror discovery and release notifications come from the index, not from
-  `pacman -Sy` polling;
+  `pacman -Sy` polling. A ring holds every source's build of a name; the
+  client takes one per name in the pool's `source_order` (the release and
+  graph views carry it — the include's order, what pacman takes from the
+  first section that has the name) and hands pacman the object's own
+  address, `<pool>/<source>/<arch>/<filename>`;
 * **MCP** (`omarchy-cli mcp`): the same answers as tools for an assistant on
   the machine — `status`, `check`, `info`, `search`, `list`, `security` —
   over stdio (JSON-RPC, one message per line), read-only; installing and

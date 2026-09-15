@@ -1,7 +1,7 @@
 import { signingEnabled, detachedSignature } from "../signing";
 import { isRing, json, type Env, type Ring } from "../index";
 import { artifactKey, isRepoArch, REPO_ARCHES, SHORT } from "../r2";
-import { sourceOfRepo } from "../meta";
+import { REPO_ORDER, sourceOfRepo } from "../meta";
 import { releaseManifests, releaseSummary, releaseSources, ringHead, ringMembers, releaseMembers, ensureCheckpoint, CHECKPOINT_EVERY, type ManifestDetail, type ReleaseRow } from "../db";
 
 interface CreateRelease {
@@ -304,6 +304,10 @@ export async function handleGetRelease(ring: string, url: URL, env: Env): Promis
     release,
     ...(await releaseSummary(env, release.id)),
     artifacts: artifacts.results,
+    // A ring holds every source's build of a name; a client that installs
+    // by itself takes the first in this order, as pacman takes the first
+    // repository of the include that has the name.
+    source_order: REPO_ORDER,
     page: { arch, offset: after ? null : offset, after: afterParam ?? null, limit: limit || null, returned: packages.length, total, next: last ? `${last.name}/${last.repo_arch}/${last.source}` : null },
     packages,
   });

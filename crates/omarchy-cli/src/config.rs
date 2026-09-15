@@ -48,11 +48,13 @@ impl Config {
         }
     }
 
-    /// Where pacman fetches a package file: beside the ring databases in the pool.
-    pub fn package_url(&self, filename: &str) -> String {
+    /// Where pacman fetches a package file: in its source's directory of the
+    /// pool, beside that source's ring databases (`<source>/<arch>/<filename>`).
+    pub fn package_url(&self, source: &str, filename: &str) -> String {
         format!(
-            "{}/{}/{}",
+            "{}/{}/{}/{}",
             self.pool.trim_end_matches('/'),
+            source,
             self.arch,
             filename
         )

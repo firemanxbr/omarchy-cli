@@ -45,6 +45,7 @@ pub struct PlannedPackage {
     pub installed: Option<String>,
     pub action: Action,
     pub filename: String,
+    pub sha256: String,
     pub size_download: u64,
 }
 
@@ -96,6 +97,7 @@ pub fn check(candidates: &[PackageManifest], local: &LocalDb, abi: &SystemAbi) -
             installed,
             action,
             filename: m.filename.clone(),
+            sha256: m.sha256.clone(),
             size_download: m.size_download,
         });
     }

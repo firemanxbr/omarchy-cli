@@ -1,6 +1,7 @@
 import { isRing, json, type Env } from "../index";
 import { ringHead, ringMembers } from "../db";
 import { REPO_ARCHES } from "../r2";
+import { REPO_ORDER } from "../meta";
 
 const MAX_NODES = 2000;
 
@@ -17,8 +18,9 @@ export async function handleGraph(url: URL, env: Env): Promise<Response> {
     .map((s) => s.trim())
     .filter(Boolean);
   const ring = url.searchParams.get("ring") ?? env.DEFAULT_RING;
-  // A multi-architecture release holds one row per (name, repo_arch); a client
-  // only resolves within its own architecture.
+  // A multi-architecture release holds one row per (source, name, repo_arch);
+  // a client only resolves within its own architecture, and takes one build
+  // per name in `source_order` — the include's order (meta.ts REPO_ORDER).
   const arch = url.searchParams.get("arch");
   if (targets.length === 0) return json({ error: "targets is required" }, 400);
   if (arch !== null && !(REPO_ARCHES as readonly string[]).includes(arch)) return json({ error: "unknown arch" }, 400);
@@ -48,18 +50,24 @@ export async function handleGraph(url: URL, env: Env): Promise<Response> {
            JOIN package_provides pv ON pv.capability = rq.requirement AND pv.declared = 1
            JOIN sel ON sel.package_id = pv.package_id
        )
-     SELECT p.manifest_json FROM packages p WHERE p.id IN (SELECT package_id FROM closure)
-     ORDER BY p.name LIMIT ?2`,
+     SELECT p.manifest_json, p.source, p.repo_arch FROM packages p WHERE p.id IN (SELECT package_id FROM closure)
+     ORDER BY p.name, p.source LIMIT ?2`,
   )
     .bind(JSON.stringify(targets), MAX_NODES + 1, arch)
-    .all<{ manifest_json: string }>();
+    .all<{ manifest_json: string; source: string; repo_arch: string }>();
 
-  const packages = rows.results.slice(0, MAX_NODES).map((r) => JSON.parse(r.manifest_json));
+  const packages = rows.results.slice(0, MAX_NODES).map((r) => {
+    const m = JSON.parse(r.manifest_json) as { name: string; source?: string; repo_arch?: string };
+    m.source = r.source;
+    m.repo_arch = r.repo_arch;
+    return m;
+  });
   const found = new Set(packages.map((p: { name: string }) => p.name));
   return json({
     ring,
     arch,
     release_id: head.id,
+    source_order: REPO_ORDER,
     packages,
     missing_targets: targets.filter((t) => !found.has(t)),
     truncated: rows.results.length > MAX_NODES,

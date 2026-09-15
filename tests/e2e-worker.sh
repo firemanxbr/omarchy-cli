@@ -135,6 +135,10 @@ grep -q "\"fingerprint\":\"$KEYID\"" <<<"$signing_key" || { echo "pool does not 
 curl -so "$E2E/stable.db" "$OMARCHY_API/pool/packages/x86_64/omarchy-packages-stable.db"
 curl -so "$E2E/stable.db.sig" "$OMARCHY_API/pool/packages/x86_64/omarchy-packages-stable.db.sig"
 gpg --verify "$E2E/stable.db.sig" "$E2E/stable.db" 2>/dev/null || { echo "the pool's database signature does not verify"; exit 1; }
+# The include names the directory the database is in — the source's own — and no other (nothing is moving).
+inc=$(curl -s "$OMARCHY_API/api/v1/pacman.conf?ring=stable&arch=x86_64")
+grep -q '^Server = .*/pool/packages/\$arch$' <<<"$inc" || { echo "the include does not name the source's directory: $inc"; exit 1; }
+! grep -q '^Server = .*/pool/\$arch$' <<<"$inc" || { echo "the include still names the flat directory: $inc"; exit 1; }
 # A client's own signature is not taken over the pool's.
 sup=$(curl -s -X PUT "$OMARCHY_API/api/v1/releases/1/artifacts/db.sig?repo=omarchy-packages-stable&arch=x86_64" -H "Authorization: Bearer $OMARCHY_TOKEN" --data-binary 'not a signature')
 grep -q '"status":"superseded"' <<<"$sup" || { echo "client signature was not superseded: $sup"; exit 1; }
@@ -190,9 +194,7 @@ for f in omarchy-packages-stable.db omarchy-packages-stable.db.sig omarchy-packa
   [[ "$code" == 200 ]] || { echo "unexpected $code for $f"; exit 1; }
 done
 [[ "$(curl -s -H 'Range: bytes=0-3' "$OMARCHY_API/pool/packages/x86_64/zlib-1:1.3.2-3-x86_64.pkg.tar.zst" | od -An -tx1 | tr -d ' \n')" == "28b52ffd" ]] || { echo "range request broken"; exit 1; }
-# The include names that directory.
-inc=$(curl -s "$OMARCHY_API/api/v1/pacman.conf?ring=stable&arch=x86_64")
-grep -q '^Server = .*/packages/\$arch$' <<<"$inc" || { echo "the include does not name the source's directory: $inc"; exit 1; }
+
 # Read bodies fully before grepping: `curl | grep -q` under pipefail fails
 # with exit 23 when grep closes the pipe early.
 stats_body=$(curl -s "$OMARCHY_API/api/v1/stats")

@@ -303,6 +303,10 @@ describe("GET /graph", () => {
     const names = (g.json.packages ?? g.json.manifests ?? []).map((p: any) => p.name).sort();
     // curl → xz (declared) and libz.so → zlib (a declared provides), xz → zlib.
     expect(names).toEqual(["curl", "xz", "zlib"]);
+    // Each node says which source built it, and the view says which source a client takes first.
+    expect(g.json.packages.map((p: any) => `${p.name}/${p.source}/${p.repo_arch}`).sort()).toEqual(["curl/extra/x86_64", "xz/core/x86_64", "zlib/core/x86_64"]);
+    expect(g.json.source_order.slice(0, 3)).toEqual(["asahi", "asahi-alarm", "packages"]);
+    expect((await call("GET", "/releases/stable?fields=summary")).json.source_order).toEqual(g.json.source_order);
     const arm = await call("GET", "/graph?ring=stable&arch=aarch64&targets=xz");
     expect((arm.json.packages ?? arm.json.manifests).map((p: any) => `${p.name}/${p.arch}`).sort()).toEqual(["xz/aarch64", "zlib/aarch64"]);
     expect((await call("GET", "/graph?ring=stable&arch=x86_64")).status).toBe(400);
