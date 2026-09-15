@@ -16,6 +16,7 @@ const CSS = String.raw`
     --amber: #e0af68; --red: #f7768e; --blue: #7aa2f7;
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; } /* a class with its own display (.gate is a grid) must not undo hidden — the Factory's sign-in gate stayed visible after signing in */
   html { color-scheme: dark; }
   body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.6 "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
   a { color: var(--text); }
@@ -157,6 +158,7 @@ const CSS = String.raw`
   .form .checklist { grid-column: 1 / -1; display: grid; gap: 7px; padding: 10px 12px; border: 1px solid var(--line); background: var(--bg-deep); }
   .form .checklist label { flex-direction: row; align-items: flex-start; gap: 9px; text-transform: none; letter-spacing: 0; font-size: 13px; color: var(--muted); line-height: 1.45; } .form .checklist input { margin-top: 3px; flex: none; }
   .form details.form-more { grid-column: 1 / -1; } .form details.form-more summary { cursor: pointer; font-size: 12.5px; color: var(--dim); letter-spacing: .04em; text-transform: uppercase; }
+  .request-panel { max-width: 860px; } .request-panel .form { margin-top: 4px; } .request-panel .done { border: 1px solid var(--green); background: var(--panel-2); padding: 14px 16px; font-size: 13.5px; margin-top: 12px; } .request-panel .done b { color: var(--text); }
   .form details.form-more[open] { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 12px 18px; } .form details.form-more[open] summary { grid-column: 1 / -1; }
   .form input[type="text"], .form input[type="url"], .form select, .searchbar input[type="password"] { background: var(--bg-deep); border: 1px solid var(--line); color: var(--text); padding: 8px 10px; font: inherit; font-size: 13.5px; }
   .form button, .searchbar button, table button { background: var(--panel-2); border: 1px solid var(--line); color: var(--text); padding: 8px 14px; font: inherit; font-size: 13.5px; cursor: pointer; }

@@ -15,7 +15,7 @@ async function get(path: string): Promise<Response> {
   return res;
 }
 
-const PAGES = ["/", "/factory", "/contribute", "/pipeline", "/docs", "/docs/get-started", "/docs/workers", "/docs/how-it-works", "/docs/governance", "/packages", "/package/zlib", "/security", "/status", "/journal", "/review", "/user/someone", "/people", "/api", "/diff"];
+const PAGES = ["/", "/factory", "/contribute", "/pipeline", "/docs", "/docs/get-started", "/docs/workers", "/docs/how-it-works", "/docs/governance", "/packages", "/package/zlib", "/security", "/status", "/journal", "/review", "/request", "/user/someone", "/people", "/api", "/diff"];
 
 describe("dashboard pages", () => {
   it("every page is served with the shared frame and no placeholder left behind", async () => {
@@ -35,8 +35,13 @@ describe("dashboard pages", () => {
     expect(await (await get("/")).text()).toContain("tested before they reach you");
     const factory = await (await get("/factory")).text();
     expect(factory).toContain("Sign in with GitHub");
-    expect(factory).toContain('id="pkg-form"');
-    expect(await (await get("/contribute")).text()).toContain('id="pkg-form"');
+    expect(factory).toContain('href="/request"');
+    expect(await (await get("/contribute")).text()).toContain('href="/request"');
+    // The request has a page of its own: the form, the checklist, nothing else — and no link to it in the header or the footer.
+    const request = await (await get("/request")).text();
+    expect(request).toContain('id="pkg-form"');
+    expect(request).toContain('data-check="evidence"');
+    expect(request).not.toMatch(/<(header|footer)[\s\S]*?href="\/request"[\s\S]*?<\/\1>/);
     const pipeline = await (await get("/pipeline")).text();
     expect(pipeline).toContain('data-live="verified-today"');
     expect(pipeline).toContain("sponsor@firemanxbr.org");

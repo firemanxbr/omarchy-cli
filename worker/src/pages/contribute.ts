@@ -44,7 +44,7 @@ const BODY = String.raw`
     <h2>Three steps, two of them yours</h2>
     <p class="sub">Every package takes the same road; you choose where your build runs.</p>
     <div class="ways">
-      <div class="way"><div class="tag"><span>1 · Request</span><span>GitHub sign-in</span></div><h3>Ask for it, on the record</h3><p>The project's URL (a GitHub repository or its release tarball — for a project elsewhere, its home page and the release), a name, one line of description, the licence, and four things you confirm. The pool checks it, writes it once to the record and signs it.</p><div class="go"><a class="btn ghost" href="/auth/github?next=/factory">Request a package</a></div></div>
+      <div class="way"><div class="tag"><span>1 · Request</span><span>GitHub sign-in</span></div><h3>Ask for it, on the record</h3><p>The project's URL (a GitHub repository or its release tarball — for a project elsewhere, its home page and the release), a name, one line of description, the licence, and four things you confirm. The pool checks it, writes it once to the record and signs it.</p><div class="go"><a class="btn ghost" href="/request">Request a package</a></div></div>
       <div class="way"><div class="tag"><span>2 · Build</span><span>evidence</span></div><h3>Build it — here or at home</h3><p>Press <b>Build</b>: a worker the project shares, with the project's agent, writes the PKGBUILD and builds it. Queue too long, or an agent of your own you prefer? Run the signed image on your machine: it builds only your packages. Either way the result is evidence, never a package users get.</p><div class="go"><a class="btn ghost" href="/docs/workers">Run a worker of my own →</a></div></div>
       <div class="way"><div class="tag"><span>3 · Review</span><span>a maintainer</span></div><h3>The project makes its own</h3><p>A maintainer reads your evidence and has the project's agent, on a worker the project trusts, write and build the package again with everything it learned — then approves what users get, or rejects with a note you see here.</p><div class="go"><a class="btn ghost" href="/docs/governance">The rules →</a></div></div>
     </div>
@@ -69,25 +69,7 @@ const BODY = String.raw`
     <div class="private-head" id="workspace"><span class="lock">private</span><h2>Your workspace</h2><span class="muted" id="ws-who"></span><span class="right"><a class="more-link" href="/pipeline#throughput">Where your builds sit in the queue →</a><a class="more-link" id="ws-profile" href="/factory">Your public profile →</a></span></div>
     <div class="tiles" id="ws-tiles"></div>
     <div class="two">
-      <div class="panel"><h3>Your packages <button type="button" id="reg-toggle">+ request one</button></h3>
-        <form id="pkg-form" class="form" onsubmit="return false" hidden>
-          <label>Project URL <input type="url" id="pkg-url" placeholder="https://github.com/owner/project — or …/archive/refs/tags/v1.2.3.tar.gz" required></label>
-          <label>Package name <input type="text" id="pkg-name" placeholder="(the repository's name)" pattern="[a-z0-9@._+-]+"></label>
-          <label>Description <input type="text" id="pkg-desc" placeholder="one line, what pacman shows" minlength="8" maxlength="120" required></label>
-          <label>Licence (SPDX) <input type="text" id="pkg-license" placeholder="MIT · GPL-3.0-or-later · Apache-2.0" list="spdx" required><datalist id="spdx"><option>MIT</option><option>Apache-2.0</option><option>GPL-2.0-only</option><option>GPL-2.0-or-later</option><option>GPL-3.0-only</option><option>GPL-3.0-or-later</option><option>LGPL-2.1-or-later</option><option>LGPL-3.0-or-later</option><option>AGPL-3.0-or-later</option><option>BSD-2-Clause</option><option>BSD-3-Clause</option><option>MPL-2.0</option><option>ISC</option><option>Unlicense</option><option>0BSD</option><option>Zlib</option><option>EUPL-1.2</option><option>custom:proprietary</option></datalist></label>
-          <label>Architectures <span class="choice"><label><input type="checkbox" id="pkg-x86" checked> x86_64</label> <label><input type="checkbox" id="pkg-arm" checked> aarch64</label></span></label>
-          <details class="form-more"><summary>Not on GitHub? The release itself</summary>
-            <label>Source URL <input type="url" id="pkg-source" placeholder="https://…/project-1.2.3.tar.gz (or the vendor's release artifact)"></label>
-            <label>Version <input type="text" id="pkg-version" placeholder="1.2.3"></label>
-          </details>
-          <div class="checklist" id="pkg-checklist">
-            <label><input type="checkbox" data-check="official"> The URL is the project's own repository or its official release — not a fork, not a mirror.</label>
-            <label><input type="checkbox" data-check="license"> The licence is the one the project declares (an SPDX identifier).</label>
-            <label><input type="checkbox" data-check="unshipped"> No upstream the pool mirrors ships this package already, and nobody else requested it.</label>
-            <label><input type="checkbox" data-check="evidence"> My build is evidence a maintainer learns from, never what users get; the pool may reject or block it.</label>
-          </div>
-          <button type="submit" id="pkg-btn">Request</button>
-        </form>
+      <div class="panel"><h3>Your packages <a href="/request">+ request one →</a></h3>
         <p class="sub" id="pkg-state"></p>
         <div class="table-wrap" style="border:0"><table id="my-packages"><thead><tr><th>Package</th><th>Project</th><th>Arches</th><th>Version · licence</th><th>Stage</th><th>Detail</th><th></th></tr></thead><tbody></tbody></table></div>
       </div>
@@ -176,23 +158,6 @@ __CHARTS__
       endSkeleton();
     }).catch(function (e) { $("#signin-state").textContent = "could not load your data: " + e; endSkeleton(); });
   }
-  $("#pkg-form").onsubmit = function () {
-    var arches = []; if ($("#pkg-x86").checked) arches.push("x86_64"); if ($("#pkg-arm").checked) arches.push("aarch64");
-    var checklist = {}; $("#pkg-checklist").querySelectorAll("input[data-check]").forEach(function (i) { checklist[i.getAttribute("data-check")] = i.checked; });
-    var body = { url: $("#pkg-url").value.trim(), description: $("#pkg-desc").value.trim(), license: $("#pkg-license").value.trim(), arches: arches, checklist: checklist };
-    if ($("#pkg-name").value.trim()) body.name = $("#pkg-name").value.trim();
-    if ($("#pkg-source").value.trim()) body.source = $("#pkg-source").value.trim();
-    if ($("#pkg-version").value.trim()) body.version = $("#pkg-version").value.trim();
-    $("#pkg-btn").disabled = true; $("#pkg-state").textContent = "Checking the pool, the project and the source…";
-    call("POST", "/packages", body).then(function (d) {
-      $("#pkg-btn").disabled = false;
-      if (d.error) { $("#pkg-state").textContent = d.error; return; }
-      var det = {}; try { det = JSON.parse(d.package.detected || "{}"); } catch (e) {}
-      $("#pkg-state").innerHTML = '<b>' + esc(d.package.name) + '</b> ' + esc(d.package.release || "") + ' requested — <a href="' + esc(d.request.record) + '">record #' + d.request.id + '</a>' + (det.build_system ? ' · ' + esc(det.build_system) : '') + '. Press <b>Build</b> when you are ready.' + (d.skipped && d.skipped.length ? ' — ' + esc(d.skipped.map(function (s) { return s.arch + " skipped (" + s.source + " ships it)"; }).join(", ")) : '') + '. Press <b>Build</b> below, then run your worker.';
-      $("#pkg-form").reset(); refresh();
-    }).catch(function (e) { $("#pkg-btn").disabled = false; $("#pkg-state").textContent = "failed: " + e; });
-    return false;
-  };
   $("#worker-form").onsubmit = function () {
     var body = { name: $("#w-name").value.trim(), arch: $("#w-arch").value };
     $("#w-btn").disabled = true;
@@ -223,7 +188,6 @@ __CHARTS__
     call("POST", "/token", {}).then(function (d) { $("#cli-token").disabled = false; if (d.error) { $("#pkg-state").textContent = d.error; return; } $("#cli-token-out").hidden = false; $("#cli-token-out").textContent = "export OMARCHY_CONTRIBUTOR_TOKEN=" + d.token + "\n# " + d.note; })
       .catch(function (e) { $("#cli-token").disabled = false; $("#pkg-state").textContent = "failed: " + e; });
   };
-  $("#reg-toggle").onclick = function () { $("#pkg-form").hidden = !$("#pkg-form").hidden; };
   $("#w-toggle").onclick = function () { $("#worker-form").hidden = !$("#worker-form").hidden; };
   if (token && login) showSigned();
   else whoami(function (me) { if (me) { login = me.login; role = me.role; areas = me.areas || []; showSigned(); } });
