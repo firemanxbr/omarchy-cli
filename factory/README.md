@@ -123,12 +123,15 @@ curl -s -X POST $API/factory/workers -H "authorization: Bearer $OMC" -H 'content
 curl -s -X POST $API/factory/packages/project/build -H "authorization: Bearer $OMC"
 
 # 5. Run the worker: the project's signed image, one fresh container per task.
+#    GITHUB_TOKEN: the worker reads GitHub's API for every package (the release, the files) — without one,
+#    60 requests an hour from your address; a fine-grained token with no permissions is enough.
 #    the agent key (ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY or XAI_API_KEY) is *yours*, on your machine: the pool never holds one.
 #    WORKER_SHARED=1 donates the worker to other contributors' packages too.
-WORKER_ID=you-laptop-ab12 OMARCHY_WORKER_TOKEN=omw_… ANTHROPIC_API_KEY=sk-… \
-  podman compose -f factory/image/compose.yml up -d        # or docker compose
-#    or, one task by hand:
-podman run -d --name omarchy-worker --restart unless-stopped -e OMARCHY_WORKER_TOKEN=omw_… ghcr.io/firemanxbr/omarchy-worker:latest
+OMARCHY_WORKER_TOKEN=omw_… GITHUB_TOKEN="$(gh auth token)" ANTHROPIC_API_KEY=sk-… \
+  podman compose -f factory/image/compose.yml up -d        # or docker compose; a stop waits for the build (3 h)
+#    or, one task by hand (--stop-timeout: a stop lets the build finish instead of killing it):
+podman run -d --name omarchy-worker --restart unless-stopped --stop-timeout 10800 \
+  -e OMARCHY_WORKER_TOKEN=omw_… -e GITHUB_TOKEN="$(gh auth token)" ghcr.io/firemanxbr/omarchy-worker:latest
 
 # 6. Follow it.
 curl -s $API/factory/me -H "authorization: Bearer $OMC"       # your packages, workers, tasks, staging quota
@@ -149,6 +152,19 @@ project worker rebuilds the same PKGBUILD and publishes it into `edge` as
 source `factory`, signed by the pool; your build was the evidence, the
 project's build is the product. A rejection comes with a note you see on your Contribute
 page.
+
+What a build can and cannot do, learned from the first contributor's day
+(2026-09-15): a failed build is **not retried** — the next fresh container
+would fail the same way — so fix the PKGBUILD and press *Build* again (the
+pool retries only what the infrastructure broke: a download, a mirror, a
+container killed under the build). A dependency that is itself a factory
+package (pinta needs dotnet) is available to your build only once *that*
+package was approved and published into `edge`; until then pacman says
+*target not found*. A project with no release or tag is not built — the
+factory packages releases (a `-git` package has nothing to pin). A split
+PKGBUILD (`pkgname=(a b c)`) builds; only the base's `depends`,
+`makedepends` and `checkdepends` are installed, as `makepkg --syncdeps`
+would.
 
 Limits: 10 tasks queued or building and 2 GB of staging per contributor;
 staging objects expire after 30 days. A worker token is revocable

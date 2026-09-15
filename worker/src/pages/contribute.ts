@@ -190,10 +190,11 @@ __CHARTS__
       if (d.error) { $("#pkg-state").textContent = d.error; return; }
       $("#w-new").hidden = false;
       $("#w-cmd").textContent =
-        "# keep it running: one task per container, the restart brings the next (docker works the same)\n" +
-        "podman run -d --name omarchy-worker --restart unless-stopped -e OMARCHY_WORKER_TOKEN=" + d.token + " \\\n  ghcr.io/firemanxbr/omarchy-worker:latest\n\n" +
+        "# keep it running: one task per container, the restart brings the next (docker works the same);\n" +
+        "# --stop-timeout lets a stop wait for the build; GITHUB_TOKEN (a fine-grained token with no permissions) lifts GitHub's 60 requests an hour\n" +
+        "podman run -d --name omarchy-worker --restart unless-stopped --stop-timeout 10800 \\\n  -e OMARCHY_WORKER_TOKEN=" + d.token + " -e GITHUB_TOKEN=\"$(gh auth token)\" \\\n  ghcr.io/firemanxbr/omarchy-worker:latest\n\n" +
         "# or with compose (" + REPO + "/blob/main/factory/image/compose.yml)\n" +
-        "OMARCHY_WORKER_TOKEN=" + d.token + " podman compose -f compose.yml up -d\n\n" +
+        "OMARCHY_WORKER_TOKEN=" + d.token + " GITHUB_TOKEN=\"$(gh auth token)\" podman compose -f compose.yml up -d\n\n" +
         "# add -e WORKER_SHARED=1 to build anyone's packages; -e ANTHROPIC_API_KEY=… (or OPENAI_API_KEY, GEMINI_API_KEY, XAI_API_KEY: your key) for agent-drafted PKGBUILDs";
       $("#worker-form").reset(); refresh();
     }).catch(function (e) { $("#w-btn").disabled = false; $("#pkg-state").textContent = "failed: " + e; });

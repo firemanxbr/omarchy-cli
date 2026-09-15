@@ -12,7 +12,7 @@ import { issueJobToken, scopesFor, type JobClaims } from "../jobtoken";
  *   POST /factory/claim                 {arch, hostname?, labels?, version?, kinds?, agent?} → a task with a lease and its job token, or 204
  *   POST /factory/tasks/:id/heartbeat                                  extend the lease (a fresh job token)
  *   POST /factory/tasks/:id/complete    {sha256, filename, version, duration_ms?, log_tail?} · {result, summary} for jobs
- *   POST /factory/tasks/:id/fail        {error, duration_ms?, log_tail?}   → requeued, or failed after max_attempts
+ *   POST /factory/tasks/:id/fail        {error, duration_ms?, log_tail?, final?}   → requeued, or failed after max_attempts (at once when final: the recipe's fault, not the worker's)
  * The worker is its registered token (POST /factory/workers); a task's
  * writes use the job token the claim issued.
  *
@@ -430,11 +430,17 @@ export async function handleComplete(id: number, request: Request, env: Env, act
 }
 
 export async function handleFail(id: number, request: Request, env: Env, actor: Actor): Promise<Response> {
-  const b = (await request.json()) as { error?: string; duration_ms?: number; log_tail?: string };
+  const b = (await request.json()) as { error?: string; duration_ms?: number; log_tail?: string; final?: boolean };
   const task = await owned(env, id, actor);
   if (task instanceof Response) return task;
   const who = workerName(actor);
-  const exhausted = task.attempts >= task.max_attempts;
+  // Retries are for the infrastructure (a download, a mirror, a container
+  // killed), not for the recipe: a PKGBUILD that failed to build fails the
+  // same way three times, each in a fresh container — the first
+  // contributor's day, 2026-09-15, was 84 failed attempts for 28 tasks. The
+  // worker says which is which (`final`); the contributor fixes and queues
+  // a new build.
+  const exhausted = b.final === true || task.attempts >= task.max_attempts;
   // A requeued task goes behind its peers (priority + 10) so one broken
   // PKGBUILD does not hold the queue.
   await env.DB.prepare(
@@ -446,7 +452,7 @@ export async function handleFail(id: number, request: Request, env: Env, actor: 
   if (task.trust === "community" && exhausted) {
     await env.DB.prepare("UPDATE factory_packages SET status = 'registered', detail = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE name = ?").bind(`build failed on ${who}: ${(b.error ?? "").slice(0, 160)}`, task.name).run();
   }
-  await event(env, "build", exhausted ? "error" : "warn", `${task.name} for ${task.arch} failed on ${who} (attempt ${task.attempts}/${task.max_attempts})${exhausted ? " — giving up" : " — back in the queue"}: ${(b.error ?? "").slice(0, 120)}`, { task: id, arch: task.arch, worker: who, attempts: task.attempts, exhausted });
+  await event(env, "build", exhausted ? "error" : "warn", `${task.name} for ${task.arch} failed on ${who} (attempt ${task.attempts}/${task.max_attempts})${b.final ? " — the recipe's, not retried" : exhausted ? " — giving up" : " — back in the queue"}: ${(b.error ?? "").slice(0, 120)}`, { task: id, arch: task.arch, worker: who, attempts: task.attempts, exhausted, final: b.final === true });
   return json({ task: id, status: exhausted ? "failed" : "queued", attempts: task.attempts });
 }
 

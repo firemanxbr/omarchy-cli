@@ -208,3 +208,27 @@ describe("a community build, its audit and the review", () => {
     expect(seal.upstream).toBeUndefined();
   });
 });
+
+describe("a recipe's failure", () => {
+  it("fails at once when the worker says it is final, and the package says why; the infrastructure's is retried", async () => {
+    await env.DB.batch([
+      env.DB.prepare(`INSERT INTO factory_packages (name, owner, url, "group", arches, status) VALUES ('broken', 'alice', 'https://github.com/alice/broken', 'community', '["aarch64"]', 'waiting')`),
+      env.DB.prepare(`INSERT INTO build_tasks (name, "group", arch, version, pkgbuild_ref, reason, priority, publish, trust, owner, kind) VALUES ('broken', 'community', 'aarch64', '1.0-1', 'https://github.com/alice/broken@HEAD:PKGBUILD', 'contributor', 100, 0, 'community', 'alice', 'build')`),
+    ]);
+    // A download that broke: back in the queue, as before.
+    let c = await call("POST", "/factory/claim", { arch: "aarch64" }, "omw_w3");
+    expect(c.status).toBe(200);
+    const id = c.json.task.id;
+    const transient = await call("POST", `/factory/tasks/${id}/fail`, { error: "exit 4: curl: (28) Connection timed out", final: false }, c.json.token);
+    expect(transient.json).toMatchObject({ status: "queued", attempts: 1 });
+    expect((await env.DB.prepare("SELECT status FROM factory_packages WHERE name = 'broken'").first<{ status: string }>())!.status).toBe("building");
+    // The recipe's: failed now, two attempts unspent, the package back to registered with the reason.
+    c = await call("POST", "/factory/claim", { arch: "aarch64" }, "omw_w3");
+    expect(c.json.task.id).toBe(id);
+    const final = await call("POST", `/factory/tasks/${id}/fail`, { error: "exit 4: error: target not found: ghostty", final: true }, c.json.token);
+    expect(final.json).toMatchObject({ status: "failed", attempts: 2 });
+    expect((await call("POST", "/factory/claim", { arch: "aarch64" }, "omw_w3")).status).toBe(204);
+    const pkg = await env.DB.prepare("SELECT status, detail FROM factory_packages WHERE name = 'broken'").first<{ status: string; detail: string }>();
+    expect(pkg).toMatchObject({ status: "registered", detail: "build failed on w3: exit 4: error: target not found: ghostty" });
+  });
+});
