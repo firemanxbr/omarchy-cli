@@ -565,7 +565,8 @@ fn render_both(
 #[derive(Default)]
 struct Pending {
     add: Vec<String>,
-    remove: Vec<String>,
+    /// `(source, name)`: each source drops from its own rows only.
+    remove: Vec<(String, String)>,
     notes: Vec<String>,
 }
 
@@ -661,7 +662,7 @@ fn sync_job(opts: &WorkOptions, job: &Api, task: &Task) -> Result<Outcome> {
         let created = job.create_release(&ReleaseRequest {
             ring,
             add: &p.add,
-            remove: &p.remove,
+            remove_from: &p.remove,
             remove_arch: Some(&arch),
             note: Some(&note),
             ..ReleaseRequest::default()

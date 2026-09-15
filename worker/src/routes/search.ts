@@ -1,6 +1,7 @@
 import { isRing, json, RINGS, type Env, type Ring } from "../index";
 import { isRepoArch } from "../r2";
 import { ringHead, ringMembers } from "../db";
+import { sourceRank } from "../meta";
 import { maintenanceOf } from "./users";
 import { sealOf } from "./seal";
 import { provenanceOf } from "../provenance";
@@ -71,26 +72,34 @@ export async function handlePackage(name: string, url: URL, env: Env): Promise<R
   const s = scope(url, env);
   if (s instanceof Response) return s;
 
-  // Where the package is in every ring (for this architecture); the page
-  // shows the requested ring's object, or the first ring that has it.
+  // Where the package is in every ring (for this architecture): one row
+  // per source that builds it, in the order of the include — the first is
+  // what pacman takes. The page shows the requested ring's object (the
+  // requested source's with `source=`, else the winning one), or the first
+  // ring that has it.
+  const wantSource = url.searchParams.get("source");
   const heads = await Promise.all(RINGS.map(async (ring) => ({ ring, head: await ringHead(env, ring) })));
   const inRings: { ring: string; release_id: number; release_seq: number; version: string; sha256: string; size_download: number; source: string; filename: string; created_at: string }[] = [];
   const rowsByRing = new Map<string, PackageRow>();
   for (const { ring, head } of heads) {
     if (!head) continue;
-    const row = await env.DB.prepare(
+    const rows = await env.DB.prepare(
       `SELECT p.id, p.name, p.version, p.arch, p.repo_arch, p.source, p.filename, p.sha256, p.size_download, p.size_installed, p.has_signature, p.created_at
          FROM ${ringMembers(ring)} rp JOIN packages p ON p.id = rp.package_id
         WHERE p.name = ?1 AND p.repo_arch = ?2`,
     )
       .bind(name, s.arch)
-      .first<PackageRow>();
-    if (!row) continue;
-    rowsByRing.set(ring, row);
-    inRings.push({ ring, release_id: head.id, release_seq: head.seq, version: row.version, sha256: row.sha256, size_download: row.size_download, source: row.source, filename: row.filename, created_at: row.created_at });
+      .all<PackageRow>();
+    const ordered = rows.results.sort((a, b) => sourceRank(a.source) - sourceRank(b.source) || a.source.localeCompare(b.source));
+    if (!ordered.length) continue;
+    rowsByRing.set(ring, ordered.find((r) => r.source === wantSource) ?? ordered[0]);
+    for (const row of ordered) {
+      inRings.push({ ring, release_id: head.id, release_seq: head.seq, version: row.version, sha256: row.sha256, size_download: row.size_download, source: row.source, filename: row.filename, created_at: row.created_at });
+    }
   }
-  const pick = inRings.find((r) => r.ring === s.ring) ?? inRings[0];
-  const chosen = pick ? rowsByRing.get(pick.ring) : undefined;
+  const shownRing = rowsByRing.has(s.ring) ? s.ring : inRings[0]?.ring;
+  const chosen = shownRing ? rowsByRing.get(shownRing) : undefined;
+  const pick = chosen ? inRings.find((r) => r.ring === shownRing && r.sha256 === chosen.sha256) : undefined;
   if (!pick || !chosen) return json({ error: `${name} is not in any ring for ${s.arch}` }, 404);
   const head = heads.find((h) => h.ring === pick.ring)?.head;
   if (!head) return json({ error: "ring vanished" }, 500);

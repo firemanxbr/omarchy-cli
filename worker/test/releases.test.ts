@@ -265,8 +265,8 @@ describe("GET /releases/:ring", () => {
     expect(page3.json.page.returned).toBe(1);
     expect([...page1.json.packages, ...page2.json.packages, ...page3.json.packages].map((p: any) => `${p.name}/${p.arch}`)).toEqual(names);
     expect(page1.json.packages[0].manifest ?? page1.json.packages[0]).toBeTruthy();
-    // Keyset paging: page.next names the last row, `after=` continues from it, the last page has no next.
-    expect(page1.json.page.next).toBe(`${page1.json.packages[1].name}/${page1.json.packages[1].repo_arch}`);
+    // Keyset paging: page.next names the last row (its source too: each source's build is a row), `after=` continues from it, the last page has no next.
+    expect(page1.json.page.next).toBe(`${page1.json.packages[1].name}/${page1.json.packages[1].repo_arch}/${page1.json.packages[1].source}`);
     const k2 = await call("GET", `/releases/stable?limit=2&after=${encodeURIComponent(page1.json.page.next)}&release_id=${all.json.release.id}`);
     expect(k2.json.page).toMatchObject({ after: page1.json.page.next, offset: null, returned: 2 });
     const k3 = await call("GET", `/releases/stable?limit=2&after=${encodeURIComponent(k2.json.page.next)}&release_id=${all.json.release.id}`);
@@ -274,6 +274,10 @@ describe("GET /releases/:ring", () => {
     expect(k3.json.page.next).toBeNull();
     expect([...page1.json.packages, ...k2.json.packages, ...k3.json.packages].map((p: any) => `${p.name}/${p.arch}`)).toEqual(names);
     expect((await call("GET", "/releases/stable?limit=2&after=nonsense")).status).toBe(400);
+    expect((await call("GET", "/releases/stable?limit=2&after=/x86_64/core")).status).toBe(400);
+    // A cursor from before the source joined it (a walk started on the previous deployment) continues after the name and arch.
+    const old = await call("GET", `/releases/stable?limit=2&after=${encodeURIComponent(`${page1.json.packages[1].name}/${page1.json.packages[1].repo_arch}`)}&release_id=${all.json.release.id}`);
+    expect(old.json.packages.map((p: any) => `${p.name}/${p.arch}`)).toEqual(k2.json.packages.map((p: any) => `${p.name}/${p.arch}`));
     // The total comes from the release row, per architecture too.
     expect((await call("GET", "/releases/stable?arch=aarch64&fields=summary")).json.page.total).toBe(2);
     // include=files carries the file lists (gzipped, as the client reads them); the default view does not.
@@ -405,5 +409,62 @@ describe("releases as deltas", () => {
     const hist = (await call("GET", "/releases/edge/history")).json.releases as { id: number; seq: number }[];
     expect((await call("GET", `/releases/edge/diff?to=${hist[1].id}`)).status).toBe(200);
     expect((await call("GET", `/releases/edge/diff?from=${hist.find((r) => r.seq === expected - 3)!.id}`)).status).toBe(410);
+  });
+});
+
+describe("one row per source", () => {
+  it("keeps another source's build of a name, replaces only its own, and removes per source", async () => {
+    // Arch Linux ARM's mesa and asahi-alarm's: two builds of one name, both
+    // served (each in its own database; the include's order picks on a Mac).
+    const mesaExtra = await index("extra", "aarch64", { name: "mesa", version: "1:26.2.2-1", arch: "aarch64" }, pool);
+    const mesaAsahi = await index("asahi-alarm", "aarch64", { name: "mesa", version: "26.1.8-1", arch: "aarch64" }, pool);
+    expect((await call("POST", "/releases", { ring: "edge", add: [mesaExtra], remove_arch: "aarch64" }, edge)).status).toBe(201);
+    const second = await call("POST", "/releases", { ring: "edge", add: [mesaAsahi], remove_arch: "aarch64" }, edge);
+    expect(second.status).toBe(201);
+    const rows = async () =>
+      ((await call("GET", "/releases/edge?fields=summary&arch=aarch64")).json.packages as { name: string; version: string; source: string }[])
+        .filter((p) => p.name === "mesa")
+        .map((p) => `${p.source} ${p.version}`)
+        .sort();
+    expect(await rows()).toEqual(["asahi-alarm 26.1.8-1", "extra 1:26.2.2-1"]);
+    // The diff sees a source's add, not a downgrade of the other's.
+    const d = await call("GET", `/releases/edge/diff?to=${second.json.release.id}&arch=aarch64`);
+    expect(d.json.counts).toMatchObject({ added: 1, removed: 0, upgraded: 0 });
+    expect(d.json.added[0]).toMatchObject({ name: "mesa", source: "asahi-alarm" });
+    // A newer build from extra replaces extra's row only.
+    const mesaExtra2 = await index("extra", "aarch64", { name: "mesa", version: "1:26.2.3-1", arch: "aarch64" }, pool);
+    const third = await call("POST", "/releases", { ring: "edge", add: [mesaExtra2], remove_arch: "aarch64" }, edge);
+    expect(third.status).toBe(201);
+    expect(await rows()).toEqual(["asahi-alarm 26.1.8-1", "extra 1:26.2.3-1"]);
+    expect((await call("GET", `/releases/edge/diff?to=${third.json.release.id}&arch=aarch64`)).json.upgraded).toEqual([
+      { name: "mesa", arch: "aarch64", from: "1:26.2.2-1", to: "1:26.2.3-1", source: "extra" },
+    ]);
+    // The package page lists every source's row of the ring, the one pacman would take first; `source=` looks at another.
+    const page = await call("GET", "/package/mesa?ring=edge&arch=aarch64");
+    expect(page.status).toBe(200);
+    expect(page.json.rings.filter((r: any) => r.ring === "edge").map((r: any) => r.source)).toEqual(["asahi-alarm", "extra"]);
+    expect(page.json.package.source).toBe("asahi-alarm");
+    expect((await call("GET", "/package/mesa?ring=edge&arch=aarch64&source=extra")).json.package.version).toBe("1:26.2.3-1");
+    // Keyset paging walks both rows of the name: one per page, nothing skipped at the boundary between them.
+    const all = ((await call("GET", "/releases/edge?fields=summary&arch=aarch64")).json.packages as { name: string; source: string }[]).map((p) => `${p.name}/${p.source}`);
+    const walked: string[] = [];
+    let after: string | null = null;
+    for (;;) {
+      const r = await call("GET", `/releases/edge?fields=summary&arch=aarch64&limit=1${after ? `&after=${encodeURIComponent(after)}` : ""}`);
+      walked.push(...r.json.packages.map((p: any) => `${p.name}/${p.source}`));
+      if (!r.json.page.next) break;
+      after = r.json.page.next;
+    }
+    expect(walked).toEqual(all);
+    expect(all.filter((k) => k.startsWith("mesa/"))).toEqual(["mesa/asahi-alarm", "mesa/extra"]);
+    // A sync's removal is scoped to its source; a maintainer's `remove` drops the name from every source.
+    const r1 = await call("POST", "/releases", { ring: "edge", remove_from: [{ source: "asahi-alarm", name: "mesa" }], remove_arch: "aarch64" }, edge);
+    expect(r1.status).toBe(201);
+    expect(await rows()).toEqual(["extra 1:26.2.3-1"]);
+    expect((await call("POST", "/releases", { ring: "edge", add: [mesaAsahi], remove_arch: "aarch64" }, edge)).status).toBe(201);
+    expect(await rows()).toEqual(["asahi-alarm 26.1.8-1", "extra 1:26.2.3-1"]);
+    const r2 = await call("POST", "/releases", { ring: "edge", remove: ["mesa"], remove_arch: "aarch64" }, edge);
+    expect(r2.status).toBe(201);
+    expect(await rows()).toEqual([]);
   });
 });
