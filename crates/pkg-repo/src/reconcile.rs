@@ -177,9 +177,7 @@ pub fn run(api: &Api, work_dir: &Path, arch: &str) -> Result<Report> {
                 ));
             }
             Err(RepoError::Api { status: 409, body }) => {
-                report
-                    .skipped
-                    .push(format!("{}: {}", m.name, body.trim()));
+                report.skipped.push(format!("{}: {}", m.name, body.trim()));
             }
             Err(e) => return Err(e.into()),
         }
