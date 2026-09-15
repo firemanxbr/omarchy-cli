@@ -141,8 +141,7 @@ reconcile (`enqueue`, hourly); daily slots for promote (06:00 edge→rc,
 09:00 rc→stable), health (08:30) and the Sunday GC — each queued as a
 pulled job (below) when due and never doubled while one is queued or
 running. The metrics snapshot (30 min), the governance sync (10 min), the
-package-request issues (10 min), the update check (05:45) and the cost
-estimate (06:30) it does itself. One thing still starts on GitHub, by
+update check (05:45) and the cost estimate (06:30) it does itself. One thing still starts on GitHub, by
 dispatch: `factory-update.yml` (05:45, pull requests for the project's own
 recipes). Each dispatch is a `dispatch` line in the journal and needs the
 worker secret `GITHUB_TOKEN` (fine-grained, this repository, *Actions: read

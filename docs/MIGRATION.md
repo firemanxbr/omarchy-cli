@@ -232,9 +232,8 @@ from the scheduler. Point a test machine at `stable` with *Get started* and run
 ## F2. The factory
 
 `factory/` (worker script, image, PKGBUILDs, the governance file), the
-`factory-update.yml` workflow, the `worker-image` jobs of `release.yml` and the
-package-request issue form are a **tenant** of this repository, not part of
-the pool: they should move to their own repository once a home exists (the
+`factory-update.yml` workflow and the `worker-image` jobs of `release.yml`
+are a **tenant** of this repository, not part of the pool: they should move to their own repository once a home exists (the
 contract is in [factory/README.md](../factory/README.md), *The contract*).
 Until then, moving the pool moves them too:
 

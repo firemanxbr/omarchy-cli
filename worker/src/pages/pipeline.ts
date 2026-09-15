@@ -89,10 +89,9 @@ const BODY = String.raw`
   </section>
 
   <section>
-    <div class="h2row"><h2>Registry and requests</h2><a class="more-link" href="${REPO_URL}/issues/new?template=package-request.yml">Request a package →</a></div>
-    <p class="sub">Every registered package, and every request — a project URL the factory drafts, dry-runs and opens a pull request for.</p>
-    <div class="table-wrap"><table id="registry"><thead><tr><th>Package</th><th>Project</th><th>Owner</th><th>Arches</th><th>Detected</th><th>Stage</th><th>Detail</th><th>Updated</th></tr></thead><tbody></tbody></table></div>
-    <div class="table-wrap" style="margin-top:12px"><table id="requests"><thead><tr><th>#</th><th>Package</th><th>Project</th><th>Arches</th><th>Stage</th><th>Requested by</th><th>Detail</th><th>Updated</th></tr></thead><tbody></tbody></table></div>
+    <div class="h2row"><h2>Requested packages</h2><a class="more-link" href="/factory">Request one →</a></div>
+    <p class="sub">Every package a contributor asked for — each request written once to the record and signed by the pool — and where it stands.</p>
+    <div class="table-wrap"><table id="registry"><thead><tr><th>Package</th><th>Project</th><th>Owner</th><th>Arches</th><th>Version · licence</th><th>Stage</th><th>Detail</th><th>Updated</th></tr></thead><tbody></tbody></table></div>
   </section>
 
   <section>
@@ -134,9 +133,10 @@ __CHARTS__
     busy(fetch("/api/v1/factory/packages")).then(function (r) { return r.json(); }).then(function (d) {
       pager("#registry", d.packages || [], function (p) {
         var det = p.detected || {};
-        return '<tr><td><b>' + esc(p.name) + '</b> <span class="src">' + esc(p.group) + '</span></td><td><a href="' + esc(p.url) + '">' + esc(p.url.replace(/^https?:\/\/(www\.)?github\.com\//, "")) + '</a></td><td>' + esc(p.owner) + '</td><td>' + esc((p.arches || []).join(", ")) + '</td>' +
-          '<td>' + esc([det.build_system, det.language, det.license, det.latest_tag].filter(Boolean).join(" · ")) + '</td><td>' + statusPill(p.status) + (p.staged_builds ? ' <span class="muted">' + p.staged_builds + ' staged</span>' : '') + '</td><td>' + esc(p.detail || "") + '</td><td>' + ago(p.updated_at) + '</td></tr>';
-      }, { empty: 'no package registered yet — <a href="/factory">be the first</a>', text: function (p) { return [p.name, p.group, p.owner, p.url, p.status].join(" "); } });
+        var home = p.project || p.url;
+        return '<tr><td><b>' + esc(p.name) + '</b>' + (p.request_id ? ' <a class="src" href="' + esc(POOL + "/factory/" + p.name + "/" + p.request_id + "/request.json") + '" title="the request, on the record">#' + p.request_id + '</a>' : '') + '</td><td><a href="' + esc(home) + '">' + esc(home.replace(/^https?:\/\/(www\.)?(github\.com\/)?/, "")) + '</a></td><td>' + esc(p.owner) + '</td><td>' + esc((p.arches || []).join(", ")) + '</td>' +
+          '<td>' + esc([p.release || det.latest_tag, p.license || det.license].filter(Boolean).join(" · ")) + '</td><td>' + statusPill(p.status) + (p.staged_builds ? ' <span class="muted">' + p.staged_builds + ' staged</span>' : '') + '</td><td>' + esc(p.detail || "") + '</td><td>' + ago(p.updated_at) + '</td></tr>';
+      }, { empty: 'no package requested yet — <a href="/factory">be the first</a>', text: function (p) { return [p.name, p.group, p.owner, p.url, p.status].join(" "); } });
     }).catch(function () { $("#registry tbody").innerHTML = ""; });
   }
   function renderTables(d) {
@@ -171,21 +171,13 @@ __CHARTS__
         '<td>' + statusPill(t.status) + (t.trust === "community" ? ' <span class="pill none" title="a contributor\'s build: goes to staging, a maintainer approves">' + esc(t.owner || "community") + '</span>' : '') + (t.publish === 0 && t.trust !== "community" ? ' <span class="pill none" title="built and measured, never published">dry run</span>' : '') + (t.attempts > 1 ? ' <span class="muted">attempt ' + t.attempts + '/' + t.max_attempts + '</span>' : '') + '</td><td>' + esc(t.reason) + '</td>' +
         '<td class="mono">' + esc(t.lease_owner || "") + '</td><td>' + took(t.duration_ms) + '</td><td>' + result + '</td></tr>';
     }, { empty: "nothing queued or built yet", text: function (t) { return [t.id, t.kind, t.name, t.arch, t.status, t.reason, t.lease_owner, t.owner, paramsLabel(t)].join(" "); } });
-    pager("#requests", d.requests, function (r) {
-      var links = (r.pr_url ? ' <a class="run" href="' + esc(r.pr_url) + '">pull request</a>' : '') + (r.issue_url ? ' <a class="run" href="' + esc(r.issue_url) + '">issue</a>' : '');
-      return '<tr><td>' + r.id + '</td><td><b>' + esc(r.name) + '</b> <span class="src">' + esc(r.group) + '</span></td><td>' + (r.url ? '<a href="' + esc(r.url) + '">' + esc(r.url.replace(/^https?:\/\/(www\.)?/, "")) + '</a>' : '<span class="muted">—</span>') + '</td><td>' + esc(JSON.parse(r.arches || "[]").join(", ")) + '</td>' +
-        '<td>' + statusPill(r.status) + (r.approved_by ? ' <span class="muted">by ' + esc(r.approved_by) + '</span>' : '') + links + '</td>' +
-        '<td>' + esc(r.requested_by || "—") + '</td><td>' + esc(r.detail || r.reason || "") + '</td><td>' + ago(r.updated_at || r.created_at) + '</td></tr>';
-    }, { empty: "no requests", text: function (r) { return [r.name, r.group, r.url, r.status, r.requested_by].join(" "); } });
   }
   var API = "/api/v1/factory", REPO = "__REPO_URL__";
   var ME_ROLE = null, ME_LOGIN = null, FACTORY = null, STATS = null, STAGED = [];
   function can() { return ME_ROLE === "maintainer"; }
   function live(key, text) { document.querySelectorAll('[data-live="' + key + '"]').forEach(function (el) { el.textContent = text; }); }
   function roleOf(w) { var r = w.labels && w.labels.role; if (r === "pool" || r === "review" || r === "community") return r; return w.trust === "project" ? "pool" : "community"; }
-  skeletonTiles("#tiles", 6); skeletonRows("#staged", 8, 2); skeletonRows("#events", 7, 6); skeletonRows("#tasks", 8, 4); skeletonRows("#workers", 9, 2); skeletonRows("#cworkers", 9, 2); skeletonRows("#registry", 8, 2); skeletonRows("#requests", 8, 2);
-
-  // ---- the state row: the service (measured now) and the pipeline (from the journal)
+  skeletonTiles("#tiles", 6); skeletonRows("#staged", 8, 2); skeletonRows("#events", 7, 6); skeletonRows("#tasks", 8, 4); skeletonRows("#workers", 9, 2); skeletonRows("#cworkers", 9, 2); skeletonRows("#registry", 8, 2); // ---- the state row: the service (measured now) and the pipeline (from the journal)
   function renderState(d) {
     fetch("/api/v1/status", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (st) { live("api", "API up · index " + (st.index.ok ? st.index.ms + " ms" : "down") + " · pool " + (st.pool.ok ? st.pool.ms + " ms" : "down")); }).catch(function () { live("api", "API not answering"); });
     // A ring's pill is the worse of its two architectures' latest health checks.

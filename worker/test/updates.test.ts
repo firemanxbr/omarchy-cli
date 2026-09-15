@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { pkgverOf } from "../src/updates";
-import { field, parseIssue } from "../src/requests";
+import { pkgbuildFields } from "../src/requests";
+import { parseProjectUrl } from "../src/routes/contributors";
 
 describe("bumps", () => {
   it("turns a release tag into a pkgver", () => {
@@ -11,15 +12,17 @@ describe("bumps", () => {
   });
 });
 
-describe("package request issues", () => {
-  const body = "### Project URL\n\nhttps://github.com/Owner/Tool.git\n\n### Package name (optional)\n\n_No response_\n\n### Group\n\nomarchy\n\n### Notes for the packager (optional)\n\nneeds libfoo\n";
-  it("reads the form fields", () => {
-    expect(field(body, "Group")).toBe("omarchy");
-    expect(field(body, "Package name (optional)")).toBe("");
-    expect(parseIssue(body)).toEqual({ url: "https://github.com/Owner/Tool", name: "tool", group: "omarchy", hint: "needs libfoo" });
+describe("package requests", () => {
+  it("reads the project's home, the tag and the source from the URL a contributor pastes", () => {
+    expect(parseProjectUrl("https://github.com/Owner/Tool.git")).toEqual({ project: "https://github.com/Owner/Tool", github: { owner: "Owner", repo: "Tool" }, tag: null, source: null });
+    expect(parseProjectUrl("https://github.com/kyoheiu/felix/archive/refs/tags/v2.16.1.tar.gz")).toEqual({ project: "https://github.com/kyoheiu/felix", github: { owner: "kyoheiu", repo: "felix" }, tag: "v2.16.1", source: "https://github.com/kyoheiu/felix/archive/refs/tags/v2.16.1.tar.gz" });
+    expect(parseProjectUrl("https://github.com/eradman/entr/releases/tag/5.8")).toMatchObject({ project: "https://github.com/eradman/entr", tag: "5.8", source: null });
+    expect(parseProjectUrl("https://www.spotify.com/download/linux/")).toEqual({ project: "https://www.spotify.com/download/linux", github: null, tag: null, source: null });
+    expect(parseProjectUrl("https://github.com/only-owner")).toMatchObject({ error: expect.stringContaining("repository") });
+    expect(parseProjectUrl("http://example.org/x")).toMatchObject({ error: "url must be https" });
   });
-  it("refuses what is not a GitHub project", () => {
-    expect(parseIssue("### Project URL\n\nhttps://example.org/x\n")).toEqual({ error: "not a GitHub project URL: https://example.org/x" });
-    expect(parseIssue("nothing")).toMatchObject({ error: expect.stringContaining("not a GitHub project URL") });
+  it("reads url, pkgdesc and license from a staged PKGBUILD (the backfill's source of truth)", () => {
+    expect(pkgbuildFields("pkgname=felix\npkgdesc='tui file manager'\nurl=\"https://github.com/kyoheiu/felix\"\nlicense=('MIT')\n")).toEqual({ url: "https://github.com/kyoheiu/felix", pkgdesc: "tui file manager", license: "MIT" });
+    expect(pkgbuildFields("pkgname=x\n")).toEqual({ url: null, pkgdesc: null, license: null });
   });
 });

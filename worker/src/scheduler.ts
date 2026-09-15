@@ -2,7 +2,7 @@ import type { Env } from "./index";
 import { requeueExpiredLeases, pruneWorkers } from "./routes/factory";
 import { snapshotMetrics } from "./metrics";
 import { syncGovernance } from "./governance";
-import { syncRequests } from "./requests";
+import { backfillRequests } from "./requests";
 import { checkUpdates } from "./updates";
 import { syncProvenance } from "./provenance";
 import { costGuard, dailyCost } from "./cost";
@@ -216,10 +216,11 @@ export async function runScheduler(env: Env, now = new Date()): Promise<string[]
   } catch (e) {
     log.push(`governance: ${String(e)}`);
   }
-  // Package requests: open issues become community build tasks.
+  // The record: registrations made before package requests existed
+  // (2026-09-15) get their request.json written from what the pool knows.
   try {
-    const r = await syncRequests(env);
-    if (!r.endsWith("nothing new")) log.push(r);
+    const r = await backfillRequests(env);
+    if (r) log.push(r);
   } catch (e) {
     log.push(`requests: ${String(e)}`);
   }

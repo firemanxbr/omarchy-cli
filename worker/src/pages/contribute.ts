@@ -16,10 +16,10 @@ const BODY = String.raw`
   <div class="hero">
     <p class="eyebrow">For contributors</p>
     <h1>Package what you love. The factory builds it, a maintainer checks it.</h1>
-    <p class="lede">Register a project, build it on your own worker or on the ones the community shares, and a maintainer learns from <em>your</em> build — the recipe, the log, the metrics — to write the one the project builds. A GitHub account is the only thing asked.</p>
+    <p class="lede">Request a package, build it on the workers the project shares or on one of your own, and a maintainer learns from <em>your</em> build — the recipe, the log, the metrics — to make the one users get. A GitHub account is the only thing asked; every request is on the record, signed by the pool.</p>
     <div class="cta-row" id="signin">
       <a class="btn" id="oauth-link" href="/auth/github?next=/factory">${GITHUB_ICON} Sign in with GitHub</a>
-      <a class="btn ghost" href="#ways">Request a package</a>
+      <a class="btn ghost" href="#ways">How it works</a>
       <span class="hint">No permission needed. A worker of your own is optional.</span>
     </div>
     <details id="token-alt"><summary class="sub" style="cursor:pointer">Without a browser sign-in (scripts, CI): a GitHub token, used once</summary>
@@ -37,16 +37,16 @@ const BODY = String.raw`
   <section>
     <div class="h2row"><h2>How a package gets in</h2><a class="more-link" href="/docs/governance">Governance: contributors and maintainers →</a></div>
     <p class="sub">Nobody knows better than you how your software should be built. The maintainer learns it from you — and writes the recipe the project builds; nothing you built is copied.</p>
-    <figure class="diagram">${factoryDiagram()}<figcaption>Your build is evidence, never what users install: the project builds it again from your PKGBUILD, signs it, and your name goes on the record. The agents draft and audit — their keys stay with whoever runs the worker.</figcaption></figure>
+    <figure class="diagram">${factoryDiagram()}<figcaption>Your build is evidence, never what users install: the project's agent makes the package again on a worker the project trusts, a maintainer approves it, the pool signs it, and your name goes on the record. Every step is written once to the record.</figcaption></figure>
   </section>
 
   <section id="ways">
-    <h2>Three ways to bring one</h2>
-    <p class="sub">Pick the one that matches how much you want to do.</p>
+    <h2>Three steps, two of them yours</h2>
+    <p class="sub">Every package takes the same road; you choose where your build runs.</p>
     <div class="ways">
-      <div class="way"><div class="tag"><span>Request</span><span>no account</span></div><h3>Just ask for it</h3><p>A project URL is enough. The factory drafts the PKGBUILD, builds it as a dry run on both architectures and opens a pull request for a maintainer.</p><div class="go"><a class="btn ghost" href="${REPO_URL}/issues/new?template=package-request.yml">Request a package</a></div></div>
-      <div class="way"><div class="tag"><span>Recipe</span><span>GitHub sign-in</span></div><h3>Bring your PKGBUILD</h3><p>Register the repository and say where the PKGBUILD lives. Shared workers build it; you follow the builds and the review here.</p><div class="go"><a class="btn ghost" href="/auth/github?next=/factory">Register a package</a></div></div>
-      <div class="way"><div class="tag"><span>Worker</span><span>optional</span></div><h3>Bring a worker</h3><p>You never need one — the shared workers build for everyone. Run the signed image anyway and your builds skip the queue; one flag shares it with the community.</p><div class="go"><a class="btn ghost" href="/docs/workers">Write my run command →</a></div></div>
+      <div class="way"><div class="tag"><span>1 · Request</span><span>GitHub sign-in</span></div><h3>Ask for it, on the record</h3><p>The project's URL (a GitHub repository or its release tarball — for a project elsewhere, its home page and the release), a name, one line of description, the licence, and four things you confirm. The pool checks it, writes it once to the record and signs it.</p><div class="go"><a class="btn ghost" href="/auth/github?next=/factory">Request a package</a></div></div>
+      <div class="way"><div class="tag"><span>2 · Build</span><span>evidence</span></div><h3>Build it — here or at home</h3><p>Press <b>Build</b>: a worker the project shares, with the project's agent, writes the PKGBUILD and builds it. Queue too long, or an agent of your own you prefer? Run the signed image on your machine: it builds only your packages. Either way the result is evidence, never a package users get.</p><div class="go"><a class="btn ghost" href="/docs/workers">Run a worker of my own →</a></div></div>
+      <div class="way"><div class="tag"><span>3 · Review</span><span>a maintainer</span></div><h3>The project makes its own</h3><p>A maintainer reads your evidence and has the project's agent, on a worker the project trusts, write and build the package again with everything it learned — then approves what users get, or rejects with a note you see here.</p><div class="go"><a class="btn ghost" href="/docs/governance">The rules →</a></div></div>
     </div>
   </section>
 
@@ -63,24 +63,33 @@ const BODY = String.raw`
     </div>
   </section>
 
-  <div class="gate" id="gate"><div><div class="lock">private area · contributors</div><h3 style="margin-top:6px">Your workspace</h3><p>Sign in with GitHub to register packages, run a worker, follow your builds and get your public profile.</p><ul><li>your packages and their stage</li><li>your workers, live</li><li>every build with its evidence</li><li>a CLI token</li></ul></div><a class="btn" href="/auth/github?next=/factory">${GITHUB_ICON} Sign in with GitHub</a></div>
+  <div class="gate" id="gate"><div><div class="lock">private area · contributors</div><h3 style="margin-top:6px">Your workspace</h3><p>Sign in with GitHub to request packages, run a worker, follow your builds and get your public profile.</p><ul><li>your packages and their stage</li><li>your workers, live</li><li>every build with its evidence</li><li>a CLI token</li></ul></div><a class="btn" href="/auth/github?next=/factory">${GITHUB_ICON} Sign in with GitHub</a></div>
 
   <div id="signed" hidden>
     <div class="private-head" id="workspace"><span class="lock">private</span><h2>Your workspace</h2><span class="muted" id="ws-who"></span><span class="right"><a class="more-link" href="/pipeline#throughput">Where your builds sit in the queue →</a><a class="more-link" id="ws-profile" href="/factory">Your public profile →</a></span></div>
     <div class="tiles" id="ws-tiles"></div>
     <div class="two">
-      <div class="panel"><h3>Your packages <button type="button" id="reg-toggle">+ register one</button></h3>
+      <div class="panel"><h3>Your packages <button type="button" id="reg-toggle">+ request one</button></h3>
         <form id="pkg-form" class="form" onsubmit="return false" hidden>
-          <label>Project URL <input type="url" id="pkg-url" placeholder="https://github.com/you/project" required></label>
-          <label>Package name <input type="text" id="pkg-name" placeholder="(repository name)" pattern="[a-z0-9@._+-]+"></label>
-          <label>Group <select id="pkg-group"><option value="community">community</option></select></label>
+          <label>Project URL <input type="url" id="pkg-url" placeholder="https://github.com/owner/project — or …/archive/refs/tags/v1.2.3.tar.gz" required></label>
+          <label>Package name <input type="text" id="pkg-name" placeholder="(the repository's name)" pattern="[a-z0-9@._+-]+"></label>
+          <label>Description <input type="text" id="pkg-desc" placeholder="one line, what pacman shows" minlength="8" maxlength="120" required></label>
+          <label>Licence (SPDX) <input type="text" id="pkg-license" placeholder="MIT · GPL-3.0-or-later · Apache-2.0" list="spdx" required><datalist id="spdx"><option>MIT</option><option>Apache-2.0</option><option>GPL-2.0-only</option><option>GPL-2.0-or-later</option><option>GPL-3.0-only</option><option>GPL-3.0-or-later</option><option>LGPL-2.1-or-later</option><option>LGPL-3.0-or-later</option><option>AGPL-3.0-or-later</option><option>BSD-2-Clause</option><option>BSD-3-Clause</option><option>MPL-2.0</option><option>ISC</option><option>Unlicense</option><option>0BSD</option><option>Zlib</option><option>EUPL-1.2</option><option>custom:proprietary</option></datalist></label>
           <label>Architectures <span class="choice"><label><input type="checkbox" id="pkg-x86" checked> x86_64</label> <label><input type="checkbox" id="pkg-arm" checked> aarch64</label></span></label>
-          <label>Release tag <input type="text" id="pkg-release" placeholder="(latest)"></label>
-          <label>PKGBUILD in your repo <input type="text" id="pkg-path" placeholder="(none — drafted) e.g. packaging/PKGBUILD"></label>
-          <button type="submit" id="pkg-btn">Register</button>
+          <details class="form-more"><summary>Not on GitHub? The release itself</summary>
+            <label>Source URL <input type="url" id="pkg-source" placeholder="https://…/project-1.2.3.tar.gz (or the vendor's release artifact)"></label>
+            <label>Version <input type="text" id="pkg-version" placeholder="1.2.3"></label>
+          </details>
+          <div class="checklist" id="pkg-checklist">
+            <label><input type="checkbox" data-check="official"> The URL is the project's own repository or its official release — not a fork, not a mirror.</label>
+            <label><input type="checkbox" data-check="license"> The licence is the one the project declares (an SPDX identifier).</label>
+            <label><input type="checkbox" data-check="unshipped"> No upstream the pool mirrors ships this package already, and nobody else requested it.</label>
+            <label><input type="checkbox" data-check="evidence"> My build is evidence a maintainer learns from, never what users get; the pool may reject or block it.</label>
+          </div>
+          <button type="submit" id="pkg-btn">Request</button>
         </form>
         <p class="sub" id="pkg-state"></p>
-        <div class="table-wrap" style="border:0"><table id="my-packages"><thead><tr><th>Package</th><th>Project</th><th>Arches</th><th>Detected</th><th>Stage</th><th>Detail</th><th></th></tr></thead><tbody></tbody></table></div>
+        <div class="table-wrap" style="border:0"><table id="my-packages"><thead><tr><th>Package</th><th>Project</th><th>Arches</th><th>Version · licence</th><th>Stage</th><th>Detail</th><th></th></tr></thead><tbody></tbody></table></div>
       </div>
       <div class="panel"><h3>Your workers <button type="button" id="w-toggle">+ register one</button></h3>
         <p class="sub" style="margin:0 0 10px;font-size:12.5px">Optional: builds happen on the shared workers otherwise. Register one, run the signed image with the token it gives you — shown once — and your builds skip the queue. <code>WORKER_SHARED=1</code> donates it to everyone's. <a href="/docs/workers">Run a worker →</a></p>
@@ -142,10 +151,11 @@ __CHARTS__
       if (d.__status === 401) { $("#signin-state").textContent = "Your contributor token is no longer valid; sign in again."; $("#signin-form").hidden = false; $("#signed").hidden = true; endSkeleton(); return; }
       pager("#my-packages", (d.packages || []), function (p) {
         var det = {}; try { det = JSON.parse(p.detected || "{}"); } catch (e) {}
-        return '<tr><td><b>' + esc(p.name) + '</b> <span class="src">' + esc(p.group) + '</span></td><td><a href="' + esc(p.url) + '">' + esc(p.url.replace(/^https?:\/\/(www\.)?github\.com\//, "")) + '</a></td><td>' + esc(JSON.parse(p.arches || "[]").join(", ")) + '</td>' +
-          '<td>' + esc([det.build_system, det.license, det.latest_tag].filter(Boolean).join(" · ")) + '</td><td>' + statusPill(p.status) + '</td><td>' + esc(p.detail || "") + '</td>' +
+        var home = p.project || p.url;
+        return '<tr><td><b>' + esc(p.name) + '</b>' + (p.request_id ? ' <a class="src" href="' + esc(POOL + "/factory/" + p.name + "/" + p.request_id + "/request.json") + '" title="the request, on the record">#' + p.request_id + '</a>' : '') + '</td><td><a href="' + esc(home) + '">' + esc(home.replace(/^https?:\/\/(www\.)?(github\.com\/)?/, "")) + '</a></td><td>' + esc(JSON.parse(p.arches || "[]").join(", ")) + '</td>' +
+          '<td>' + esc([p.release || det.latest_tag, p.license || det.license, det.build_system].filter(Boolean).join(" · ")) + '</td><td>' + statusPill(p.status) + '</td><td>' + esc(p.detail || "") + '</td>' +
           '<td style="white-space:nowrap"><button type="button" data-build="' + esc(p.name) + '">Build</button> <button type="button" data-remove="' + esc(p.name) + '" title="remove the registration">✕</button></td></tr>';
-      }, { empty: 'no package registered yet' });
+      }, { empty: 'no package requested yet' });
       pager("#my-workers", (d.workers || []), function (w) {
         var alive = w.last_seen && (Date.now() - Date.parse(w.last_seen)) < 600000;
         return '<tr><td class="mono">' + esc(w.id) + (w.revoked_at ? ' <span class="pill none">revoked</span>' : alive ? ' <span class="pill ok">alive</span>' : '') + '</td><td>' + esc(w.arch) + '</td><td>' + esc(w.mode) + (w.packages && w.packages.length ? ' <span class="muted">' + esc(w.packages.join(", ")) + '</span>' : '') + '</td><td>' + agentCell(w) + '</td><td>' + ago(w.last_seen) + '</td>' +
@@ -168,16 +178,17 @@ __CHARTS__
   }
   $("#pkg-form").onsubmit = function () {
     var arches = []; if ($("#pkg-x86").checked) arches.push("x86_64"); if ($("#pkg-arm").checked) arches.push("aarch64");
-    var body = { url: $("#pkg-url").value.trim(), group: $("#pkg-group").value, arches: arches };
+    var checklist = {}; $("#pkg-checklist").querySelectorAll("input[data-check]").forEach(function (i) { checklist[i.getAttribute("data-check")] = i.checked; });
+    var body = { url: $("#pkg-url").value.trim(), description: $("#pkg-desc").value.trim(), license: $("#pkg-license").value.trim(), arches: arches, checklist: checklist };
     if ($("#pkg-name").value.trim()) body.name = $("#pkg-name").value.trim();
-    if ($("#pkg-release").value.trim()) body.release = $("#pkg-release").value.trim();
-    if ($("#pkg-path").value.trim()) body.pkgbuild_path = $("#pkg-path").value.trim();
-    $("#pkg-btn").disabled = true; $("#pkg-state").textContent = "Checking the pool and the repository…";
+    if ($("#pkg-source").value.trim()) body.source = $("#pkg-source").value.trim();
+    if ($("#pkg-version").value.trim()) body.version = $("#pkg-version").value.trim();
+    $("#pkg-btn").disabled = true; $("#pkg-state").textContent = "Checking the pool, the project and the source…";
     call("POST", "/packages", body).then(function (d) {
       $("#pkg-btn").disabled = false;
       if (d.error) { $("#pkg-state").textContent = d.error; return; }
       var det = {}; try { det = JSON.parse(d.package.detected || "{}"); } catch (e) {}
-      $("#pkg-state").innerHTML = '<b>' + esc(d.package.name) + '</b> registered: ' + esc([det.build_system, det.language, det.license, det.latest_tag].filter(Boolean).join(" · ")) + (d.skipped && d.skipped.length ? ' — ' + esc(d.skipped.map(function (s) { return s.arch + " skipped (" + s.source + " ships it)"; }).join(", ")) : '') + '. Press <b>Build</b> below, then run your worker.';
+      $("#pkg-state").innerHTML = '<b>' + esc(d.package.name) + '</b> ' + esc(d.package.release || "") + ' requested — <a href="' + esc(d.request.record) + '">record #' + d.request.id + '</a>' + (det.build_system ? ' · ' + esc(det.build_system) : '') + '. Press <b>Build</b> when you are ready.' + (d.skipped && d.skipped.length ? ' — ' + esc(d.skipped.map(function (s) { return s.arch + " skipped (" + s.source + " ships it)"; }).join(", ")) : '') + '. Press <b>Build</b> below, then run your worker.';
       $("#pkg-form").reset(); refresh();
     }).catch(function (e) { $("#pkg-btn").disabled = false; $("#pkg-state").textContent = "failed: " + e; });
     return false;
@@ -207,10 +218,6 @@ __CHARTS__
     else if (b.hasAttribute("data-remove")) { if (!confirm("Remove the registration of " + b.getAttribute("data-remove") + "?")) return; call("DELETE", "/packages/" + encodeURIComponent(b.getAttribute("data-remove"))).then(function (r) { $("#pkg-state").textContent = r.error || ("removed " + r.deleted); refresh(); }); }
     else if (b.hasAttribute("data-revoke")) { call("DELETE", "/workers/" + encodeURIComponent(b.getAttribute("data-revoke"))).then(refresh); }
   });
-  // The groups a package can register into, from factory/MAINTAINERS.toml.
-  fetch(API + "/groups").then(function (r) { return r.json(); }).then(function (d) {
-    var sel = $("#pkg-group"); sel.innerHTML = (d.groups || []).map(function (g) { return '<option value="' + esc(g.name) + '"' + (g.name === "community" ? " selected" : "") + '>' + esc(g.name) + ' — ' + esc(g.description) + '</option>'; }).join("") || '<option value="community">community</option>';
-  }).catch(function () {});
   $("#cli-token").onclick = function () {
     $("#cli-token").disabled = true;
     call("POST", "/token", {}).then(function (d) { $("#cli-token").disabled = false; if (d.error) { $("#pkg-state").textContent = d.error; return; } $("#cli-token-out").hidden = false; $("#cli-token-out").textContent = "export OMARCHY_CONTRIBUTOR_TOKEN=" + d.token + "\n# " + d.note; })
@@ -238,11 +245,11 @@ __CHARTS__
       var approved = apps.filter(function (a) { return a.decision === "approved"; });
       var waits = staged.map(function (s) { return Date.now() - Date.parse(s.finished_at || s.created_at || 0); }).filter(function (x) { return x > 0; }).sort(function (a, b) { return a - b; });
       setTiles("#tiles", [
-        ["Community packages", num(pkgs.filter(function (p) { return p.status === "approved"; }).length), "approved into the rings, from " + num(Object.keys(pkgs.reduce(function (o, p) { o[p.owner] = 1; return o; }, {})).length) + " contributors"],
+        ["Community packages", num(pkgs.filter(function (p) { return p.status === "approved" || p.status === "published"; }).length), "approved into the rings, from " + num(Object.keys(pkgs.reduce(function (o, p) { o[p.owner] = 1; return o; }, {})).length) + " contributors"],
         ["Waiting for review", num(staged.length), waits.length ? "oldest " + ago(new Date(Date.now() - waits[waits.length - 1]).toISOString()).replace(" ago", "") : "nothing staged right now", staged.length ? "warn" : ""],
         ["Shared workers online", num(shared.length), num(shared.filter(function (w) { return w.side === "community"; }).length) + " community · " + num(shared.filter(function (w) { return w.side === "omarchy"; }).length) + " project — for everyone", shared.length ? "ok" : ""],
         ["Builds this week", num(builds7.length), num(builds7.filter(function (t) { return t.status === "staged"; }).length) + " staged · " + num(builds7.filter(function (t) { return t.status === "done"; }).length) + " published · " + num(builds7.filter(function (t) { return t.status === "failed"; }).length) + " failed"],
-        ["Open requests", num(f.requests.filter(function (r) { return r.status === "requested"; }).length), "a URL each, no account needed"]
+        ["Requested, not built yet", num(pkgs.filter(function (p) { return p.status === "registered"; }).length), "on the record, waiting for a Build"]
       ]);
       document.querySelectorAll('[data-live="shared-online"]').forEach(function (el) { el.textContent = num(shared.length) + " online now"; });
       $("#landed").innerHTML = approved.slice(0, 6).map(function (a) {

@@ -3,15 +3,18 @@ import { groupsOf, roleFor, GOVERNANCE_FILE } from "../governance";
 import { isRepoArch } from "../r2";
 import { providedBy } from "./factory";
 import { cookieOf } from "./auth";
+import { putRecord, recordKey, recordUrl } from "../record";
+import { version } from "../meta";
 
 /**
  * Contributors: anyone with a GitHub identity. No permission needed to
- * register a package or run a worker for it; the project pays for nothing
- * until a maintainer approves a build.
+ * request a package or run a worker for it; the project pays for nothing
+ * until a maintainer starts the project's own build.
  *
  *   POST /factory/register            {github_token}            → {login, token}   the contributor token (shown once)
  *   GET  /factory/me                  (contributor token)       → who am I, my packages, my workers
- *   POST /factory/packages            {name?, url, group?, arches?, release?, pkgbuild_path?}
+ *   POST /factory/packages            {url, name?, description, license, arches?, source?, version?, checklist}
+ *                                     the package request: checked, written once to the record (R2, signed), registered
  *   POST /factory/packages/:name/build {arches?, reason?}       → community tasks (results go to staging)
  *   DELETE /factory/packages/:name
  *   POST /factory/workers             {name, arch, mode: shared|dedicated, packages?, labels?} → {worker, token}
@@ -47,6 +50,8 @@ export interface Contributor {
   avatar_url: string | null;
   role: string;
   areas: string[];
+  /** Set by a maintainer (docs/GOVERNANCE.md): no requests, no builds, workers revoked. */
+  blocked?: { at: string; reason: string | null } | null;
 }
 
 /**
@@ -57,15 +62,20 @@ export interface Contributor {
 export async function contributorOf(request: Request, env: Env): Promise<Contributor | null> {
   const token = bearer(request);
   const session = token ? "" : (cookieOf(request, "omc") ?? "");
-  let row: { login: string; name: string | null; avatar_url: string | null; role: string; areas: string | null } | null = null;
+  let row: { login: string; name: string | null; avatar_url: string | null; role: string; areas: string | null; blocked_at: string | null; blocked_reason: string | null } | null = null;
   if (token.startsWith("omc_")) {
-    row = await env.DB.prepare("SELECT login, name, avatar_url, role, areas FROM contributors WHERE token_hash = ?").bind(await sha256Hex(token)).first();
+    row = await env.DB.prepare("SELECT login, name, avatar_url, role, areas, blocked_at, blocked_reason FROM contributors WHERE token_hash = ?").bind(await sha256Hex(token)).first();
   } else if (session.startsWith("oms_")) {
-    row = await env.DB.prepare("SELECT login, name, avatar_url, role, areas FROM contributors WHERE session_hash = ?").bind(await sha256Hex(session)).first();
+    row = await env.DB.prepare("SELECT login, name, avatar_url, role, areas, blocked_at, blocked_reason FROM contributors WHERE session_hash = ?").bind(await sha256Hex(session)).first();
   }
   if (!row) return null;
   await env.DB.prepare("UPDATE contributors SET last_seen = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE login = ?").bind(row.login).run();
-  return { ...row, areas: row.areas ? JSON.parse(row.areas) : [] };
+  return { login: row.login, name: row.name, avatar_url: row.avatar_url, role: row.role, areas: row.areas ? JSON.parse(row.areas) : [], blocked: row.blocked_at ? { at: row.blocked_at, reason: row.blocked_reason } : null };
+}
+
+/** The answer a blocked contributor gets from every door that changes something. */
+function blockedResponse(c: Contributor): Response | null {
+  return c.blocked ? json({ error: `${c.login} is blocked by a maintainer${c.blocked.reason ? ": " + c.blocked.reason : ""}; nothing can be requested or built until another maintainer lifts it` }, 403) : null;
 }
 
 export interface WorkerIdentity {
@@ -167,37 +177,148 @@ async function detect(url: string, env: Env): Promise<Record<string, unknown>> {
   }
 }
 
-export async function handleRegisterPackage(c: Contributor, request: Request, env: Env): Promise<Response> {
-  const b = (await request.json()) as { name?: string; url?: string; group?: string; arches?: unknown; release?: string; pkgbuild_path?: string };
-  if (!b.url || !GITHUB_URL.test(b.url)) return json({ error: "url must be a GitHub repository (https://github.com/owner/project)" }, 400);
-  const url = b.url.replace(/\.git$/, "").replace(/\/$/, "");
-  const name = (b.name ?? url.split("/").pop() ?? "").toLowerCase();
-  if (!/^[a-z0-9@._+-]+$/.test(name)) return json({ error: "name must be a pacman package name" }, 400);
+/**
+ * The request's URL, in the forms a contributor pastes: a GitHub repository
+ * (the tag is the latest release, found by detect()), a GitHub release
+ * tarball or release page (the tag is in the URL), or — for a project that
+ * is not on GitHub, a vendor's binary release — its home page, with the
+ * source and version given separately. The project's home, normalised, is
+ * what makes a package unique in the pool.
+ */
+export function parseProjectUrl(raw: string): { project: string; github: { owner: string; repo: string } | null; tag: string | null; source: string | null } | { error: string } {
+  const u = raw.trim();
+  if (!/^https:\/\/[^\s]+$/.test(u)) return { error: "url must be https" };
+  let m = u.match(/^https:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)\/archive\/refs\/tags\/([^/\s]+?)\.(?:tar\.gz|zip)$/);
+  if (m) return { project: `https://github.com/${m[1]}/${m[2]}`, github: { owner: m[1], repo: m[2] }, tag: decodeURIComponent(m[3]), source: u };
+  m = u.match(/^https:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)\/releases\/tag\/([^/\s]+)\/?$/);
+  if (m) return { project: `https://github.com/${m[1]}/${m[2]}`, github: { owner: m[1], repo: m[2] }, tag: decodeURIComponent(m[3]), source: null };
+  m = u.match(GITHUB_URL);
+  if (m) return { project: `https://github.com/${m[1]}/${m[2]}`, github: { owner: m[1], repo: m[2] }, tag: null, source: null };
+  if (/^https:\/\/github\.com\//.test(u)) return { error: "a GitHub URL must be the repository, a release page or a release tarball" };
+  try {
+    const p = new URL(u);
+    return { project: `${p.protocol}//${p.host.toLowerCase()}${p.pathname.replace(/\/+$/, "")}`, github: null, tag: null, source: null };
+  } catch {
+    return { error: "url is not a URL" };
+  }
+}
+
+/** SPDX identifier or expression; `custom:` is what Arch writes for the rest. */
+const LICENSE = /^(custom:[A-Za-z0-9._+-]+|[A-Za-z0-9._+-]+(?:\s+(?:OR|AND|WITH)\s+[A-Za-z0-9._+-]+)*)$/;
+/** What the contributor confirms with the request; every item, or no request. */
+export const CHECKLIST: Record<string, string> = {
+  official: "the URL is the project's own repository or its official release — not a fork, not a mirror",
+  license: "the licence is the one the project declares (an SPDX identifier)",
+  unshipped: "no upstream the pool mirrors ships this package already, and nobody else requested it",
+  evidence: "my build is evidence a maintainer learns from, never what users get; the pool may reject or block it",
+};
+
+/** Does the source answer? GitHub tarballs redirect to codeload; a HEAD that lands on 200 is enough. */
+async function sourceAnswers(source: string, fetcher: typeof fetch = fetch): Promise<string | null> {
+  try {
+    const res = await fetcher(source, { method: "HEAD", redirect: "follow", headers: { "user-agent": "omarchy-pool-factory" } });
+    if (res.ok) return null;
+    if (res.status === 405 || res.status === 403) {
+      const get = await fetcher(source, { method: "GET", redirect: "follow", headers: { "user-agent": "omarchy-pool-factory", range: "bytes=0-0" } });
+      return get.ok ? null : `HTTP ${get.status}`;
+    }
+    return `HTTP ${res.status}`;
+  } catch (e) {
+    return String(e instanceof Error ? e.message : e);
+  }
+}
+
+/**
+ * The package request. Everything is checked before anything is written:
+ * the contributor is not blocked, the URL is a project's own, the source of
+ * the version answers, the name and the project are not in the pool
+ * already (a request of your own can be renewed; somebody else's is
+ * theirs), no upstream the pool mirrors ships the name, and the checklist
+ * is complete. Then the record: request.json in the pool bucket, signed,
+ * written once; the registration points at it and the build can start.
+ */
+export async function handleRequestPackage(c: Contributor, request: Request, env: Env, fetcher: typeof fetch = fetch): Promise<Response> {
+  const blocked = blockedResponse(c);
+  if (blocked) return blocked;
+  const b = (await request.json().catch(() => ({}))) as { name?: string; url?: string; source?: string; version?: string; description?: string; license?: string; arches?: unknown; checklist?: Record<string, unknown> };
+  if (!b.url) return json({ error: "url is required: the project's GitHub repository, a release tarball, or the project's home page" }, 400);
+  const parsed = parseProjectUrl(b.url);
+  if ("error" in parsed) return json({ error: parsed.error }, 400);
+  const missing = Object.keys(CHECKLIST).filter((k) => b.checklist?.[k] !== true);
+  if (missing.length) return json({ error: `confirm the checklist: ${missing.map((k) => CHECKLIST[k]).join("; ")}`, checklist: CHECKLIST }, 400);
+  const description = (b.description ?? "").trim().replace(/\s+/g, " ");
+  if (description.length < 8 || description.length > 120) return json({ error: "description: one line, 8 to 120 characters — what pacman shows as pkgdesc" }, 400);
+  const license = (b.license ?? "").trim();
+  if (!LICENSE.test(license)) return json({ error: "license must be an SPDX identifier (MIT, GPL-3.0-or-later, Apache-2.0 …) or custom:<name>" }, 400);
+  const name = (b.name ?? parsed.github?.repo ?? parsed.project.split("/").pop() ?? "").toLowerCase();
+  if (!/^[a-z0-9@._+-]+$/.test(name) || name.length > 100) return json({ error: "name must be a pacman package name (lowercase letters, digits, @ . _ + -)" }, 400);
   const arches = (Array.isArray(b.arches) ? b.arches : ["x86_64", "aarch64"]).filter((a): a is string => typeof a === "string" && isRepoArch(a));
   if (!arches.length) return json({ error: "arches must include x86_64 and/or aarch64" }, 400);
-  const existing = await env.DB.prepare("SELECT owner FROM factory_packages WHERE name = ?").bind(name).first<{ owner: string }>();
-  if (existing && existing.owner !== c.login) return json({ error: `${name} is registered by ${existing.owner}` }, 409);
+
+  // Who has this name, who has this project.
+  const byName = await env.DB.prepare("SELECT owner, status, project FROM factory_packages WHERE name = ?").bind(name).first<{ owner: string; status: string; project: string | null }>();
+  if (byName && byName.owner !== c.login) return json({ error: `${name} is ${byName.status}, requested by ${byName.owner}` }, 409);
+  const byProject = await env.DB.prepare("SELECT name, owner, status FROM factory_packages WHERE project = ? AND name != ?").bind(parsed.project, name).first<{ name: string; owner: string; status: string }>();
+  if (byProject) return json({ error: `${parsed.project} is already in the pool as ${byProject.name} (${byProject.status}, requested by ${byProject.owner})` }, 409);
+  if (byName && !["registered", "rejected", "unmaintained"].includes(byName.status)) return json({ error: `${name} is ${byName.status}; a request can be renewed once it is rejected or unmaintained — press Build to build it again` }, 409);
   const upstream = (await providedBy(env, name)).filter((p) => !["factory", "chaotic"].includes(p.source) && arches.includes(p.arch));
   if (upstream.length === arches.length) {
     return json({ error: `${upstream[0].source} already ships ${name} (${upstream.map((u) => `${u.version} for ${u.arch}`).join(", ")}); install it from the pool`, provided: upstream }, 409);
   }
   const build = arches.filter((a) => !upstream.some((u) => u.arch === a));
-  const detected = await detect(url, env);
-  if (detected.error) return json({ error: String(detected.error) }, 400);
-  // The group decides who reviews: one of factory/MAINTAINERS.toml's.
-  const groups = (await groupsOf(env)).map((g) => g.name);
-  const group = b.group && groups.includes(b.group) ? b.group : groups.includes("community") ? "community" : (groups[0] ?? "community");
-  const row = await env.DB.prepare(
-    `INSERT INTO factory_packages (name, owner, url, "group", arches, release, pkgbuild_path, detected) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT (name) DO UPDATE SET url = excluded.url, "group" = excluded."group", arches = excluded.arches, release = excluded.release,
-       pkgbuild_path = excluded.pkgbuild_path, detected = excluded.detected, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') RETURNING *`,
+
+  // The version and its source: from GitHub when the project is there, from the request otherwise.
+  let detected: Record<string, unknown> = {};
+  let tag = parsed.tag ?? (b.version ?? "").trim() ?? "";
+  let source = parsed.source ?? (b.source ?? "").trim();
+  if (parsed.github) {
+    detected = await detect(parsed.project, env);
+    if (detected.error) return json({ error: String(detected.error) }, 400);
+    if (!tag) tag = String(detected.latest_tag ?? "");
+    if (!tag) return json({ error: `${parsed.project} has no release or tag yet; the factory packages releases` }, 400);
+    if (!source) source = `${parsed.project}/archive/refs/tags/${encodeURIComponent(tag)}.tar.gz`;
+    if (detected.license && String(detected.license) !== "NOASSERTION" && String(detected.license).toLowerCase() !== license.toLowerCase()) {
+      return json({ error: `GitHub says ${parsed.project} is ${String(detected.license)}; the request says ${license} — one of them is wrong`, detected_license: detected.license }, 400);
+    }
+  } else {
+    if (!source || !/^https:\/\/[^\s]+$/.test(source)) return json({ error: "source is required for a project that is not on GitHub: the https URL of the release tarball or artifact" }, 400);
+    if (!tag || !/^[A-Za-z0-9._+~-]{1,64}$/.test(tag)) return json({ error: "version is required for a project that is not on GitHub: the release's version or tag" }, 400);
+  }
+  // Tests run inside workerd without the network (vitest.config.ts): the source is taken as it is.
+  const unanswered = env.SOURCE_CHECK === "off" ? null : await sourceAnswers(source, fetcher);
+  if (unanswered) return json({ error: `the source does not answer: ${source} (${unanswered})` }, 400);
+
+  // The record, written once; then the registration that points at it.
+  const req = await env.DB.prepare(
+    `INSERT INTO package_requests (name, owner, project, source, version, description, license, arches, checklist, detected) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id, created_at`,
   )
-    .bind(name, c.login, url, group, JSON.stringify(build), b.release ?? null, b.pkgbuild_path ?? (detected.has_pkgbuild ? "PKGBUILD" : null), JSON.stringify(detected))
+    .bind(name, c.login, parsed.project, source, tag, description, license, JSON.stringify(build), JSON.stringify(Object.fromEntries(Object.keys(CHECKLIST).map((k) => [k, true]))), JSON.stringify(detected))
+    .first<{ id: number; created_at: string }>();
+  if (!req) return json({ error: "the request could not be recorded" }, 500);
+  const key = recordKey(name, req.id, "request.json");
+  const record = await putRecord(env, key, {
+    schema: "omarchy-pool/package-request/1",
+    request: req.id, name, project: parsed.project, source, version: tag, description, license, arches: build,
+    requested_by: c.login, requested_at: req.created_at,
+    checklist: Object.fromEntries(Object.keys(CHECKLIST).map((k) => [k, { confirmed: true, text: CHECKLIST[k] }])),
+    detected, pool: version(env).version,
+  });
+  await env.DB.prepare("UPDATE package_requests SET record = ?, sha256 = ? WHERE id = ?").bind(record.key, record.sha256, req.id).run();
+  const groups = (await groupsOf(env)).map((g) => g.name);
+  const group = groups.includes("community") ? "community" : (groups[0] ?? "community");
+  const row = await env.DB.prepare(
+    `INSERT INTO factory_packages (name, owner, url, "group", arches, release, pkgbuild_path, detected, request_id, project, source, description, license, status, detail)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'registered', ?)
+     ON CONFLICT (name) DO UPDATE SET url = excluded.url, arches = excluded.arches, release = excluded.release, pkgbuild_path = excluded.pkgbuild_path, detected = excluded.detected,
+       request_id = excluded.request_id, project = excluded.project, source = excluded.source, description = excluded.description, license = excluded.license,
+       status = 'registered', detail = excluded.detail, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') RETURNING *`,
+  )
+    .bind(name, c.login, parsed.project, group, JSON.stringify(build), tag, detected.has_pkgbuild ? "PKGBUILD" : null, JSON.stringify(detected), req.id, parsed.project, source, description, license, `requested ${tag} by ${c.login}; press Build to build it`)
     .first();
   await env.DB.prepare("INSERT INTO events (kind, ring, source, status, summary, payload) VALUES ('request', NULL, 'factory', 'ok', ?, ?)")
-    .bind(`${name} registered by ${c.login} from ${url} (${String(detected.build_system)}, ${build.join(", ")})`, JSON.stringify({ name, owner: c.login, url, arches: build, skipped: upstream }))
+    .bind(`${name} ${tag} requested by ${c.login} from ${parsed.project} (${license}; ${build.join(", ")}) — record ${req.id}`, JSON.stringify({ request: req.id, name, owner: c.login, project: parsed.project, source, version: tag, license, arches: build, skipped: upstream, record: recordUrl(env, record.key) }))
     .run();
-  return json({ package: row, skipped: upstream, next: `POST /api/v1/factory/packages/${name}/build queues it; a worker of yours (or a shared one) builds it into your staging workspace.` }, existing ? 200 : 201);
+  return json({ package: row, request: { id: req.id, record: recordUrl(env, record.key), signature: record.signed ? recordUrl(env, `${record.key}.sig`) : null, sha256: record.sha256 }, skipped: upstream, next: `POST /api/v1/factory/packages/${name}/build queues it; a worker of yours, or one the project shares, builds it into your staging workspace.` }, byName ? 200 : 201);
 }
 
 /** The owner frees the name (unless approved or published); a maintainer of its group frees any, an unmaintained one included. */
@@ -215,9 +336,11 @@ export async function handleDeletePackage(c: Contributor, name: string, env: Env
 
 /** Queue community builds of a registered package: results go to staging, never to the pool. */
 export async function handleBuildPackage(c: Contributor, name: string, request: Request, env: Env): Promise<Response> {
+  const blocked = blockedResponse(c);
+  if (blocked) return blocked;
   const b = (await request.json().catch(() => ({}))) as { arches?: unknown; reason?: string; release?: string };
   const pkg = await env.DB.prepare("SELECT * FROM factory_packages WHERE name = ? AND owner = ?").bind(name, c.login).first<{ name: string; group: string; arches: string; url: string; release: string | null; pkgbuild_path: string | null; detected: string | null }>();
-  if (!pkg) return json({ error: "register the package first (POST /factory/packages)" }, 404);
+  if (!pkg) return json({ error: "request the package first (POST /factory/packages)" }, 404);
   const queued = await env.DB.prepare("SELECT COUNT(*) AS n FROM build_tasks WHERE owner = ? AND status IN ('queued', 'leased')").bind(c.login).first<{ n: number }>();
   if ((queued?.n ?? 0) >= QUEUED_QUOTA) return json({ error: `you have ${queued?.n} tasks queued or building; the limit is ${QUEUED_QUOTA}` }, 429);
   const wanted = (Array.isArray(b.arches) ? b.arches : JSON.parse(pkg.arches)) as string[];

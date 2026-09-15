@@ -84,9 +84,9 @@ curl -s  https://pool.firemanxbr.org/x86_64/omarchy-core-stable.db | tar -tz | h
     <h2>Write (people)</h2>
     <p class="sub">Bearer <code>omc_…</code> (a contributor token from your profile) or the browser session after <em>Sign in with GitHub</em>. Nothing here touches the pool directly: maintainers queue jobs and approve builds; workers do the work with per-job tokens.</p>
     <div class="table-wrap"><table><thead><tr><th>Endpoint</th><th>Who</th><th>What it does</th></tr></thead><tbody>
-      <tr><td><code>POST /factory/packages</code> · <code>/packages/:name/build</code> · <code>DELETE /packages/:name</code></td><td>contributor</td><td>Register a package (the project's URL), ask for a build on your worker, remove the registration.</td></tr>
+      <tr><td><code>POST /factory/packages</code> · <code>/packages/:name/build</code> · <code>DELETE /packages/:name</code></td><td>contributor</td><td>Request a package (the project's URL, a description, the licence, the checklist — written once to the record), ask for a build, remove the request.</td></tr>
       <tr><td><code>POST /factory/workers</code> · <code>DELETE /workers/:id</code></td><td>contributor</td><td>Register a worker (the token is shown once), revoke it.</td></tr>
-      <tr><td><code>POST /factory/tasks/:id/approve</code> · <code>/reject</code></td><td>maintainer of the group</td><td>Approve a staged build (the project rebuilds it) or send it back with a note. Never your own package.</td></tr>
+      <tr><td><code>POST /factory/tasks/:id/approve</code> · <code>/reject</code></td><td>maintainer of the group</td><td>Approve a staged build — the decision on the record — or send it back with a note. Never your own package.</td></tr>
       <tr><td><code>POST /factory/jobs</code></td><td>maintainer</td><td>Queue a pool job by hand (sync, promote, rollback, render, health, security, gc, enqueue) — what <code>pkg-repo job</code> calls.</td></tr>
       <tr><td><code>POST /factory/workers/:id/trust</code></td><td>maintainer</td><td>Promote a registration to project trust, or back.</td></tr>
       <tr><td><code>GET /auth/github</code> · <code>/auth/me</code> · <code>/auth/logout</code></td><td>anyone</td><td>Sign in with GitHub (a session cookie for the dashboard); who is signed in; sign out — the session stops working on the server, the CLI token is untouched.</td></tr>

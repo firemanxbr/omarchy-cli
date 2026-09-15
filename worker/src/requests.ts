@@ -1,95 +1,78 @@
 /**
- * Package requests come in as GitHub issues (the "package-request" form)
- * and leave GitHub right there: the brain reads the open issues — public
- * API, no token — records each new one and queues a community build with a
- * drafted PKGBUILD (`draft:<url>@latest`) for the issue's author. A shared
- * community worker whose owner runs an agent takes it; the result is
- * evidence for a maintainer like any contributor's build. No agent runs on
- * GitHub, no key of the pool's is involved.
+ * The record for what came before it. Until 2026-09-15 a package entered
+ * the pool as a registration (a repository URL, a name) or as a GitHub
+ * issue; since then it enters as a package request, written once to the
+ * pool bucket and signed (record.ts, routes/contributors.ts). The
+ * registrations made before that have no record, so the scheduler writes
+ * one for each — from what the pool already knows: the registration, the
+ * GitHub metadata it detected, and the PKGBUILD the contributor's worker
+ * staged (its url, pkgdesc and license), when there is one. The record
+ * says it was written this way (`migrated`), and it changes nothing else:
+ * the package keeps its state and takes every gate like any other.
  */
 import type { Env } from "./index";
-import { groupsOf } from "./governance";
-import { providedBy, splitByUpstream } from "./routes/factory";
+import { putRecord, recordKey } from "./record";
+import { parseProjectUrl } from "./routes/contributors";
+import { version } from "./meta";
 
-const ISSUES = "https://api.github.com/repos/firemanxbr/omarchy-pool/issues?labels=package-request&state=open&per_page=50";
-
-interface Issue {
-  number: number;
-  html_url: string;
-  body: string | null;
-  user: { login: string; type?: string };
-  pull_request?: unknown;
+interface Registration {
+  name: string;
+  owner: string;
+  url: string;
+  arches: string;
+  release: string | null;
+  detected: string | null;
+  created_at: string;
 }
 
-/** One field of the issue form (`### Label` followed by its value). */
-export function field(body: string, label: string): string {
-  const lines = body.replace(/\r/g, "").split("\n");
-  const at = lines.findIndex((l) => l.trim() === `### ${label}`);
-  if (at < 0) return "";
-  for (const l of lines.slice(at + 1)) {
-    if (l.startsWith("### ")) break;
-    const v = l.trim();
-    if (v && v !== "_No response_") return v;
-  }
-  return "";
+/** `pkgdesc='…'`, `url="…"`, `license=('MIT')` — the three lines a PKGBUILD always has. */
+export function pkgbuildFields(text: string): { url: string | null; pkgdesc: string | null; license: string | null } {
+  const one = (key: string): string | null => {
+    const m = text.match(new RegExp(`^${key}=\\(?\\s*(['"]?)([^'"\\n)]*)\\1`, "m"));
+    return m && m[2].trim() ? m[2].trim() : null;
+  };
+  return { url: one("url"), pkgdesc: one("pkgdesc"), license: one("license") };
 }
 
-/** What an issue asks for, or the reason it cannot be a request. */
-export function parseIssue(body: string): { url: string; name: string; group: string; hint: string } | { error: string } {
-  let url = field(body, "Project URL");
-  const m = url.match(/^https:\/\/github\.com\/([^/\s]+)\/([^/#?\s]+)/);
-  if (!m) return { error: `not a GitHub project URL: ${url || "(empty)"}` };
-  url = `https://github.com/${m[1]}/${m[2].replace(/\.git$/, "")}`;
-  let name = field(body, "Package name (optional)").toLowerCase();
-  if (!name) name = m[2].replace(/\.git$/, "").toLowerCase();
-  if (!/^[a-z0-9@._+-]+$/.test(name)) return { error: `not a pacman package name: ${name}` };
-  return { url, name, group: field(body, "Group"), hint: field(body, "Notes for the packager (optional)") };
-}
-
-export async function syncRequests(env: Env, fetcher: typeof fetch = fetch): Promise<string> {
-  const res = await fetcher(ISSUES, { headers: { accept: "application/vnd.github+json", "user-agent": "omarchy-pool" }, cf: { cacheTtl: 300 } } as RequestInit);
-  if (res.status === 403 || res.status === 429) return "requests: GitHub rate limit; next tick";
-  if (!res.ok) throw new Error(`issues: HTTP ${res.status}`);
-  const issues = ((await res.json()) as Issue[]).filter((i) => !i.pull_request && i.user?.type !== "Bot");
-  const groups = (await groupsOf(env)).map((g) => g.name);
-  const log: string[] = [];
-  for (const issue of issues) {
-    const known = await env.DB.prepare("SELECT id, status FROM build_requests WHERE issue_url = ?").bind(issue.html_url).first<{ id: number; status: string }>();
-    if (known) continue;
-    const parsed = parseIssue(issue.body ?? "");
-    if ("error" in parsed) {
-      await env.DB.prepare("INSERT INTO build_requests (name, \"group\", arches, requested_by, reason, status, issue_url, detail) VALUES (?, 'community', '[]', ?, ?, 'rejected', ?, ?) ON CONFLICT (name) DO NOTHING")
-        .bind(`issue-${issue.number}`, issue.user.login, `issue #${issue.number}`, issue.html_url, parsed.error)
-        .run();
-      log.push(`#${issue.number}: ${parsed.error}`);
-      continue;
+export async function backfillRequests(env: Env): Promise<string> {
+  const rows = await env.DB.prepare("SELECT name, owner, url, arches, release, detected, created_at FROM factory_packages WHERE request_id IS NULL ORDER BY created_at LIMIT 10").all<Registration>();
+  if (!rows.results.length) return "";
+  const done: string[] = [];
+  for (const r of rows.results) {
+    const detected = r.detected ? (JSON.parse(r.detected) as Record<string, unknown>) : {};
+    // The staged PKGBUILD, if any: the contributor's own words for the project, the description and the licence.
+    const staged = await env.DB.prepare("SELECT id FROM build_tasks WHERE name = ? AND owner = ? AND staged_prefix IS NOT NULL ORDER BY id DESC LIMIT 1").bind(r.name, r.owner).first<{ id: number }>();
+    let fields = { url: null as string | null, pkgdesc: null as string | null, license: null as string | null };
+    if (staged) {
+      const obj = await env.STAGING.get(`staging/${r.owner}/${r.name}/${staged.id}/PKGBUILD`);
+      if (obj) fields = pkgbuildFields(await obj.text());
     }
-    const group = groups.includes(parsed.group) ? parsed.group : groups.includes("community") ? "community" : (groups[0] ?? "community");
-    const arches = ["x86_64", "aarch64"];
-    const { build, skipped } = splitByUpstream(await providedBy(env, parsed.name), arches, false);
-    if (!build.length) {
-      await env.DB.prepare("INSERT INTO build_requests (name, \"group\", arches, url, requested_by, reason, status, issue_url, detail) VALUES (?, ?, '[]', ?, ?, ?, 'rejected', ?, ?) ON CONFLICT (name) DO UPDATE SET issue_url = excluded.issue_url, detail = excluded.detail, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')")
-        .bind(parsed.name, group, parsed.url, issue.user.login, `issue #${issue.number}`, issue.html_url, `${skipped[0].source} already ships ${parsed.name} (${skipped.map((s) => `${s.version} for ${s.arch}`).join(", ")})`)
-        .run();
-      log.push(`#${issue.number} ${parsed.name}: shipped upstream already`);
-      continue;
-    }
-    // The issue's author owns the package (a contributor row they take
-    // over at their first sign-in); the request is in review once built.
+    const parsed = parseProjectUrl(fields.url ?? r.url);
+    const project = "error" in parsed ? r.url : parsed.project;
+    const tag = r.release ?? (typeof detected.latest_tag === "string" ? detected.latest_tag : null) ?? "unknown";
+    const source = !("error" in parsed) && parsed.github ? `${parsed.project}/archive/refs/tags/${encodeURIComponent(tag)}.tar.gz` : project;
+    const description = fields.pkgdesc ?? (typeof detected.description === "string" ? detected.description : null) ?? `${r.name} (registered before requests existed)`;
+    const license = fields.license ?? (typeof detected.license === "string" && detected.license !== "NOASSERTION" ? detected.license : null) ?? "unknown";
+    const req = await env.DB.prepare(
+      `INSERT INTO package_requests (name, owner, project, source, version, description, license, arches, checklist, detected, migrated, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, '{}', ?, 1, ?) RETURNING id`,
+    )
+      .bind(r.name, r.owner, project, source, tag, description.slice(0, 120), license, r.arches, JSON.stringify(detected), r.created_at)
+      .first<{ id: number }>();
+    if (!req) continue;
+    const key = recordKey(r.name, req.id, "request.json");
+    const record = await putRecord(env, key, {
+      schema: "omarchy-pool/package-request/1",
+      request: req.id, name: r.name, project, source, version: tag, description: description.slice(0, 120), license, arches: JSON.parse(r.arches),
+      requested_by: r.owner, requested_at: r.created_at,
+      checklist: null,
+      migrated: { from: "a registration made before package requests existed", registered_at: r.created_at, pkgbuild_of_task: staged?.id ?? null, written_at: new Date().toISOString() },
+      detected, pool: version(env).version,
+    });
     await env.DB.batch([
-      env.DB.prepare("INSERT INTO contributors (login, token_hash, role, areas) VALUES (?, ?, 'contributor', '[]') ON CONFLICT (login) DO NOTHING").bind(issue.user.login, `unset:${crypto.randomUUID()}`),
-      env.DB.prepare("INSERT INTO factory_packages (name, owner, url, \"group\", arches, status, detail) VALUES (?, ?, ?, ?, ?, 'waiting', ?) ON CONFLICT (name) DO NOTHING")
-        .bind(parsed.name, issue.user.login, parsed.url, group, JSON.stringify(build), `requested in issue #${issue.number}; waiting for a shared community worker with an agent`),
-      env.DB.prepare("INSERT INTO build_requests (name, \"group\", arches, url, requested_by, reason, status, issue_url, detail) VALUES (?, ?, ?, ?, ?, ?, 'drafting', ?, ?) ON CONFLICT (name) DO UPDATE SET issue_url = excluded.issue_url, status = 'drafting', detail = excluded.detail, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')")
-        .bind(parsed.name, group, JSON.stringify(build), parsed.url, issue.user.login, parsed.hint || `issue #${issue.number}`, issue.html_url, "queued for a shared community worker to draft and build"),
-      ...build.map((arch) =>
-        env.DB.prepare(`INSERT INTO build_tasks (name, "group", arch, pkgbuild_ref, reason, priority, publish, trust, owner, kind) VALUES (?, ?, ?, ?, ?, 100, 0, 'community', ?, 'build')`)
-          .bind(parsed.name, group, arch, `draft:${parsed.url}@latest`, `package-request #${issue.number}`, issue.user.login),
-      ),
-      env.DB.prepare("INSERT INTO events (kind, ring, source, status, summary, payload) VALUES ('request', NULL, 'factory', 'ok', ?, ?)")
-        .bind(`${parsed.name} requested in issue #${issue.number} by ${issue.user.login}: ${build.join(", ")} queued for a shared community worker`, JSON.stringify({ name: parsed.name, group, arches: build, url: parsed.url, issue: issue.html_url, skipped })),
+      env.DB.prepare("UPDATE package_requests SET record = ?, sha256 = ? WHERE id = ?").bind(record.key, record.sha256, req.id),
+      env.DB.prepare("UPDATE factory_packages SET request_id = ?, project = ?, source = ?, description = ?, license = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE name = ?").bind(req.id, project, source, description.slice(0, 120), license, r.name),
     ]);
-    log.push(`#${issue.number} ${parsed.name}: ${build.join(", ")} queued`);
+    done.push(`${r.name} → ${req.id}`);
   }
-  return log.length ? `requests: ${log.join("; ")}` : `requests: ${issues.length} open, nothing new`;
+  return `requests: ${done.length} registration(s) given their record — ${done.join(", ")}`;
 }

@@ -287,3 +287,56 @@ describe("an expired lease", () => {
     expect(await requeueExpiredLeases(env)).toBe(0);
   });
 });
+
+describe("a package request", () => {
+  const checklist = { official: true, license: true, unshipped: true, evidence: true };
+  it("is checked before anything is written: the checklist, the description, the licence, the source", async () => {
+    expect((await call("POST", "/factory/packages", { url: "https://example.org/htop" })).status).toBe(401);
+    const noList = await call("POST", "/factory/packages", { url: "https://htop.dev", source: "https://github.com/htop-dev/htop/archive/refs/tags/3.5.3.tar.gz", version: "3.5.3", description: "Interactive process viewer", license: "GPL-2.0-only" }, "omc_alice");
+    expect(noList.status).toBe(400);
+    expect(noList.json.error).toMatch(/confirm the checklist/);
+    expect((await call("POST", "/factory/packages", { url: "https://htop.dev", source: "https://x/y.tar.gz", version: "3.5.3", description: "short", license: "GPL-2.0-only", checklist }, "omc_alice")).json.error).toMatch(/description/);
+    expect((await call("POST", "/factory/packages", { url: "https://htop.dev", source: "https://x/y.tar.gz", version: "3.5.3", description: "Interactive process viewer", license: "GPL v2", checklist }, "omc_alice")).json.error).toMatch(/SPDX/);
+    expect((await call("POST", "/factory/packages", { url: "https://htop.dev", version: "3.5.3", description: "Interactive process viewer", license: "GPL-2.0-only", checklist }, "omc_alice")).json.error).toMatch(/source is required/);
+  });
+
+  it("is written once to the record, signed when the pool signs, and registered for the contributor", async () => {
+    const body = { name: "htop", url: "https://htop.dev/", source: "https://github.com/htop-dev/htop/archive/refs/tags/3.5.3.tar.gz", version: "3.5.3", description: "Interactive process viewer", license: "GPL-2.0-only", arches: ["aarch64"], checklist };
+    const r = await call("POST", "/factory/packages", body, "omc_alice");
+    expect(r.status, JSON.stringify(r.json)).toBe(201);
+    expect(r.json.package).toMatchObject({ name: "htop", owner: "alice", project: "https://htop.dev", source: body.source, release: "3.5.3", description: body.description, license: "GPL-2.0-only", status: "registered" });
+    expect(r.json.request).toMatchObject({ id: expect.any(Number), record: `${env.POOL_URL}/factory/htop/${r.json.request.id}/request.json`, sha256: expect.stringMatching(/^[0-9a-f]{64}$/) });
+    const obj = await env.PACKAGES.get(`factory/htop/${r.json.request.id}/request.json`);
+    const record = JSON.parse(await obj!.text());
+    expect(record).toMatchObject({ schema: "omarchy-pool/package-request/1", name: "htop", project: "https://htop.dev", version: "3.5.3", requested_by: "alice", arches: ["aarch64"] });
+    expect(Object.keys(record.checklist)).toEqual(["official", "license", "unshipped", "evidence"]);
+    // The same project under another name, or the same name by someone else, is refused; the owner may renew their own.
+    expect((await call("POST", "/factory/packages", { ...body, name: "htop2" }, "omc_alice")).status).toBe(409);
+    expect((await call("POST", "/factory/packages", body, "omc_m2")).status).toBe(409);
+    const renewed = await call("POST", "/factory/packages", { ...body, version: "3.5.4", source: body.source.replace("3.5.3", "3.5.4") }, "omc_alice");
+    expect(renewed.status).toBe(200);
+    expect(renewed.json.request.id).toBeGreaterThan(r.json.request.id);
+    expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM package_requests WHERE name = 'htop'").first<{ n: number }>())!.n).toBe(2);
+    // A blocked contributor requests nothing and builds nothing.
+    await env.DB.prepare("UPDATE contributors SET blocked_at = '2026-09-15T00:00:00Z', blocked_by = 'm1', blocked_reason = 'spam' WHERE login = 'alice'").run();
+    expect((await call("POST", "/factory/packages", { ...body, name: "htop3", url: "https://htop.dev/x" }, "omc_alice")).status).toBe(403);
+    expect((await call("POST", "/factory/packages/htop/build", {}, "omc_alice")).status).toBe(403);
+    await env.DB.prepare("UPDATE contributors SET blocked_at = NULL, blocked_by = NULL, blocked_reason = NULL WHERE login = 'alice'").run();
+  });
+
+  it("gives a registration made before requests existed its record, from the staged PKGBUILD", async () => {
+    await env.DB.batch([
+      env.DB.prepare(`INSERT INTO factory_packages (name, owner, url, "group", arches, detected, status, created_at) VALUES ('older', 'alice', 'https://github.com/alice/recipes', 'community', '["aarch64"]', '{"latest_tag":"v9"}', 'staged', '2026-09-14T10:00:00Z')`),
+      env.DB.prepare(`INSERT INTO build_tasks (name, "group", arch, version, pkgbuild_ref, reason, priority, publish, trust, owner, kind, status, staged_prefix) VALUES ('older', 'community', 'aarch64', '1.2-1', 'https://github.com/alice/recipes@HEAD:older/PKGBUILD', 'contributor', 100, 0, 'community', 'alice', 'build', 'staged', 'staging/alice/older/1/')`),
+    ]);
+    const task = (await env.DB.prepare("SELECT id FROM build_tasks WHERE name = 'older'").first<{ id: number }>())!.id;
+    await env.STAGING.put(`staging/alice/older/${task}/PKGBUILD`, "pkgname=older\npkgdesc=\"An older tool\"\nurl=\"https://github.com/upstream/older\"\nlicense=('Apache-2.0')\n");
+    const { backfillRequests } = await import("../src/requests");
+    expect(await backfillRequests(env)).toMatch(/older → \d+/);
+    const pkg = await env.DB.prepare("SELECT request_id, project, description, license FROM factory_packages WHERE name = 'older'").first<{ request_id: number; project: string; description: string; license: string }>();
+    expect(pkg).toMatchObject({ project: "https://github.com/upstream/older", description: "An older tool", license: "Apache-2.0" });
+    const record = JSON.parse(await (await env.PACKAGES.get(`factory/older/${pkg!.request_id}/request.json`))!.text());
+    expect(record).toMatchObject({ migrated: { pkgbuild_of_task: task }, version: "v9", source: "https://github.com/upstream/older/archive/refs/tags/v9.tar.gz" });
+    expect(await backfillRequests(env)).toBe("");
+  });
+});

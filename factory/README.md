@@ -16,7 +16,7 @@ evidence: the recipe, the log, the manifest that let a maintainer rebuild,
 verify and attest the package faster and approve it with more confidence.
 
 ```
-PKGBUILD reviewed and merged ──▶ pool: build_requests / build_tasks (D1)
+PKGBUILD reviewed and merged ──▶ pool: package_requests / build_tasks (D1)
                                      ▲            │ claim (lease 30 min)
                                      │ heartbeat  ▼
                           worker: clean Arch container, anywhere
@@ -29,14 +29,21 @@ PKGBUILD reviewed and merged ──▶ pool: build_requests / build_tasks (D1)
 
 ## A package's life
 
-1. **Someone brings it.** A contributor signs in, registers the package
-   (the project's URL; a `PKGBUILD` in that repository if there is one) and
-   runs their own worker: the signed `omarchy-worker` image, on their
-   machine, with their agent key if they want the PKGBUILD drafted and
-   corrected for them. Someone without a worker files a
-   [package request issue](../../../issues/new?template=package-request.yml)
-   instead: the brain reads open issues every ten minutes and queues the
-   same build for a *shared* community worker whose owner runs an agent.
+1. **Someone requests it.** A contributor signs in and asks, on the
+   dashboard: the project's URL (a GitHub repository or its release tarball
+   — for a project elsewhere, its home page and the release's source and
+   version), a name, one line of description, the licence (SPDX), the
+   architectures, and four things they confirm (the URL is the project's
+   own, the licence is the project's, nobody ships or requested it, their
+   build is evidence). The pool checks all of it — a blocked contributor,
+   a name or a project already in the pool, an upstream that ships the
+   name, a source that does not answer — and only then writes the request
+   **once** to the record, `factory/<name>/<id>/request.json` in the pool
+   bucket with the pool's detached signature, public and immutable
+   (`worker/src/record.ts`). Nothing about a request lives on GitHub.
+   Then **Build**: a worker the project shares (the project's agent) or
+   one of the contributor's own (their agent) — a contributor's worker
+   builds only its owner's packages.
 2. **Does someone ship it already?** The pool is asked first. If Arch, Arch
    Linux ARM or the OPR ship the name for an architecture it enters the pool's
    cycle as it is; the factory refuses to build that architecture
@@ -117,10 +124,12 @@ curl -s -X POST $API/factory/register -H 'content-type: application/json' \
   -d "{\"github_token\":\"$(gh auth token)\"}"
 #    → {"login":"you","token":"omc_…"}   keep it: export OMC=omc_…
 
-# 2. Register the package: the pool checks nobody ships it, detects what it is.
+# 2. Request the package: the pool checks nobody ships it, that the source answers, and writes the request to the record.
 curl -s -X POST $API/factory/packages -H "authorization: Bearer $OMC" -H 'content-type: application/json' \
-  -d '{"url":"https://github.com/you/project"}'
-#    optional: "name", "group" (one of GET $API/factory/groups — who reviews it), "arches", "release" (a tag), "pkgbuild_path" (a PKGBUILD in your repo)
+  -d '{"url":"https://github.com/you/project","description":"What it does, one line","license":"MIT",
+       "checklist":{"official":true,"license":true,"unshipped":true,"evidence":true}}'
+#    optional: "name", "arches"; for a project not on GitHub: "source" (the release tarball) and "version"
+#    → {"package":…,"request":{"id":12,"record":"https://pool.firemanxbr.org/factory/<name>/12/request.json",…}}
 
 # 3. Register a worker. It builds your packages; WORKER_SHARED=1 at start makes it build anyone's.
 curl -s -X POST $API/factory/workers -H "authorization: Bearer $OMC" -H 'content-type: application/json' \
@@ -314,7 +323,6 @@ factory/
   bin/pkgbuild-meta               PKGBUILD → arches and version, without executing it as you
   pkgbuilds/<group>/<name>/       reviewed PKGBUILDs; CODEOWNERS per group
 .github/workflows/factory-update.yml    daily: pull requests bumping the project's own recipes (reviewed, never auto-merged)
-.github/ISSUE_TEMPLATE/package-request.yml   the request form the brain reads every ten minutes
   bin/agent.py                    the owner's agent, whichever provider: Anthropic, OpenAI, Gemini, xAI (by the key set)
   bin/draft-pkgbuild              project URL → PKGBUILD (the agent, or a template), checksums left to updpkgsums
   prompts/pkgbuild.md             the packaging rules the drafter follows
