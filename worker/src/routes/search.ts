@@ -117,20 +117,22 @@ export async function handlePackage(name: string, url: URL, env: Env): Promise<R
   for (let i = 0; i < wanted.length; i += 100) {
     const chunk = wanted.slice(i, i + 100);
     // Two indexed lookups (by name, by provided capability) instead of one
-    // OR that scanned every package of the architecture: google-chrome's
-    // page went from 7.5 s to well under a second.
+    // OR that scanned every package of the architecture, in a forced order
+    // (CROSS JOIN): from the wanted capabilities into the ring, never the
+    // other way round — the planner's choice walked the ring's members and
+    // read 3.8 M rows for google-chrome's page; 1.4 k this way.
     const rows = await env.DB.prepare(
       `SELECT DISTINCT capability, name, version FROM (
          SELECT cap.value AS capability, p.name, p.version
            FROM json_each(?1) cap
-           JOIN packages p ON p.name = cap.value AND p.repo_arch = ?2
-           JOIN ${ringMembers(s.ring)} rp ON rp.package_id = p.id
+           CROSS JOIN packages p ON p.name = cap.value AND p.repo_arch = ?2
+           CROSS JOIN ring_packages rp ON rp.ring = '${s.ring}' AND rp.package_id = p.id
          UNION ALL
          SELECT cap.value AS capability, p.name, p.version
            FROM json_each(?1) cap
-           JOIN package_provides pv ON pv.capability = cap.value AND (pv.declared = 1 OR cap.value GLOB '*.so.[0-9]*')
-           JOIN packages p ON p.id = pv.package_id AND p.repo_arch = ?2
-           JOIN ${ringMembers(s.ring)} rp ON rp.package_id = p.id
+           CROSS JOIN package_provides pv ON pv.capability = cap.value AND (pv.declared = 1 OR cap.value GLOB '*.so.[0-9]*')
+           CROSS JOIN packages p ON p.id = pv.package_id AND p.repo_arch = ?2
+           CROSS JOIN ring_packages rp ON rp.ring = '${s.ring}' AND rp.package_id = p.id
        )`,
     )
       .bind(JSON.stringify(chunk), s.arch)
@@ -142,13 +144,15 @@ export async function handlePackage(name: string, url: URL, env: Env): Promise<R
 
   // Reverse edges: packages in the ring that depend on this one by name or
   // by something it provides (a soname = a binary that actually loads it).
+  // Same forced order: capabilities → requirement index → ring (366 k rows
+  // read per page before, seven for a package nothing depends on).
   const caps = [chosen.name, ...(manifest.provides ?? []).map(capabilityOf)];
   const reverse = await env.DB.prepare(
     `SELECT DISTINCT p.name, p.version, rq.requirement
-       FROM package_requires rq
-       JOIN packages p ON p.id = rq.package_id AND p.repo_arch = ?2
-       JOIN ${ringMembers(s.ring)} rp ON rp.package_id = p.id
-      WHERE rq.kind = 'depends' AND rq.requirement IN (SELECT value FROM json_each(?1)) AND p.name != ?3
+       FROM json_each(?1) cap
+       CROSS JOIN package_requires rq ON rq.requirement = cap.value AND rq.kind = 'depends'
+       CROSS JOIN ring_packages rp ON rp.ring = '${s.ring}' AND rp.package_id = rq.package_id
+       CROSS JOIN packages p ON p.id = rq.package_id AND p.repo_arch = ?2 AND p.name != ?3
       ORDER BY p.name LIMIT 400`,
   )
     .bind(JSON.stringify([...new Set(caps)]), s.arch, chosen.name)
