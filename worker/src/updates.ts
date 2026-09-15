@@ -67,7 +67,7 @@ export async function checkUpdates(env: Env, now = new Date(), fetcher: typeof f
 
   const pkgs = await env.DB.prepare(
     `SELECT p.name, p.owner, p.url, p."group", p.arches, p.status FROM factory_packages p
-      WHERE p.status != 'unmaintained' AND p.url LIKE 'https://github.com/%'
+      WHERE p.status != 'unmaintained' AND p.blocked_at IS NULL AND p.url LIKE 'https://github.com/%'
         AND EXISTS (SELECT 1 FROM approvals a WHERE a.name = p.name AND a.decision = 'approved')`,
   ).all<Pkg>();
   let checked = 0;

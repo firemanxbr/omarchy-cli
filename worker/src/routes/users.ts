@@ -68,9 +68,9 @@ export async function recordOf(env: Env, login: string): Promise<TrackRecord[]> 
 }
 
 export async function handleUser(login: string, env: Env): Promise<Response> {
-  const person = await env.DB.prepare("SELECT login, name, avatar_url, role, areas, created_at, last_seen FROM contributors WHERE login = ?")
+  const person = await env.DB.prepare("SELECT login, name, avatar_url, role, areas, created_at, last_seen, blocked_at, blocked_by, blocked_reason FROM contributors WHERE login = ?")
     .bind(login)
-    .first<{ login: string; name: string | null; avatar_url: string | null; role: string; areas: string | null; created_at: string; last_seen: string }>();
+    .first<{ login: string; name: string | null; avatar_url: string | null; role: string; areas: string | null; created_at: string; last_seen: string; blocked_at: string | null; blocked_by: string | null; blocked_reason: string | null }>();
   if (!person) return json({ error: "no such contributor" }, 404);
   const areas = person.areas ? (JSON.parse(person.areas) as string[]) : [];
   const [packages, builds, counts, approvals, workers, groups, record] = await Promise.all([
@@ -105,6 +105,7 @@ export async function handleUser(login: string, env: Env): Promise<Response> {
       avatar_url: person.avatar_url,
       github: `https://github.com/${person.login}`,
       role: person.role,
+      blocked: person.blocked_at ? { at: person.blocked_at, by: person.blocked_by, reason: person.blocked_reason } : null,
       areas,
       groups: groups.filter((g) => g.maintainers.includes(login)).map((g) => ({ name: g.name, description: g.description })),
       since: person.created_at,

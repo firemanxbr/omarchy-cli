@@ -74,7 +74,7 @@ podman run -d --name omarchy-worker --restart unless-stopped --stop-timeout 1080
 # or your Claude subscription instead of a key (see "A Claude subscription as the agent" below)
   -e CLAUDE_CODE_OAUTH_TOKEN=…    # what 'claude setup-token' printed on your machine</pre>
       <p>The Factory page shows which agent each worker reported (<code>anthropic/claude-sonnet-5</code>, <code>claude-code/claude-sonnet-5</code>, <code>openai/gpt-5</code>, …); the key itself never leaves your machine.</p>
-      <p>A shared worker with an agent is what turns a <em>package request</em> (a GitHub issue) into a first PKGBUILD and a first build; without one, requests wait. What your agent produces is evidence like any other build: a maintainer reads it before anything reaches users.</p></div>
+      <p>A shared worker with an agent is what turns a <em>package request</em> (the <a href="/request">request page</a>) into a first PKGBUILD and a first build; without one, requests wait. What your agent produces is evidence like any other build: a maintainer reads it before anything reaches users.</p></div>
       <div class="step"><h3>4. Watch it</h3><p>In <b>Docker Desktop</b>, <em>Containers</em> lists <code>omarchy-worker</code> with its state and a <em>Logs</em> tab; in <b>Podman Desktop</b>, the same under <em>Containers</em>. On the command line: <code>docker logs -f omarchy-worker</code> / <code>podman logs -f omarchy-worker</code>. The container exits after each task (that is by design) and the restart policy brings it back.</p>
       <div class="shot">Screenshot to add: Docker Desktop → Containers, the running <code>omarchy-worker</code> and its Logs tab; Podman Desktop → Containers, the same.</div></div>
     </div>

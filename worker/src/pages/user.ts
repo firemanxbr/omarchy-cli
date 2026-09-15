@@ -67,6 +67,7 @@ const SCRIPT = String.raw`
     // An icon, never a photo: two letters, green for a maintainer.
     $("#avatar").textContent = d.login.slice(0, 2); if (d.role === "maintainer") $("#avatar").classList.add("m");
     $("#line").innerHTML = '<span class="pill ' + (d.role === "maintainer" ? "rec" : "ok") + '">' + esc(d.role) + '</span>' +
+      (d.blocked ? '<span class="pill error" title="by ' + esc(d.blocked.by || "") + ', ' + esc(d.blocked.at || "") + '">blocked: ' + esc(d.blocked.reason || "") + '</span>' : '') +
       (d.groups.length ? d.groups.map(function (g) { return '<a class="pill none" href="/docs/governance" style="text-decoration:none">' + esc(g.name) + '</a>'; }).join("") : '') +
       '<span>since ' + esc(String(d.since).slice(0, 10)) + '</span><span class="dim">·</span><span>last seen ' + ago(d.last_seen) + '</span><span class="dim">·</span><a href="' + esc(d.github) + '" style="color:var(--muted);text-decoration:none">github.com/' + esc(d.login) + ' ↗</a>';
     var c = d.build_counts;
