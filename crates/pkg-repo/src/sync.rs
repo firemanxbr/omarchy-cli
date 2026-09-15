@@ -81,6 +81,60 @@ pub struct SyncReport {
     pub pending_remove: Vec<String>,
 }
 
+/// A repository published as GitHub releases, one per snapshot, is named by
+/// a prefix: `github-release://owner/repo/asahi-packages-stable-` is the
+/// newest published (not draft, not pre-release) release whose tag starts
+/// with `asahi-packages-stable-`, served from its `releases/download/<tag>`.
+/// Any other base is returned as it is. `GITHUB_TOKEN`, when set, lifts the
+/// API's 60 requests an hour per address.
+pub fn resolve_base(api: &Api, base: &str) -> Result<String, RepoError> {
+    let Some(spec) = base.strip_prefix("github-release://") else {
+        return Ok(base.to_owned());
+    };
+    let (owner, rest) = spec
+        .split_once('/')
+        .ok_or_else(|| RepoError::Source(format!("github-release: no repository in {base}")))?;
+    let (repo, prefix) = rest
+        .split_once('/')
+        .ok_or_else(|| RepoError::Source(format!("github-release: no tag prefix in {base}")))?;
+    let token = std::env::var("GITHUB_TOKEN").ok();
+    let releases = api.get_external_json_as(
+        &format!("https://api.github.com/repos/{owner}/{repo}/releases?per_page=50"),
+        token.as_deref(),
+    )?;
+    let tag = newest_release_tag(&releases, prefix).ok_or_else(|| {
+        RepoError::Source(format!(
+            "github-release: no published release of {owner}/{repo} tagged {prefix}*"
+        ))
+    })?;
+    Ok(format!(
+        "https://github.com/{owner}/{repo}/releases/download/{tag}"
+    ))
+}
+
+/// The newest published release (by `published_at`; drafts and pre-releases
+/// are candidates, not releases) whose tag starts with the prefix.
+fn newest_release_tag(releases: &serde_json::Value, prefix: &str) -> Option<String> {
+    releases
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|r| {
+            !r["draft"].as_bool().unwrap_or(false) && !r["prerelease"].as_bool().unwrap_or(false)
+        })
+        .filter_map(|r| {
+            let tag = r["tag_name"].as_str()?;
+            tag.starts_with(prefix).then(|| {
+                (
+                    r["published_at"].as_str().unwrap_or("").to_owned(),
+                    tag.to_owned(),
+                )
+            })
+        })
+        .max()
+        .map(|(_, t)| t)
+}
+
 #[allow(clippy::too_many_lines)]
 pub fn run(api: &Api, opts: &SyncOptions) -> Result<SyncReport, RepoError> {
     let started = Instant::now();
@@ -92,7 +146,7 @@ pub fn run(api: &Api, opts: &SyncOptions) -> Result<SyncReport, RepoError> {
             opts.arch
         )
     });
-    let base = base.trim_end_matches('/').to_owned();
+    let base = resolve_base(api, base.trim_end_matches('/'))?;
     let db_name = opts.db_name.clone().unwrap_or_else(|| opts.source.clone());
     std::fs::create_dir_all(&opts.work_dir)?;
 
@@ -500,6 +554,29 @@ pub fn human(bytes: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_newest_published_release_with_the_prefix_is_the_snapshot() {
+        // The Asahi fork's release list as GitHub returns it: families mixed, candidates are pre-releases.
+        let releases = serde_json::json!([
+            { "tag_name": "aurora-packages-4439238d", "published_at": "2026-09-15T07:39:00Z", "prerelease": true, "draft": false },
+            { "tag_name": "asahi-quattro-channel-32", "published_at": "2026-09-13T11:28:00Z", "prerelease": false, "draft": false },
+            { "tag_name": "asahi-packages-stable-83973903", "published_at": "2026-09-13T11:27:00Z", "prerelease": false, "draft": false },
+            { "tag_name": "asahi-packages-candidate-c3e98be6", "published_at": "2026-09-14T10:56:00Z", "prerelease": true, "draft": false },
+            { "tag_name": "asahi-packages-stable-99999999", "published_at": "2026-09-16T00:00:00Z", "prerelease": false, "draft": true },
+            { "tag_name": "asahi-packages-stable-74b8da66", "published_at": "2026-09-12T04:57:00Z", "prerelease": false, "draft": false }
+        ]);
+        assert_eq!(
+            newest_release_tag(&releases, "asahi-packages-stable-").as_deref(),
+            Some("asahi-packages-stable-83973903"),
+            "the newest published stable — not the newer candidate (pre-release), not the draft"
+        );
+        assert_eq!(
+            newest_release_tag(&releases, "asahi-quattro-channel-").as_deref(),
+            Some("asahi-quattro-channel-32")
+        );
+        assert_eq!(newest_release_tag(&releases, "nothing-"), None);
+    }
     use crate::client::{PackageSummary, Release, ReleaseSummaryView};
 
     fn up(name: &str) -> UpstreamPackage {

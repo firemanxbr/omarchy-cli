@@ -32,6 +32,8 @@ pub enum RepoError {
     Io(#[from] std::io::Error),
     #[error("gpg failed: {0}")]
     Gpg(String),
+    #[error("source: {0}")]
+    Source(String),
     #[error("HTTP error: {0}")]
     Http(#[from] reqwest::Error),
     #[error("API returned {status}: {body}")]

@@ -658,8 +658,21 @@ impl Api {
 
     /// `GET` a JSON document from any URL (a public feed), retrying on 5xx.
     pub fn get_external_json(&self, url: &str) -> Result<serde_json::Value, RepoError> {
+        self.get_external_json_as(url, None)
+    }
+
+    /// The same with a bearer token of the caller's (GitHub's API: 60 requests an hour without one).
+    pub fn get_external_json_as(
+        &self,
+        url: &str,
+        bearer: Option<&str>,
+    ) -> Result<serde_json::Value, RepoError> {
         with_retry("get_external_json", || {
-            let resp = self.http.get(url).send()?;
+            let mut req = self.http.get(url);
+            if let Some(t) = bearer.filter(|t| !t.is_empty()) {
+                req = req.bearer_auth(t);
+            }
+            let resp = req.send()?;
             Ok(Self::check(resp)?.json()?)
         })
     }

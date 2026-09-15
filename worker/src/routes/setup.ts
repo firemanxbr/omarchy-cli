@@ -21,9 +21,10 @@ import { ringHead } from "../db";
  * that has it. Omarchy's own packages (the OPR) and the factory's builds
  * come first — as [omarchy] sits above [core] on an Omarchy install — then
  * Arch's core, extra, multilib, Arch Linux ARM's alarm, and the optional
- * sources last.
+ * sources last. On a Mac the Asahi fork and asahi-alarm come before all of
+ * them: their kernel, graphics and Apple-specific builds must win.
  */
-const REPO_ORDER = ["packages", "factory", "core", "extra", "multilib", "alarm"];
+const REPO_ORDER = ["asahi", "asahi-alarm", "packages", "factory", "core", "extra", "multilib", "alarm"];
 
 export async function pacmanInclude(env: Env, ring: string, arch: string, withOptional: Set<string>, setupUrl: string): Promise<string | null> {
   if (!isRing(ring) || !isRepoArch(arch)) return null;

@@ -41,7 +41,11 @@ describe("pulled jobs", () => {
     expect(jobsOf(sync).map((j) => j.arch)).toEqual(["x86_64", "aarch64"]);
     const arm = jobsOf(sync).find((j) => j.arch === "aarch64")!;
     expect(JSON.parse(arm.params.sources)).toHaveLength(SYNC_SOURCES.filter((s) => s.arch === "aarch64").length);
-    expect(JSON.parse(arm.params.sources).map((s: { source: string }) => s.source)).toEqual(["core", "alarm", "extra", "packages"]);
+    // Arch Linux ARM, the OPR, then the Mac's own: the Asahi fork (a GitHub release resolved at sync time) and asahi-alarm; the AUR selection last, optional.
+    expect(JSON.parse(arm.params.sources).map((s: { source: string }) => s.source)).toEqual(["core", "alarm", "extra", "packages", "asahi", "asahi-alarm", "aur"]);
+    const asahi = JSON.parse(arm.params.sources).find((s: { source: string }) => s.source === "asahi");
+    expect(asahi.base_url).toBe("github-release://maralcbr/omarchy-pkgs/asahi-packages-stable-");
+    expect(asahi.keyring).toBe("omarchy-asahi");
     const health = RULES.find((r) => r.job?.kind === "health")!;
     expect(jobsOf(health)).toHaveLength(6);
     const promote = RULES.find((r) => r.job?.kind === "promote" && r.job.params.to === "stable")!;
