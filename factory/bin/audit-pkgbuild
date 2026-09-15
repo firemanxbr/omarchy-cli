@@ -45,10 +45,15 @@ def parse(text):
     return None
 
 
-def ask(pkgbuild, log, pkginfo):
+def ask(pkgbuild, log, pkginfo, tests=None):
     user = "--- PKGBUILD ---\n" + pkgbuild + "\n\n--- build log (tail) ---\n" + log[-12000:] + "\n"
     if pkginfo:
         user += "\n--- .PKGINFO ---\n" + pkginfo[:4000] + "\n"
+    if tests:
+        # The gate's transcript (tests.log): shellcheck, namcap on the PKGBUILD and the
+        # package, the file list, the metadata, check(), the smoke test — what the
+        # worker already found, so the audit weighs it instead of rediscovering it.
+        user += "\n--- the gate (tests.log) ---\n" + tests[-6000:] + "\n"
     user += "\nReturn the JSON report only."
     # The budget covers the model's thinking too (Gemini counts it against
     # the output): 12 000 left a block verdict on brave-origin-bin cut
@@ -89,10 +94,12 @@ def main():
     ap.add_argument("--pkgbuild", required=True)
     ap.add_argument("--log", required=True)
     ap.add_argument("--pkginfo")
+    ap.add_argument("--tests")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     report = ask(open(a.pkgbuild).read(), open(a.log, errors="replace").read(),
-                 open(a.pkginfo, errors="replace").read() if a.pkginfo else None)
+                 open(a.pkginfo, errors="replace").read() if a.pkginfo else None,
+                 open(a.tests, errors="replace").read() if a.tests else None)
     os.makedirs(a.out, exist_ok=True)
     with open(os.path.join(a.out, "audit.json"), "w") as f:
         json.dump(report, f, indent=1)

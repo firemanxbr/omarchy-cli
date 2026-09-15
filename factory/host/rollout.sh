@@ -52,9 +52,15 @@ for svc in agent-proxy community-x86_64 community-aarch64 review-x86_64 review-a
     changed=1; continue
   fi
   running="$(docker inspect -f '{{.Image}}' "$cid")"
-  [[ "$running" == "$wanted" ]] && continue
+  # The image, and the service's configuration: an environment or a volume
+  # changed in compose.yml is a container to replace too (community-x86_64
+  # kept its old environment for an hour after the agent-proxy landed,
+  # 2026-09-15). compose stamps every container with its config hash.
+  wanted_cfg="$(docker compose config --hash "$svc" 2>/dev/null | awk '{print $2}')"
+  running_cfg="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.config-hash"}}' "$cid" 2>/dev/null || true)"
+  [[ "$running" == "$wanted" && ( -z "$wanted_cfg" || "$running_cfg" == "$wanted_cfg" ) ]] && continue
   task="$(docker logs --tail 40 "$cid" 2>&1 | grep -oE '^task [0-9]+: [^(]*\(attempt' | tail -1 | sed 's/ (attempt$//' || true)"
-  log "$svc: ${running:7:12} → ${wanted:7:12}${task:+ (draining: $task)}"
+  log "$svc: ${running:7:12} → ${wanted:7:12}$( [[ "$running_cfg" != "$wanted_cfg" && -n "$wanted_cfg" ]] && echo " (configuration changed)")${task:+ (draining: $task)}"
   changed=1
   (( check )) && continue
   # up -d recreates a container whose image changed: stop (drain), remove, start.

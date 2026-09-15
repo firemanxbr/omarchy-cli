@@ -106,6 +106,7 @@ describe("claims and leases", () => {
 describe("a community build, its audit and the review", () => {
   let task: number;
   let jobToken: string;
+  let req: number;
 
   it("the owner's worker stages the evidence with its job token; the builder cannot write the audit", async () => {
     await env.DB.prepare(`INSERT INTO build_tasks (name, "group", arch, version, pkgbuild_ref, reason, priority, publish, trust, owner, kind) VALUES ('mine', 'community', 'aarch64', '1.0-1', 'draft:https://github.com/alice/mine@latest', 'contributor', 100, 0, 'community', 'alice', 'build')`).run();
@@ -127,19 +128,34 @@ describe("a community build, its audit and the review", () => {
     task = c.json.task.id;
     jobToken = c.json.token;
     expect(c.json.upload).toBe(`/api/v1/factory/tasks/${task}/artifacts/<filename>`);
-    for (const f of ["PKGBUILD", "build.log", "PKGINFO", "mine-1.0-1-aarch64.pkg.tar.zst"]) {
+    // The package this build is for: requested (record #), so the evidence has a place on the record.
+    req = (await env.DB.prepare(`INSERT INTO package_requests (name, owner, project, source, version, description, license, arches, checklist, record, sha256) VALUES ('mine', 'alice', 'https://github.com/alice/mine', 'https://github.com/alice/mine/archive/refs/tags/v1.0.tar.gz', 'v1.0', 'Mine, a tool', 'MIT', '["aarch64"]', '{}', 'factory/mine/0/request.json', 'x') RETURNING id`).first<{ id: number }>())!.id;
+    await env.DB.prepare(`INSERT INTO factory_packages (name, owner, url, "group", arches, status, request_id, project) VALUES ('mine', 'alice', 'https://github.com/alice/mine', 'community', '["aarch64"]', 'building', ?, 'https://github.com/alice/mine')`).bind(req).run();
+    for (const f of ["PKGBUILD", "build.log", "PKGINFO", "tests.log", "mine-1.0-1-aarch64.pkg.tar.zst"]) {
       expect((await call("PUT", `/factory/tasks/${task}/artifacts/${f}`, undefined, jobToken, `evidence ${f}`)).status).toBe(201);
     }
     expect((await call("PUT", `/factory/tasks/${task}/artifacts/audit.json`, undefined, jobToken, "{}")).status).toBe(403);
     expect((await call("PUT", `/factory/tasks/${task}/artifacts/PKGBUILD`, undefined, "omw_w1", "x")).status).toBe(409);
     // Completing before the package is uploaded is refused; after, the build is staged and the audit queued.
     expect((await call("POST", `/factory/tasks/${task}/complete`, { sha256: "b".repeat(64), filename: "other.pkg.tar.zst" }, jobToken)).status).toBe(409);
+    // A gate that failed never stages: the worker reports a failure instead.
+    await call("PUT", `/factory/tasks/${task}/artifacts/vet.json`, undefined, jobToken, JSON.stringify({ schema: "omarchy-pool/vet/1", verdict: "fail", checks: [{ name: "smoke", status: "fail", detail: "a binary does not start" }] }));
+    const refused = await call("POST", `/factory/tasks/${task}/complete`, { sha256: "b".repeat(64), filename: "mine-1.0-1-aarch64.pkg.tar.zst", version: "1.0-1" }, jobToken);
+    expect(refused.status).toBe(409);
+    expect(refused.json.error).toMatch(/gate failed \(smoke\)/);
+    await call("PUT", `/factory/tasks/${task}/artifacts/vet.json`, undefined, jobToken, JSON.stringify({ schema: "omarchy-pool/vet/1", verdict: "pass", checks: [{ name: "checksums", status: "pass", detail: "" }, { name: "check", status: "warn", detail: "no check()" }] }));
     const st = await call("POST", `/factory/tasks/${task}/complete`, { sha256: "b".repeat(64), filename: "mine-1.0-1-aarch64.pkg.tar.zst", version: "1.0-1" }, jobToken);
     expect(st.json.status).toBe("staged");
+    // The gate's verdict stays with the task; the evidence — not the package — is on the record, signed when the pool signs.
+    expect(JSON.parse((await env.DB.prepare("SELECT result FROM build_tasks WHERE id = ?").bind(task).first<{ result: string }>())!.result)).toEqual({ vet: { verdict: "pass", fails: 0, warnings: 1, failed: [], warned: ["check"] } });
+    for (const f of ["PKGBUILD", "build.log", "PKGINFO", "tests.log", "vet.json"]) expect(await env.PACKAGES.head(`factory/mine/${req}/build-${task}/${f}`), f).not.toBeNull();
+    expect(await env.PACKAGES.head(`factory/mine/${req}/build-${task}/mine-1.0-1-aarch64.pkg.tar.zst`)).toBeNull();
     const review = await call("GET", "/factory/review");
     const row = review.json.staged.find((t: any) => t.id === task);
     expect(row.audit).toEqual({ status: "queued" });
     expect(row.evidence.audit).toBe(`/api/v1/factory/tasks/${task}/artifacts/audit.md`);
+    expect(row.vet).toEqual({ verdict: "pass", fails: 0, warnings: 1, failed: [], warned: ["check"] });
+    expect(row.evidence.vet).toBe(`/api/v1/factory/tasks/${task}/artifacts/vet.json`);
     // The PKGBUILD, the log and the .PKGINFO are public; the package is not.
     const ctx = createExecutionContext();
     const pk = await worker.fetch(new Request(`${API}/factory/tasks/${task}/artifacts/PKGINFO`), env, ctx);
@@ -164,6 +180,8 @@ describe("a community build, its audit and the review", () => {
     expect(done.json.status).toBe("done");
     const review = await call("GET", "/factory/review");
     expect(review.json.staged.find((t: any) => t.id === task).audit).toMatchObject({ status: "done", verdict: "warn", findings: 1, high: 1, model: "test" });
+    // The report joins the evidence on the record.
+    expect(await env.PACKAGES.head(`factory/mine/${req}/build-${task}/audit.md`)).not.toBeNull();
   });
 
   it("a newer build of the same package supersedes the staged one before it", async () => {
@@ -208,7 +226,7 @@ describe("a community build, its audit and the review", () => {
 
   it("the project's build of the merged recipe completes with the seal: linked to the approval, the chain as JSON, an attestation next to the object", async () => {
     // The recipe m2 wrote landed on main: the enqueue job queues the project build at that commit.
-    await env.DB.prepare(`INSERT INTO factory_packages (name, owner, url, "group", arches, status) VALUES ('mine', 'm1', 'https://github.com/alice/mine', 'community', '["aarch64"]', 'approved')`).run();
+    await env.DB.prepare(`UPDATE factory_packages SET owner = 'm1', status = 'approved' WHERE name = 'mine'`).run();
     const q = await call("POST", "/factory/enqueue", { name: "mine", group: "community", pkgbuild_ref: "9f1c2ab", reason: "merged", arches: ["aarch64"], version: "1.0-1" }, "omc_m2");
     expect(q.status, JSON.stringify(q.json)).toBe(201);
     // The trusted worker claims it, publishes the package to the pool with the job token, completes.
