@@ -51,16 +51,18 @@ print(f"{len(have)} of {len(wanted)} wanted packages are served by {sys.argv[2]}
 ' "$WORK/wanted2.txt" "$RING" > "$WORK/install.txt" || { echo "could not read the ring" >&2; exit 1; }
 [[ -s "$WORK/install.txt" ]] || { echo "nothing of the Omarchy set is served by $RING" >&2; exit 1; }
 
-repos=$(for src in core extra multilib packages factory; do
-  if curl -sfI --max-time 20 "$POOL/$ARCH/omarchy-$src-$RING.db" >/dev/null; then echo "omarchy-$src-$RING"; fi
-done)
-# The databases must be the pool's (signed); the packages are installed as
+# The Omarchy set's repositories, with the Server lines the pool's include
+# gives them (routes/setup.ts: each database's own directory). The
+# databases must be the pool's (signed); the packages are installed as
 # bytes for their libraries — whether their signatures verify is the health
-# check's and the verify job's question, not this reference's.
+# check's and the verify job's question, not this reference's — so the
+# include's per-section SigLevel is dropped for the one in [options].
+include=$(curl -sf --max-time 20 "$OMARCHY_API/api/v1/pacman.conf?ring=$RING&arch=$ARCH") || { echo "the pool has no include for $RING/$ARCH" >&2; exit 1; }
+keep=" $(for src in core extra multilib packages factory; do printf 'omarchy-%s-%s ' "$src" "$RING"; done)"
 {
   echo "[options]"; echo "Architecture = $ARCH"; echo "SigLevel = DatabaseRequired PackageNever"
-  echo "DisableSandbox"
-  for repo in $repos; do printf '\n[%s]\nServer = %s/$arch\n' "$repo" "$POOL"; done
+  echo "DisableSandbox"; echo
+  awk -v keep="$keep" '/^\[/ { on = index(keep, " " substr($0, 2, length($0) - 2) " ") > 0 } on && !/^SigLevel/ { print }' <<< "$include"
 } > "$WORK/pacman.conf"
 cp "$ROOT/docs/omarchy-staging.pub.asc" "$WORK/omarchy-poc.pub.asc"
 if [[ -n "${OMARCHY_KEYRINGS:-}" && -f "$OMARCHY_KEYRINGS/omarchy.gpg" ]]; then cp "$OMARCHY_KEYRINGS/omarchy.gpg" "$WORK/omarchy.gpg"; fi

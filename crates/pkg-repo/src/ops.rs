@@ -112,12 +112,12 @@ pub fn publish(
         let manifest = pkg_extract::extract_manifest(archive)
             .with_context(|| format!("inspecting {}", archive.display()))?;
         let sha = manifest.sha256.clone();
-        // The pool keeps the first object stored under a filename (the same
-        // rule the sync applies to upstream rebuilds): a rebuild of the same
-        // version pins what is already there instead of failing on the
-        // size/sha mismatch.
+        // The pool keeps the first object a source stored under a filename
+        // (the same rule the sync applies to upstream rebuilds): a rebuild of
+        // the same version pins what is already there instead of failing on
+        // the size/sha mismatch.
         let (_, by_filename) =
-            api.known_with_filenames(&[], std::slice::from_ref(&manifest.filename), arch)?;
+            api.known_with_filenames(&[], std::slice::from_ref(&manifest.filename), source, arch)?;
         let sha = match by_filename.get(&manifest.filename) {
             Some(stored) if *stored != sha => {
                 eprintln!(
@@ -138,12 +138,12 @@ pub fn publish(
                 "uploading {} {} ({} bytes)",
                 manifest.name, manifest.version, manifest.size_download
             );
-            api.upload_pool(&sha, &manifest.filename, arch, archive)?;
+            api.upload_pool(&sha, &manifest.filename, source, arch, archive)?;
             let sig = PathBuf::from(format!("{}.sig", archive.display()));
             if pool_signs {
-                api.sign_pool(&sha, &manifest.filename, arch)?;
+                api.sign_pool(&sha, &manifest.filename, source, arch)?;
             } else if sig.exists() {
-                api.upload_pool_signature(&sha, &manifest.filename, arch, &sig)?;
+                api.upload_pool_signature(&sha, &manifest.filename, source, arch, &sig)?;
             }
             api.index_manifest(&manifest, source, arch)?;
             bytes += manifest.size_download;

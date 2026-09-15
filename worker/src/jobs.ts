@@ -64,6 +64,10 @@ export async function handleQueueJob(c: Contributor, request: Request, env: Env)
     case "gc":
       job = { kind: "gc", params: s("keep") ? { keep: s("keep") } : {}, arch: "x86_64" };
       break;
+    case "relayout":
+      // The one-time move of every object into its source's directory (routes/relayout.ts).
+      job = { kind: "relayout", params: {}, arch: "x86_64" };
+      break;
     case "security":
     case "enqueue":
       job = { kind: b.kind, params: {}, arch: ARCHES.includes(b.arch ?? "") ? (b.arch as string) : "x86_64" };
@@ -78,7 +82,7 @@ export async function handleQueueJob(c: Contributor, request: Request, env: Env)
       break;
     }
     default:
-      return json({ error: "kind must be one of sync, promote, rollback, render, health, security, enqueue, gc, verify" }, 400);
+      return json({ error: "kind must be one of sync, promote, rollback, render, health, security, enqueue, gc, verify, relayout" }, 400);
   }
   const id = await createJob(env, job, `queued by ${c.login}`);
   await env.DB.prepare("INSERT INTO events (kind, ring, source, status, summary, payload) VALUES ('dispatch', ?, ?, 'ok', ?, ?)")

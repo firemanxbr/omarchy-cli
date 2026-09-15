@@ -1,16 +1,19 @@
 import { json, type Env } from "../index";
 import { signingEnabled, detachedSignature } from "../signing";
 import { IMMUTABLE, isRepoArch, packageKey, signatureKey } from "../r2";
+import { SOURCES } from "./packages";
 
 const FILENAME_RE = /^[A-Za-z0-9@._+:-]+-(x86_64|aarch64|any)\.pkg\.tar\.(zst|xz)$/;
 
-/** `?filename=` and `?arch=` (the upstream repository's architecture). */
-function target(url: URL): { filename: string; repoArch: string } | Response {
+/** `?filename=`, `?source=` (the upstream repository) and `?arch=` (its architecture): together, the object's key. */
+function target(url: URL): { filename: string; source: string; repoArch: string } | Response {
   const filename = url.searchParams.get("filename") ?? "";
   if (!FILENAME_RE.test(filename)) return json({ error: "filename must be <name>-<ver>-<arch>.pkg.tar.zst" }, 400);
+  const source = url.searchParams.get("source") ?? "";
+  if (!(SOURCES as readonly string[]).includes(source)) return json({ error: `source must be one of ${SOURCES.join(", ")}` }, 400);
   const repoArch = url.searchParams.get("arch") ?? "x86_64";
   if (!isRepoArch(repoArch)) return json({ error: "arch must be x86_64 or aarch64" }, 400);
-  return { filename, repoArch };
+  return { filename, source, repoArch };
 }
 
 /**
@@ -22,7 +25,7 @@ export async function handlePutPool(sha256: string, url: URL, request: Request, 
   const t = target(url);
   if (t instanceof Response) return t;
   if (!request.body) return json({ error: "empty body" }, 400);
-  const key = packageKey(t.repoArch, t.filename);
+  const key = packageKey(t.source, t.repoArch, t.filename);
   const existing = await env.PACKAGES.head(key);
   if (existing) return json({ sha256, key, size: existing.size, status: "already-present" });
 
@@ -46,13 +49,13 @@ export async function handleSignPool(sha256: string, url: URL, env: Env): Promis
   if (!signingEnabled(env)) return json({ error: "the pool has no signing key configured" }, 501);
   const t = target(url);
   if (t instanceof Response) return t;
-  const key = packageKey(t.repoArch, t.filename);
+  const key = packageKey(t.source, t.repoArch, t.filename);
   const obj = await env.PACKAGES.get(key);
   if (!obj) return json({ error: "archive not in pool" }, 404);
   const storedSha = obj.checksums.sha256 ? [...new Uint8Array(obj.checksums.sha256)].map((b) => b.toString(16).padStart(2, "0")).join("") : null;
   if (storedSha && storedSha !== sha256) return json({ error: `the pool serves ${storedSha} under ${t.filename}; not ${sha256}` }, 409);
   const sig = await detachedSignature(env, obj.body as ReadableStream<Uint8Array>);
-  await env.PACKAGES.put(signatureKey(t.repoArch, t.filename), sig, { httpMetadata: { cacheControl: IMMUTABLE } });
+  await env.PACKAGES.put(signatureKey(t.source, t.repoArch, t.filename), sig, { httpMetadata: { cacheControl: IMMUTABLE } });
   await env.DB.prepare("UPDATE packages SET has_signature = 1 WHERE sha256 = ? AND repo_arch = ?").bind(sha256, t.repoArch).run();
   return json({ sha256, signed: true, size: sig.byteLength }, 201);
 }
@@ -61,15 +64,15 @@ export async function handlePutPoolSig(sha256: string, url: URL, request: Reques
   const t = target(url);
   if (t instanceof Response) return t;
   if (!request.body) return json({ error: "empty body" }, 400);
-  const archive = await env.PACKAGES.head(packageKey(t.repoArch, t.filename));
+  const archive = await env.PACKAGES.head(packageKey(t.source, t.repoArch, t.filename));
   if (!archive) return json({ error: "archive not in pool" }, 404);
-  // A signature belongs to exact bytes. The pool keeps the first object
-  // stored under a filename, so a signature of a rebuild with different
-  // content would break verification of what is actually served.
+  // A signature belongs to exact bytes. The pool keeps the first object a
+  // source stored under a filename, so a signature of a rebuild with
+  // different content would break verification of what is actually served.
   const storedSha = archive.checksums.sha256 ? [...new Uint8Array(archive.checksums.sha256)].map((b) => b.toString(16).padStart(2, "0")).join("") : null;
   if (storedSha && storedSha !== sha256) return json({ error: `the pool serves ${storedSha} under ${t.filename}; a signature for ${sha256} does not apply`, stored: storedSha }, 409);
   const bytes = await request.arrayBuffer();
-  await env.PACKAGES.put(signatureKey(t.repoArch, t.filename), bytes, { httpMetadata: { cacheControl: IMMUTABLE } });
+  await env.PACKAGES.put(signatureKey(t.source, t.repoArch, t.filename), bytes, { httpMetadata: { cacheControl: IMMUTABLE } });
   await env.DB.prepare("UPDATE packages SET has_signature = 1 WHERE sha256 = ? AND repo_arch = ?").bind(sha256, t.repoArch).run();
   return json({ sha256, size: bytes.byteLength, status: "stored" }, 201);
 }
@@ -82,7 +85,7 @@ export async function handlePutPoolSig(sha256: string, url: URL, request: Reques
 export async function handleMultipartCreate(sha256: string, url: URL, env: Env): Promise<Response> {
   const t = target(url);
   if (t instanceof Response) return t;
-  const key = packageKey(t.repoArch, t.filename);
+  const key = packageKey(t.source, t.repoArch, t.filename);
   if (await env.PACKAGES.head(key)) return json({ status: "already-present" });
   const upload = await env.PACKAGES.createMultipartUpload(key, {
     httpMetadata: { contentType: "application/octet-stream", cacheControl: IMMUTABLE },

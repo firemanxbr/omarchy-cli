@@ -11,9 +11,10 @@
  * is the user's.
  */
 import { isRing, type Env } from "../index";
-import { isRepoArch } from "../r2";
-import { EXPECTED_SOURCES, sourceRank } from "../meta";
+import { isRepoArch, keyDir } from "../r2";
+import { EXPECTED_SOURCES, sourceRank, sourceOfRepo } from "../meta";
 import { ringHead } from "../db";
+import { UNMOVED } from "./relayout";
 
 /** The include file: one section per database the ring serves for the architecture, in REPO_ORDER (meta.ts); optional sources only when asked (`with=chaotic`). */
 
@@ -21,21 +22,30 @@ export async function pacmanInclude(env: Env, ring: string, arch: string, withOp
   if (!isRing(ring) || !isRepoArch(arch)) return null;
   const head = await ringHead(env, ring);
   if (!head) return null;
-  const dbs = await env.DB.prepare("SELECT repo FROM release_artifacts WHERE release_id = ? AND kind = 'db' AND arch = ? ORDER BY repo").bind(head.id, arch).all<{ repo: string }>();
+  const dbs = await env.DB.prepare("SELECT repo, r2_key FROM release_artifacts WHERE release_id = ? AND kind = 'db' AND arch = ? ORDER BY repo").bind(head.id, arch).all<{ repo: string; r2_key: string }>();
   const pool = env.POOL_URL.replace(/\/$/, "");
-  const sourceOf = (repo: string) => repo.replace(/^omarchy-/, "").replace(new RegExp(`-${ring}$`), "");
-  const repos = dbs.results.map((r) => r.repo).sort((a, b) => sourceRank(sourceOf(a)) - sourceRank(sourceOf(b)) || a.localeCompare(b));
+  const sourceOf = (repo: string) => sourceOfRepo(repo) ?? repo;
+  const repos = dbs.results.sort((a, b) => sourceRank(sourceOf(a.repo)) - sourceRank(sourceOf(b.repo)) || a.repo.localeCompare(b.repo));
+  // A section's Server is the directory its database is in — a source's own
+  // (`<source>/<arch>`), where its packages are. While a relayout is still
+  // moving objects out of the flat `<arch>/` directory, that one is named
+  // second: pacman tries the servers in order, so a package not yet moved
+  // is still found. The line goes when the last object has moved.
+  const moving = await env.DB.prepare(`SELECT 1 FROM packages WHERE ${UNMOVED} LIMIT 1`).first();
   const lines = [
     `# omarchy-pool — ring ${ring}, ${arch}. Generated from what the ring serves (release #${head.seq}).`,
     `# Included from /etc/pacman.conf above [core]; the mirrors below it are the fallback.`,
     `# ${setupUrl} rewrites this file; edit /etc/pacman.conf, not this.`,
     "",
   ];
-  for (const repo of repos) {
+  for (const { repo, r2_key } of repos) {
     const source = sourceOf(repo);
     const expected = EXPECTED_SOURCES.find((e) => e.source === source && e.arch === arch);
     if (expected?.optional && !withOptional.has(source)) continue;
-    lines.push(`[${repo}]`, "SigLevel = Required DatabaseRequired", `Server = ${pool}/$arch`, "");
+    const dir = keyDir(r2_key) === arch ? "$arch" : keyDir(r2_key).replace(new RegExp(`/${arch}$`), "/$arch");
+    lines.push(`[${repo}]`, "SigLevel = Required DatabaseRequired", `Server = ${pool}/${dir}`);
+    if (moving && dir !== "$arch") lines.push(`Server = ${pool}/$arch`);
+    lines.push("");
   }
   return lines.join("\n");
 }

@@ -11,11 +11,10 @@
  * signature beside it, so anyone can check it without trusting this API.
  *
  *   GET /api/v1/packages/:sha256/provenance      the seal as JSON
- *   pool/<arch>/<filename>.provenance.json(.sig) the attestation, factory builds
+ *   pool/factory/<arch>/<filename>.provenance.json(.sig) the attestation, factory builds
  */
 import { json, type Env } from "../index";
 import { version } from "../meta";
-import { packageKey } from "../r2";
 import { detachedSignature, publicKey, signingEnabled } from "../signing";
 
 const REPO_URL = "https://github.com/firemanxbr/omarchy-pool";
@@ -29,7 +28,7 @@ function upstreamOf(source: string, repoArch: string): { project: string; keyrin
   return { project: "Arch Linux", keyring: "archlinux" };
 }
 
-interface PackageRow { id: number; sha256: string; name: string; version: string; arch: string; repo_arch: string; filename: string; source: string; has_signature: number; created_at: string }
+interface PackageRow { id: number; sha256: string; name: string; version: string; arch: string; repo_arch: string; filename: string; source: string; has_signature: number; created_at: string; r2_key: string }
 interface TaskRow { id: number; name: string; group: string; arch: string; version: string | null; pkgbuild_ref: string; owner: string | null; trust: string; started_at: string | null; finished_at: string | null; duration_ms: number | null; attempts: number }
 
 async function builderOf(env: Env, task: number): Promise<{ worker: string | null; agent: string | null }> {
@@ -104,15 +103,15 @@ export async function factoryChain(env: Env, sha256: string): Promise<Record<str
 
 /** The seal of any object the pool stores. */
 export async function sealOf(env: Env, sha256: string): Promise<Record<string, unknown> | null> {
-  const p = await env.DB.prepare("SELECT id, sha256, name, version, arch, repo_arch, filename, source, has_signature, created_at FROM packages WHERE sha256 = ? ORDER BY id LIMIT 1")
+  const p = await env.DB.prepare("SELECT id, sha256, name, version, arch, repo_arch, filename, source, has_signature, created_at, COALESCE(r2_key, repo_arch || '/' || filename) AS r2_key FROM packages WHERE sha256 = ? ORDER BY id LIMIT 1")
     .bind(sha256)
     .first<PackageRow>();
   if (!p) return null;
   const key = await publicKey(env);
-  const base = { sha256: p.sha256, name: p.name, version: p.version, arch: p.arch, repo_arch: p.repo_arch, filename: p.filename, source: p.source, indexed_at: p.created_at, object: `${env.POOL_URL}/${packageKey(p.repo_arch, p.filename)}` };
+  const base = { sha256: p.sha256, name: p.name, version: p.version, arch: p.arch, repo_arch: p.repo_arch, filename: p.filename, source: p.source, indexed_at: p.created_at, object: `${env.POOL_URL}/${p.r2_key}` };
   if (p.source === "factory") {
     const chain = await factoryChain(env, sha256);
-    const att = packageKey(p.repo_arch, `${p.filename}.provenance.json`);
+    const att = `${p.r2_key}.provenance.json`;
     const attested = await env.PACKAGES.head(att);
     return {
       ...base,
@@ -121,7 +120,7 @@ export async function sealOf(env: Env, sha256: string): Promise<Record<string, u
       summary: chain
         ? `built by the project on ${chain && (chain.builder as { worker: string | null }).worker ? (chain.builder as { worker: string }).worker : "a trusted worker"}${(chain.audit as { verdict?: string } | null)?.verdict ? `, audited (${(chain.audit as { verdict: string }).verdict})` : ""}${(chain.approval as { by?: string } | null)?.by ? `, approved by ${(chain.approval as { by: string }).by}` : ""}, signed by the pool`
         : "built by the project, signed by the pool",
-      signature: key ? { by: "the pool", fingerprint: key.fingerprint, object: `${env.POOL_URL}/${packageKey(p.repo_arch, p.filename)}.sig` } : null,
+      signature: key ? { by: "the pool", fingerprint: key.fingerprint, object: `${env.POOL_URL}/${p.r2_key}.sig` } : null,
       chain,
       attestation: attested ? { statement: `${env.POOL_URL}/${att}`, signature: key ? `${env.POOL_URL}/${att}.sig` : null } : null,
     };
@@ -132,7 +131,7 @@ export async function sealOf(env: Env, sha256: string): Promise<Record<string, u
     origin: p.source === "packages" ? "opr" : p.source === "chaotic" ? "chaotic" : p.repo_arch === "aarch64" ? "archlinuxarm" : "archlinux",
     seal: `imported from ${up.project}`,
     summary: `imported from ${up.project} (${p.source})${p.has_signature ? `, upstream signature verified against the ${up.keyring} keyring at import and served beside the object` : ""}`,
-    upstream: { project: up.project, repository: p.source, keyring: up.keyring, signature: p.has_signature ? `${env.POOL_URL}/${packageKey(p.repo_arch, p.filename)}.sig` : null, verified: p.has_signature === 1 },
+    upstream: { project: up.project, repository: p.source, keyring: up.keyring, signature: p.has_signature ? `${env.POOL_URL}/${p.r2_key}.sig` : null, verified: p.has_signature === 1 },
     signature: null,
     chain: null,
     attestation: null,
@@ -146,7 +145,7 @@ export async function sealOf(env: Env, sha256: string): Promise<Record<string, u
  * build completes; a rerun overwrites with the same facts.
  */
 export async function writeAttestation(env: Env, sha256: string): Promise<boolean> {
-  const p = await env.DB.prepare("SELECT repo_arch, filename FROM packages WHERE sha256 = ? ORDER BY id LIMIT 1").bind(sha256).first<{ repo_arch: string; filename: string }>();
+  const p = await env.DB.prepare("SELECT filename, COALESCE(r2_key, repo_arch || '/' || filename) AS r2_key FROM packages WHERE sha256 = ? ORDER BY id LIMIT 1").bind(sha256).first<{ filename: string; r2_key: string }>();
   const chain = await factoryChain(env, sha256);
   if (!p || !chain) return false;
   const statement = {
@@ -156,7 +155,7 @@ export async function writeAttestation(env: Env, sha256: string): Promise<boolea
     predicate: { ...chain, attested_at: new Date().toISOString() },
   };
   const bytes = new TextEncoder().encode(JSON.stringify(statement, null, 2) + "\n");
-  const key = packageKey(p.repo_arch, `${p.filename}.provenance.json`);
+  const key = `${p.r2_key}.provenance.json`;
   await env.PACKAGES.put(key, bytes, { httpMetadata: { contentType: "application/json", cacheControl: "public, max-age=300" } });
   if (signingEnabled(env)) {
     const sig = await detachedSignature(env, bytes);

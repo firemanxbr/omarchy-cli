@@ -61,8 +61,8 @@ curl -s https://pkgs.firemanxbr.org/api/v1/releases/stable/history | jq '.releas
 <pre>curl -s https://pkgs.firemanxbr.org/api/v1/stats \
   | jq '[.latest[] | select(.kind == "health") | {ring, arch: .source, status, at: .created_at}]'</pre></div>
       <div class="step"><h3>The static side (what pacman reads)</h3>
-<pre>curl -sI https://pool.firemanxbr.org/x86_64/omarchy-core-stable.db | head -3
-curl -s  https://pool.firemanxbr.org/x86_64/omarchy-core-stable.db | tar -tz | head</pre></div>
+<pre>curl -sI https://pool.firemanxbr.org/core/x86_64/omarchy-core-stable.db | head -3
+curl -s  https://pool.firemanxbr.org/core/x86_64/omarchy-core-stable.db | tar -tz | head</pre></div>
     </div>
   </section>
 
@@ -75,7 +75,7 @@ curl -s  https://pool.firemanxbr.org/x86_64/omarchy-core-stable.db | tar -tz | h
       <tr><td><code>POST /packages?source=&amp;arch=</code> · <code>POST /packages/known</code></td><td>Index a manifest; ask which sha256s are already indexed.</td></tr>
       <tr><td><code>POST /releases</code></td><td>Create, promote or roll back a release (an index write). An added package replaces its own source's build of that name; another source's stays (the include's order decides between them). <code>remove</code> drops a name from every source, <code>remove_from</code> (<code>{source, name}</code>) from one; <code>arch</code> moves one architecture only while the other keeps what the ring serves.</td></tr>
       <tr><td><code>PUT /releases/:id/artifacts/:kind?repo=&amp;arch=</code></td><td>Publish a rendered database beside the packages; the pool signs it as it stores it.</td></tr>
-      <tr><td><code>POST /events</code> · <code>POST /pool/gc</code></td><td>Record a journal entry; run retention.</td></tr>
+      <tr><td><code>POST /events</code> · <code>POST /pool/gc</code> · <code>POST /pool/relayout</code></td><td>Record a journal entry; run retention; one step of the one-time move to one directory per source (the <code>relayout</code> job).</td></tr>
       <tr><td><code>PUT /factory/tasks/:id/artifacts/&lt;file&gt;</code></td><td>A community build's token uploads its evidence to its own staging workspace; an audit's token adds <code>audit.json</code> / <code>audit.md</code> to a staged build, and nothing else.</td></tr>
     </tbody></table></div>
   </section>

@@ -211,9 +211,9 @@ export function workerReady(w: { last_seen: string; kinds: string | null; agent:
   return !needsAgent || w.agent_status === "ok";
 }
 
-const ALL_KINDS = ["build", "sync", "promote", "rollback", "render", "health", "security", "metrics", "gc", "enqueue", "audit", "verify"];
+const ALL_KINDS = ["build", "sync", "promote", "rollback", "render", "health", "security", "metrics", "gc", "enqueue", "audit", "verify", "relayout"];
 /** Jobs any architecture can run: they read the index or the staging area, not packages of one arch. */
-const ANY_ARCH_KINDS = "'metrics', 'gc', 'security', 'promote', 'audit', 'verify'";
+const ANY_ARCH_KINDS = "'metrics', 'gc', 'security', 'promote', 'audit', 'verify', 'relayout'";
 
 export async function handleClaim(request: Request, env: Env, actor: Actor): Promise<Response> {
   const b = (await request.json()) as { arch?: string; hostname?: string; labels?: unknown; version?: string; kinds?: unknown; shared?: unknown; agent?: unknown; agent_status?: unknown; agent_error?: unknown; agent_checked_at?: unknown };

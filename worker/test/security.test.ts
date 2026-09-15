@@ -30,7 +30,7 @@ const sha = (s: string) => Array.from({ length: 64 }, (_, i) => s.charCodeAt(i %
 async function index(repoArch: string, version: string, components: { ecosystem: string; name: string; version: string }[], token: string): Promise<{ sha256: string; id: number }> {
   const filename = `smolvm-${version}-${repoArch}.pkg.tar.zst`;
   const bytes = new TextEncoder().encode(`fake ${filename}`);
-  await env.PACKAGES.put(packageKey(repoArch, filename), bytes);
+  await env.PACKAGES.put(packageKey("packages", repoArch, filename), bytes);
   const s = sha(`${repoArch}/${filename}`);
   const r = await call("POST", `/packages?source=packages&arch=${repoArch}`, {
     schema_version: 1, name: "smolvm", version, arch: repoArch, sha256: s, filename, size_download: bytes.length, size_installed: 1,
@@ -77,7 +77,7 @@ describe("GET /security fixed_in", () => {
 async function dependant(name: string, requires: string[], token: string): Promise<string> {
   const filename = `${name}-1.0-1-x86_64.pkg.tar.zst`;
   const bytes = new TextEncoder().encode(`fake ${filename}`);
-  await env.PACKAGES.put(packageKey("x86_64", filename), bytes);
+  await env.PACKAGES.put(packageKey("packages", "x86_64", filename), bytes);
   const s = sha(`x86_64/${filename}`);
   const r = await call("POST", "/packages?source=packages&arch=x86_64", {
     schema_version: 1, name, version: "1.0-1", arch: "x86_64", sha256: s, filename, size_download: bytes.length, size_installed: 1,

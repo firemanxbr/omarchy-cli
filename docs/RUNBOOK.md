@@ -9,7 +9,7 @@ time; there is no shared secret. Humans operate the pipeline by queueing jobs
 |---|---|
 | Dashboard | https://omarchy-pool.firemanxbr.org |
 | Index API | https://pkgs.firemanxbr.org/api/v1/stats |
-| Pool (static, what pacman reads) | https://pool.firemanxbr.org/x86_64/ · `/aarch64/` |
+| Pool (static, what pacman reads) | https://pool.firemanxbr.org/`<source>`/x86_64/ · `/aarch64/` — `core/`, `extra/`, `packages/` (the OPR), `asahi/`, `factory/`, … |
 | Signing key | `docs/omarchy-staging.pub.asc` · https://pool.firemanxbr.org/omarchy-staging.pub.asc · https://pkgs.firemanxbr.org/api/v1/signing-key (expires 2027-09-12); the private key is the Worker secret `SIGNING_KEY` — nowhere else |
 | Jobs (pulled by project workers) | Sync (every 3 h, one task per architecture) · Promote (edge→rc 06:00 UTC, rc→stable 09:00 UTC after a one-day soak, evidence-gated, auto-rollback) · Health (daily, both arches) · Security (every 3 h, with fast-track) · GC (Sundays) · Metrics snapshot (every 30 min, by the brain itself) · Release (GitHub, every merge into `main`) |
 | Running version | https://pkgs.firemanxbr.org/api/v1/version · the chip in the dashboard header |
@@ -58,6 +58,7 @@ pkg-repo job security
 pkg-repo job enqueue                                                   # the PKGBUILDs on main → the queue, now
 pkg-repo job verify                                                    # every served OPR object verified and repaired (--param ring= --param arch= --param repair=no to only report)
 pkg-repo job gc --param keep=3
+pkg-repo job relayout                                                  # one-time: every object into its source's directory (below)
 ```
 
 Promotions are gated by evidence (see *Promotion by evidence* in
@@ -288,15 +289,56 @@ same project (an `omarchy-t2` beside `omarchy`, say) is a new **source**:
    keyrings holds: `tests/fetch-keyrings.sh`.
 
 The rest follows the source name: the rendered repository is
-`omarchy-<source>-<ring>` (`render`), the health check reads the rendered
+`omarchy-<source>-<ring>` (`render`), its objects and databases live in
+`<source>/<arch>/` on the pool, the health check reads the rendered
 databases from the release's artifacts, the coverage table and the pipeline
 status list every source they see. The next sync imports it; the next
-promotion carries it.
+promotion carries it. Its place in the include is `REPO_ORDER`
+(`worker/src/meta.ts`): a ring keeps every source's build of a name, and
+that order is what decides between them on a machine.
+
+## The relayout (one directory per source)
+
+Until 2026-09-15 the pool was flat: `<arch>/<filename>`, one object per
+filename whichever source built it — so Arch's `asusctl-6.5.0-1` stood in for
+the OPR's, Arch Linux ARM's `libkrunfw` for Asahi's, and a ring could hold
+one build of a name. Now every source has its directory
+(`<source>/<arch>/<filename>`, `worker/src/r2.ts`) and a ring holds one
+row per source, name and architecture (routes/releases.ts). The move is
+the `relayout` job, run once:
+
+```
+pkg-repo job relayout
+```
+
+It copies every object into its source's directory (R2 checks the row's
+sha256 on the way; the signature and attestation travel with it; nothing
+is deleted), renders every ring so the databases sit in the same
+directories, then purges what is left under the flat `x86_64/` and
+`aarch64/`. 34 k objects, 311 GB, an hour or three; ~US$ 0.40 of R2
+operations. While it runs, the include names both directories for every
+section — pacman tries the servers in order, so a package not yet moved is
+still found — and drops the flat one when the last object has moved. A row
+whose bytes the pool never held (a rebuild indexed behind an earlier build
+of the filename, before 2026-09-12) is marked `ghost/…` and left to
+retention. The `relayout` event in the journal says what moved, what was
+a ghost, what could not be copied.
+
+Every machine set up before it needs the new include once — the one
+command, again:
+
+```
+curl -fsSL https://pkgs.firemanxbr.org/setup | sudo bash -s -- --ring stable
+```
+
+Its old include keeps working until the purge; after, its `Server =
+…/$arch` lines name a directory that is gone.
 
 ## When what the pool serves does not verify
 
-The pool holds one object per `<arch>/<filename>` and never overwrites it;
-the OPR rebuilds the same version per channel with different bytes. Before
+The pool holds one object per `<source>/<arch>/<filename>` and never
+overwrites it; the OPR rebuilds the same version per channel with different
+bytes. Before
 the pool refused a signature for bytes it does not serve (2026-09-12), two
 things went wrong and pacman then refused the package as *corrupted*: a
 later channel's `.sig` beside an earlier channel's object (69 of stable's 229
@@ -319,7 +361,7 @@ failed on its own re-pin: `packages not indexed`. An `any` package is one
 object per architecture directory with different bytes (Arch Linux ARM
 rebuilds them), and the job remembered what the pool stores by filename
 alone — so a ring's x86_64 re-pin carried the aarch64 bytes. It now keeps
-one entry per `<arch>/<filename>`, and a re-pin happens exactly when the
+one entry per `<arch>/<filename>` of the OPR's directory, and a re-pin happens exactly when the
 ring's pin differs from what that directory stores, whatever the
 signature's story was. The index holds one row per sha256 (0001_init.sql):
 the same bytes stored under both directories can be indexed for one of
@@ -474,7 +516,7 @@ Usage based billing*; the API token cannot create them).
 
 **Who uses it.** Once a day (00:30 UTC) the brain counts yesterday's
 audience from the same analytics: the distinct client addresses that
-fetched a ring database (`/<arch>/omarchy-*-<ring>.db`) on the pool's host,
+fetched a ring database (`/<source>/<arch>/omarchy-*-<ring>.db`) on the pool's host,
 per ring and per architecture, as one `audience` journal line
 (`src/audience.ts`); the Pool page's community card and the Pipeline's
 counters show it, `/api/v1/stats` carries the last 30 days. Nothing is kept

@@ -41,16 +41,12 @@ post() { # status summary payload
     --duration-ms $(( $(ms) - started )) --payload "$3" >/dev/null 2>&1 || true
 }
 
-# The head release may not have been rendered for this architecture yet
-# (a build or sync renders the architecture it touched); what users get is
-# the latest rendered database at <arch>/<repo>.db, so check those.
-if [[ -z "$repos" ]]; then
-  for src in core extra multilib alarm packages factory; do
-    if curl -sfI --max-time 20 "$POOL/$ARCH/omarchy-$src-$RING.db" >/dev/null; then repos="$repos omarchy-$src-$RING"; fi
-  done
-  repos="${repos# }"
-fi
-if [[ -z "$repos" ]]; then
+# The repositories exactly as the pool hands them to users: the include
+# (routes/setup.ts) names each database's directory — a source's own,
+# <source>/<arch>, and the flat one beside it while a relayout still moves
+# objects out of it. The optional sources (chaotic) are not in it.
+include=$(curl -sf --max-time 20 "$OMARCHY_API/api/v1/pacman.conf?ring=$RING&arch=$ARCH") || include=""
+if [[ -z "$include" || -z "$repos" ]]; then
   post error "$RING $ARCH: no database is served" '{}'
   echo "$RING $ARCH: nothing served"; exit 1
 fi
@@ -59,7 +55,8 @@ fi
   echo "[options]"
   echo "Architecture = $ARCH"
   echo "SigLevel = Required DatabaseRequired"
-  for repo in $repos; do printf '\n[%s]\nServer = %s/$arch\n' "$repo" "$POOL"; done
+  echo
+  echo "$include"
 } > "$WORK/pacman.conf"
 cp "$ROOT/docs/omarchy-staging.pub.asc" "$WORK/omarchy-poc.pub.asc"
 # Omarchy's key, as omarchy-keyring installs it, when the caller fetched the keyrings.

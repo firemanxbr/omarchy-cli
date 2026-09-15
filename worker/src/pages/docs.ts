@@ -89,8 +89,8 @@ const SCRIPT = String.raw`
   function link(c) { return '<p style="margin-top:14px"><a href="' + c.href + '" style="color:var(--green);text-decoration:none">Read the full chapter →</a></p>'; }
   function pick(id, values, current, on) { var el = $("#" + id); if (!el) return; el.innerHTML = values.map(function (v) { return '<button type="button" class="' + (v === current ? "on" : "") + '" data-v="' + v + '">' + v + '</button>'; }).join(""); el.querySelectorAll("button").forEach(function (b) { b.onclick = function () { on(b.getAttribute("data-v")); }; }); }
   function confFor(ring, arch) {
-    var repos = arch === "x86_64" ? ["core", "extra", "multilib", "packages", "factory"] : ["core", "extra", "alarm", "packages", "factory"];
-    return '<span class="c"># the exact list for what the ring serves right now is on the Pool page</span>\n' + repos.map(function (r) { return "[<b>omarchy-" + r + "-" + ring + "</b>]\nSigLevel = Required DatabaseRequired\nServer = " + POOL + "/$arch"; }).join("\n\n");
+    var repos = arch === "x86_64" ? ["packages", "factory", "core", "extra", "multilib"] : ["asahi", "asahi-alarm", "packages", "factory", "core", "extra", "alarm"];
+    return '<span class="c"># the exact list for what the ring serves right now is on the Pool page</span>\n' + repos.map(function (r) { return "[<b>omarchy-" + r + "-" + ring + "</b>]\nSigLevel = Required DatabaseRequired\nServer = " + POOL + "/" + r + "/$arch"; }).join("\n\n");
   }
   function render() {
     nav(); var main = $("#docs-main"), q = st.q.trim().toLowerCase();

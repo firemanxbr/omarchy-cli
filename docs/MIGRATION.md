@@ -219,7 +219,7 @@ import it into the new one before the first sync, and copy the bucket with
 ```bash
 curl -s https://pkgs.example.org/api/v1/status | jq .            # online
 curl -s https://pkgs.example.org/api/v1/stats | jq '.rings[] | {ring, package_count}'
-curl -sI https://pool.example.org/x86_64/omarchy-core-stable.db | head -1   # 200 from the bucket
+curl -sI https://pool.example.org/core/x86_64/omarchy-core-stable.db | head -1   # 200 from the bucket
 pkg-repo job health --param ring=stable --param arch=x86_64      # real pacman per ring and architecture (and aarch64)
 ```
 

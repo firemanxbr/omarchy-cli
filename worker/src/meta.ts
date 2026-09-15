@@ -44,6 +44,12 @@ export function sourceRank(source: string): number {
   return i < 0 ? REPO_ORDER.length : i;
 }
 
+/** The source a rendered repository lists: `omarchy-<source>-<ring>` → `<source>`; null for any other name. */
+export function sourceOfRepo(repo: string): string | null {
+  const m = repo.match(/^omarchy-(.+)-(edge|rc|stable)$/);
+  return m ? m[1] : null;
+}
+
 /**
  * Every upstream repository the pipeline mirrors (the SOURCES table of
  * SYNC_SOURCES in scheduler.ts), so the dashboard can show what has not been synced yet.
