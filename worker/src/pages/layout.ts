@@ -33,7 +33,11 @@ const CSS = String.raw`
   header nav a { color: var(--muted); text-decoration: none; padding-bottom: 2px; border-bottom: 1px solid transparent; }
   header nav a:hover { color: var(--text); }
   header nav a.active { color: var(--text); border-bottom-color: var(--green); }
-  header .account { font-size: 13px; border: 1px solid var(--line); padding: 5px 11px; white-space: nowrap; display: inline-flex; align-items: center; }
+  header .account { font-size: 13px; border: 1px solid var(--line); padding: 5px 11px; white-space: nowrap; display: inline-flex; align-items: center; max-width: min(46vw, 420px); }
+  header .account #account { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+  /* A long GitHub login never wraps the header: the name is cut with an ellipsis (the full one is the link's title). */
+  header .account b { max-width: 18ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  header #status { margin-left: 6px; }
   header .account:hover { border-color: var(--green); }
   header .account a { color: var(--text); text-decoration: none; }
   header .account .who { color: var(--muted); }
@@ -171,7 +175,8 @@ const CSS = String.raw`
   .kind { display: inline-block; min-width: 68px; color: var(--blue); }
   .when { color: var(--dim); white-space: nowrap; }
   .muted { color: var(--muted); }
-  footer { border-top: 1px solid var(--line); background: var(--bg-deep); padding: 22px 32px; font-size: 13px; color: var(--dim); display: flex; gap: 24px; flex-wrap: wrap; }
+  footer { border-top: 1px solid var(--line); background: var(--bg-deep); padding: 22px 32px; font-size: 13px; color: var(--dim); display: flex; gap: 24px; flex-wrap: wrap; align-items: center; }
+  footer .fright { margin-left: auto; display: inline-flex; align-items: center; gap: 16px; } footer .fright .gh svg { width: 20px; height: 20px; }
   footer a { color: var(--muted); text-decoration: none; }
 
   .charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr)); gap: 16px; margin: 16px 0; }
@@ -195,7 +200,8 @@ const CSS = String.raw`
     header .brand { grid-area: brand; } header .ver { grid-area: chip; justify-self: end; } header .spacer { display: none; }
     header nav { grid-area: nav; display: flex; gap: 18px; overflow-x: auto; white-space: nowrap; padding-bottom: 4px; margin: 0 -16px; padding-left: 16px; padding-right: 16px; scrollbar-width: none; }
     header nav::-webkit-scrollbar { display: none; }
-    header #status { grid-area: status; } header .account { grid-area: account; justify-self: end; }
+    header #status { grid-area: status; margin-left: 0; } header .account { grid-area: account; justify-self: end; max-width: 60vw; }
+    footer .fright { margin-left: 0; }
     main { padding: 20px 16px 40px; }
     h1 { font-size: 22px; line-height: 1.25; } h2 { font-size: 19px; }
     .lede { font-size: 14px; }
@@ -268,7 +274,10 @@ const CSS = String.raw`
   .way { border: 1px solid var(--line); background: var(--panel); padding: 18px 20px; display: grid; gap: 8px; align-content: start; }
   .way .tag { font-size: 11.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--dim); display: flex; justify-content: space-between; } .way p { margin: 0; font-size: 13.5px; color: var(--muted); } .way .go { margin-top: 6px; }
   .start-grid { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 16px; align-items: stretch; }
-  .start-grid .steps { grid-template-rows: auto auto 1fr; max-width: none; }
+  .start-grid .steps { grid-template-rows: auto auto auto 1fr; max-width: none; align-content: start; }
+  .start-grid .steps .charts { margin: 0; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); align-items: stretch; }
+  .coverage-box { border: 1px solid var(--line); background: var(--panel); padding: 14px 16px 10px; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr)); gap: 10px 28px; margin: 16px 0; }
+  .coverage-box .k { font-size: 11.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--dim); margin-bottom: 6px; }
   .start-side { display: grid; gap: 16px; grid-template-rows: auto 1fr; }
   .cli-card, .community-card { border: 1px solid var(--line); background: var(--panel); padding: 18px 20px; display: grid; gap: 10px; align-content: start; }
   .community-card { border-color: var(--green); }
@@ -296,14 +305,14 @@ const CSS = String.raw`
   .avatar { display: inline-grid; place-items: center; width: 28px; height: 28px; background: var(--panel-2); border: 1px solid var(--line); color: var(--text); font-size: 12px; font-weight: 600; font-family: Geist, sans-serif; flex: none; text-decoration: none; }
   .avatar.lg { width: 64px; height: 64px; font-size: 24px; border-color: var(--green); } .avatar.m { background: var(--green); color: var(--green-ink); border-color: var(--green); }
   .people { display: flex; flex-wrap: wrap; gap: 10px; }
-  .person { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--line); background: var(--panel); padding: 5px 10px 5px 5px; text-decoration: none; color: var(--text); font-size: 13px; } .person:hover { border-color: var(--green); } .person .r { color: var(--dim); font-size: 11.5px; }
+  .person { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--line); background: var(--panel); padding: 5px 10px 5px 5px; text-decoration: none; color: var(--text); font-size: 13px; max-width: 100%; } .person:hover { border-color: var(--green); } .person > b { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .person .r { color: var(--dim); font-size: 11.5px; }
   .landed { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); gap: 12px; }
   .land { border: 1px solid var(--line); background: var(--panel); padding: 12px 14px; display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; align-items: center; }
   .land .avatar { grid-row: span 2; } .land .n { font-weight: 500; display: flex; justify-content: space-between; gap: 8px; align-items: baseline; } .land .n .v { color: var(--dim); font-size: 12px; }
   .land .b { font-size: 12.5px; color: var(--dim); } .land .b a { color: var(--muted); text-decoration: none; }
   .community { display: grid; grid-template-columns: 1.2fr 1fr; gap: 16px; }
   .community .box { border: 1px solid var(--line); background: var(--panel); padding: 18px 20px; display: grid; gap: 12px; align-content: start; } .community .box p { margin: 0; font-size: 13.5px; color: var(--muted); }
-  .community .stats { display: flex; gap: 22px; flex-wrap: wrap; } .community .stats div b { display: block; font-family: Geist, sans-serif; font-size: 24px; font-weight: 600; line-height: 1.1; } .community .stats div span { font-size: 12px; color: var(--dim); letter-spacing: .06em; text-transform: uppercase; }
+  .community .stats { display: flex; gap: 22px; flex-wrap: wrap; } .community .stats a { color: inherit; text-decoration: none; } .community .stats a:hover b { color: var(--green); } .community .stats > * b { display: block; font-family: Geist, sans-serif; font-size: 24px; font-weight: 600; line-height: 1.1; } .community .stats > * span { font-size: 12px; color: var(--dim); letter-spacing: .06em; text-transform: uppercase; }
   .sponsor { border: 1px solid var(--green); background: var(--panel); padding: 18px 20px; display: grid; grid-template-columns: 1fr auto; gap: 12px 24px; align-items: center; margin-top: 16px; }
   .sponsor p { margin: 0; font-size: 13.5px; color: var(--muted); max-width: 72ch; } .sponsor p b { color: var(--text); }
   .sponsor .needs { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
@@ -335,6 +344,15 @@ const CSS = String.raw`
   .ticker .head { display: flex; justify-content: space-between; font-size: 11.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--dim); border-bottom: 1px solid var(--line); padding-bottom: 6px; margin-bottom: 4px; }
   .live { color: var(--green); display: inline-flex; align-items: center; gap: 6px; } .live i { width: 7px; height: 7px; border-radius: 50%; background: var(--green); animation: pulse 2.4s ease-out infinite; }
   @keyframes tick { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+  /* The Pool's feed: one line per event, the newest on top, cut at the box's edge (the full text on hover and on click). */
+  .feed { display: grid; gap: 0; font-size: 12.5px; }
+  .feed .row { display: grid; grid-template-columns: 44px 76px minmax(0, 1fr); gap: 10px; align-items: baseline; padding: 5px 0; border-bottom: 1px solid var(--line); cursor: default; }
+  .feed .row:last-child { border-bottom: 0; } .feed .row.new { animation: tick .6s ease-out; }
+  .feed .when { color: var(--dim); font-size: 11.5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .feed .kind { min-width: 0; font-size: 12px; } .feed .kind .dot { margin-right: 6px; }
+  .feed .what { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .feed .row.open .what { white-space: normal; overflow-wrap: anywhere; }
+  .feed-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; } .feed-head b { color: var(--text); } .feed-head .live { font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; flex: none; }
   .live-grid { display: grid; grid-template-columns: 1.6fr 1fr; gap: 16px; }
   .counters { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); }
   .counters div { background: var(--panel); padding: 12px 14px; } .counters b { display: block; font-family: Geist, sans-serif; font-size: 24px; font-weight: 600; line-height: 1.1; } .counters span { font-size: 11.5px; color: var(--dim); letter-spacing: .06em; text-transform: uppercase; } .counters b.ok { color: var(--green); }
@@ -504,7 +522,7 @@ const HELPERS = String.raw`
     fetch("/auth/me", { cache: "no-store" }).then(function (r) { return r.ok ? r.json() : null; }).then(function (me) {
       ME = me; var a = $("#account"); if (!a) return;
       if (me) {
-        a.innerHTML = '<span class="avatar' + (me.role === "maintainer" ? " m" : "") + '">' + esc(String(me.login).slice(0, 2)) + '</span><b>' + esc(me.login) + '</b> <span class="who">' + esc(me.role) + '</span>'; a.href = "/user/" + encodeURIComponent(me.login); a.title = "signed in with GitHub as " + me.login + (me.areas && me.areas.length ? " (" + me.areas.join(", ") + ")" : "");
+        a.innerHTML = '<span class="avatar' + (me.role === "maintainer" ? " m" : "") + '">' + esc(String(me.login).slice(0, 2)) + '</span><b>' + esc(me.login) + '</b>'; a.href = "/user/" + encodeURIComponent(me.login); a.title = esc(me.login) + " · " + esc(me.role) + " — signed in with GitHub as " + me.login + (me.areas && me.areas.length ? " (" + me.areas.join(", ") + ")" : "");
         // Sign out is on every page: the cookie is cleared by /auth/logout,
         // the older local-storage token (a CLI token pasted into the page) with it.
         var out = $("#signout"); if (out) { out.hidden = false; out.onclick = function () { try { localStorage.removeItem("omc_token"); localStorage.removeItem("omc_login"); } catch (e) {} location.href = "/auth/logout"; return false; }; }
@@ -528,6 +546,10 @@ const HELPERS = String.raw`
   })();
   // A person, as an icon: two letters, green for a maintainer. No photos anywhere on the dashboard.
   function avatar(login, role, cls) { return '<a class="avatar ' + (cls || "") + (role === "maintainer" ? " m" : "") + '" href="/user/' + encodeURIComponent(login) + '" title="' + esc(login) + (role ? " · " + esc(role) : "") + '">' + esc(String(login).slice(0, 2)) + '</a>'; }
+  // The same icon with no link of its own — for inside a link (a chip), where a nested anchor would split.
+  function avatarIcon(login, role) { return '<span class="avatar' + (role === "maintainer" ? " m" : "") + '">' + esc(String(login).slice(0, 2)) + '</span>'; }
+  // A person as a chip: the icon carries the role (green = maintainer), the whole chip is the link to the profile.
+  function personChip(login, role, extra) { return '<a class="person" href="/user/' + encodeURIComponent(login) + '" title="' + esc(login) + ' · ' + esc(role) + '">' + avatarIcon(login, role) + '<b>' + esc(login) + '</b>' + (extra ? ' <span class="r">' + extra + '</span>' : '') + '</a>'; }
   function tile(k, v, s, cls) { return '<div class="tile"><div class="k">' + k + '</div><div class="v num' + (cls ? " " + cls : "") + '">' + v + '</div><div class="s">' + s + '</div></div>'; }
   function setTiles(sel, list) { var el = $(sel); if (!el) return; list.forEach(function (t, i) { var cell = el.children[i]; if (!cell) { cell = document.createElement("div"); cell.className = "tile"; el.appendChild(cell); } setTile(cell, '<div class="k">' + t[0] + '</div><div class="v num' + (t[3] ? " " + t[3] : "") + '">' + t[1] + '</div><div class="s">' + t[2] + '</div>'); }); while (el.children.length > list.length) el.removeChild(el.lastChild); }
   // Every fetch a page starts goes through busy(): the bar at the top stays
@@ -652,8 +674,8 @@ export function page(o: PageOptions): string {
   <nav>
     ${nav}
   </nav>
-  <span class="spacer"></span>
   <a id="status" class="status" href="/status" title="checking"><i class="led"></i><span>checking</span></a>
+  <span class="spacer"></span>
   <span class="account"><a id="account" href="/auth/github?next=${escapeHtml(o.active === "pipeline" ? "/pipeline" : "/factory")}" title="contributors and maintainers sign in with GitHub">Sign in</a><a id="signout" href="/auth/logout" hidden title="sign out of the dashboard on this browser">sign out</a></span>
 </header>
 
@@ -663,11 +685,11 @@ ${o.body}
 </main>
 
 <footer>
-  <span>omarchy-pool</span><span class="sep">·</span>
-  <a class="fbadge" href="https://omarchy.org/" title="Built for Omarchy">${BUILT_FOR_OMARCHY}</a><span class="sep">·</span>
-  <a class="gh" href="https://github.com/firemanxbr/omarchy-pool">${GITHUB_ICON} GitHub</a><span class="sep">·</span>
-  <span class="more"><span>more:</span>${more}</span><span class="sep">·</span>
-  <span>running ${v.release_url ? `<a href="${escapeHtml(v.release_url)}">${tag}</a>` : tag}${v.commit && v.commit_url ? ` · <a href="${escapeHtml(v.commit_url)}">${escapeHtml(v.commit.slice(0, 7))}</a>` : ""}</span>
+  <span class="more"><span>more:</span>${more}</span>
+  <span class="fright">
+    <a class="gh" href="https://github.com/firemanxbr/omarchy-pool" title="omarchy-pool on GitHub" aria-label="omarchy-pool on GitHub">${GITHUB_ICON}</a>
+    <a class="fbadge" href="https://omarchy.org/" title="Built for Omarchy">${BUILT_FOR_OMARCHY}</a>
+  </span>
 </footer>
 
 <script>
