@@ -72,6 +72,7 @@ import { governanceHtml } from "./pages/governance";
 import { docsHtml } from "./pages/docs";
 import { workersHtml } from "./pages/workers";
 import { userHtml } from "./pages/user";
+import { peopleHtml } from "./pages/people";
 import { handleUser } from "./routes/users";
 import { handleGetEvents, handlePostEvent } from "./routes/events";
 import { handleServiceStatus, handleStats } from "./routes/stats";
@@ -181,6 +182,7 @@ export default {
       if (path === "/packages") return html(packagesHtml(env.POOL_URL, version(env)));
       if (path === "/security") return html(securityHtml(env.POOL_URL, version(env)));
       if (path === "/factory") return html(factoryPageHtml(env.POOL_URL, version(env)));
+      if (path === "/people") return html(peopleHtml(env.POOL_URL, version(env)));
       if (path === "/pipeline") return html(pipelineHtml(env.POOL_URL, version(env)));
       if (path === "/contribute") return html(factoryPageHtml(env.POOL_URL, version(env)));
       if (path === "/review") return html(reviewHtml(env.POOL_URL, version(env)));

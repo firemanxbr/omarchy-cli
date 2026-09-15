@@ -18,7 +18,6 @@ const BODY = String.raw`
     <p class="lede">One <code>Server =</code> line. Every package is verified against its project's key, stored once, and promoted through three rings on evidence — a real <code>pacman</code>, an ABI check, a day of health — never on a promise.</p>
     <div class="cta-row">
       <a class="btn" href="#get-started">Get started</a>
-      <a class="btn ghost" href="#how">How it works</a>
       <span class="hint">No account, no sign-up. Just your Omarchy.</span>
     </div>
     <form class="searchbar" action="/packages" method="get" style="margin:6px 0 0">
@@ -75,6 +74,10 @@ const BODY = String.raw`
         <p style="margin-top:10px">Then:</p>
         <pre><span class="copy" data-copy="up">copy</span><span id="up-cmd">sudo pacman -Syu</span></pre>
       </div>
+      <div class="charts">
+        <div class="chart"><h3>Pool growth <span>7 days</span></h3><div class="sub">bytes stored once, from the metrics snapshots</div><div id="c-pool"></div><div class="mini" id="c-pool-mini"></div></div>
+        <div class="chart"><h3>Security in stable <span id="sec-when">now</span></h3><div class="sub">open advisories matched against what stable serves</div><div id="c-sec"></div></div>
+      </div>
     </div>
     <div class="start-side">
       <aside class="cli-card">
@@ -104,11 +107,10 @@ const BODY = String.raw`
 
   <section>
     <div class="h2row"><h2>Coverage</h2><a class="more-link" href="/status">Every source, every number →</a></div>
-    <p class="sub">Everything upstream serves, on both architectures — that is the target.</p>
-    <div class="charts">
-      <div class="chart"><h3>Mirrored per source <span>edge · now</span></h3><div class="sub">share of what upstream serves that edge already pins</div><div id="c-coverage"></div></div>
-      <div class="chart"><h3>Pool growth <span>7 days</span></h3><div class="sub">bytes stored once, from the metrics snapshots</div><div id="c-pool"></div><div class="mini" id="c-pool-mini"></div></div>
-      <div class="chart"><h3>Security in stable <span id="sec-when">now</span></h3><div class="sub">open advisories matched against what stable serves</div><div id="c-sec"></div></div>
+    <p class="sub">Everything upstream serves, on both architectures — that is the target. Share of what upstream serves that edge already pins, right now.</p>
+    <div class="coverage-box">
+      <div><div class="k">x86_64</div><div id="c-coverage-x86_64"></div></div>
+      <div><div class="k">aarch64</div><div id="c-coverage-aarch64"></div></div>
     </div>
   </section>
 
@@ -122,8 +124,8 @@ const BODY = String.raw`
         <p>Want your name here? Bring a package to the <a href="/factory">Factory →</a></p>
       </div>
       <div class="box">
-        <p><b style="color:var(--text)">The last things the pipeline did</b></p>
-        <div id="open-journal" style="font-size:13px;display:grid;gap:6px"></div>
+        <div class="feed-head"><b>The last things the pipeline did</b><span class="live"><i></i>live · every minute</span></div>
+        <div class="feed" id="open-journal"><div class="muted">loading…</div></div>
         <p><a href="/journal">Full journal, ring history →</a></p>
       </div>
     </div>
@@ -234,7 +236,9 @@ __CHARTS__
     $("#proof-rollback").innerHTML = rollbacks.length ? 'last rollback <b>' + ago(rollbacks[0].created_at) + '</b> · ' + esc(rollbacks[0].ring || "") + ' · automatic' : 'none in the recent journal — <b>0</b> of the last ' + (d.events || []).length + ' events';
 
     var cov = (d.coverage || []).filter(function (c) { return !c.optional; }).slice().sort(function (a, b) { return a.arch === b.arch ? (a.source < b.source ? -1 : 1) : (a.arch === "x86_64" ? -1 : 1); });
-    $("#c-coverage").innerHTML = hrows(cov.map(function (c) { var up = c.upstream_total, pct = up ? Math.min(100, Math.round(1000 * c.indexed / up) / 10) : 0; return [c.source, c.arch, pct, null, up == null ? "not yet" : pct + "%"]; }), 130);
+    ARCHES.forEach(function (a) {
+      $("#c-coverage-" + a).innerHTML = hrows(cov.filter(function (c) { return c.arch === a; }).map(function (c) { var up = c.upstream_total, pct = up ? Math.min(100, Math.round(1000 * c.indexed / up) / 10) : 0; return [c.source, "", pct, null, up == null ? "—" : pct + "%"]; }), 90);
+    });
     var S = d.series || {};
     $("#c-pool").innerHTML = area((S.metrics || []).map(function (r) { return { t: Date.parse(r.created_at), v: Number(r.bytes || 0) }; }), bytes);
     var m0 = (S.metrics || [])[0], m1 = (S.metrics || [])[(S.metrics || []).length - 1];
@@ -267,8 +271,22 @@ __CHARTS__
       $("#cc-split").innerHTML = hrows(["stable", "rc", "edge"].map(function (r) { var v = (y.by_ring || {})[r] || 0; return [r, "", Math.round(100 * v / tot), "var(--" + r + ")", num(v)]; }), 60);
       $("#cc-arch").innerHTML = ["x86_64", "aarch64"].map(function (a) { var v = (y.by_arch || {})[a] || 0; return '<div><b>' + num(v) + '</b>' + a + '</div>'; }).join("");
     }
-    $("#open-journal").innerHTML = (d.events || []).slice(0, 5).map(function (e) { return '<div><span class="dot ' + e.status + '"></span><span class="kind">' + esc(e.kind) + '</span> <span class="muted">' + esc(e.summary) + '</span> <span class="when">· ' + ago(e.created_at) + '</span></div>'; }).join("") || '<div class="muted">nothing yet</div>';
+    drawFeed(d.events || []);
   }
+
+  // The feed: eight lines, the newest on top, each cut at the box's edge with
+  // the whole text a click away. The stats poll (once a minute) brings new
+  // events; those slide in, the rest stay put.
+  var seenEvents = null;
+  function drawFeed(events) {
+    var rows = events.slice(0, 8), fresh = {};
+    if (seenEvents) rows.forEach(function (e) { if (!seenEvents[e.id]) fresh[e.id] = true; });
+    $("#open-journal").innerHTML = rows.map(function (e) {
+      return '<div class="row' + (fresh[e.id] ? " new" : "") + '" data-id="' + e.id + '" title="' + esc(e.summary) + '"><span class="when">' + ago(e.created_at) + '</span><span class="kind"><span class="dot ' + esc(e.status) + '"></span>' + esc(e.kind) + '</span><span class="what">' + esc(e.summary) + '</span></div>';
+    }).join("") || '<div class="muted">nothing yet</div>';
+    seenEvents = {}; rows.forEach(function (e) { seenEvents[e.id] = true; });
+  }
+  $("#open-journal").addEventListener("click", function (ev) { var r = ev.target.closest ? ev.target.closest(".row") : null; if (r) r.classList.toggle("open"); });
 
   // The people: every contributor with a registered package or a worker, every maintainer named in factory/MAINTAINERS.toml.
   Promise.all([
@@ -282,11 +300,11 @@ __CHARTS__
     workers.forEach(function (w) { if (w.owner && !maintainers[w.owner]) contributors[w.owner] = true; });
     var landed = pkgs.filter(function (p) { return p.status === "approved" || p.status === "published"; }).length;
     var people = Object.keys(maintainers).map(function (m) { return [m, "maintainer"]; }).concat(Object.keys(contributors).map(function (c) { return [c, "contributor"]; }));
-    var chips = people.map(function (p) { return '<a class="person" href="/user/' + encodeURIComponent(p[0]) + '">' + avatar(p[0], p[1]) + esc(p[0]) + ' <span class="r">' + p[1] + '</span></a>'; }).join("");
+    var chips = people.map(function (p) { return personChip(p[0], p[1]); }).join("");
     $("#cc-count").textContent = num(people.length);
     $("#cc-line").textContent = num(Object.keys(contributors).length) + " contributors · " + num(Object.keys(maintainers).length) + " maintainers · " + num(workers.filter(function (w) { return w.alive; }).length) + " workers online";
     $("#cc-people").innerHTML = chips || '<span class="muted">be the first</span>';
-    $("#open-stats").innerHTML = '<div><b>' + num(Object.keys(contributors).length) + '</b><span>contributors</span></div><div><b>' + num(Object.keys(maintainers).length) + '</b><span>maintainers</span></div><div><b>' + num(workers.filter(function (w) { return w.alive; }).length) + '</b><span>workers online</span></div><div><b>' + num(landed) + '</b><span>community packages</span></div>';
+    $("#open-stats").innerHTML = '<a href="/people#contributors"><b>' + num(Object.keys(contributors).length) + '</b><span>contributors</span></a><a href="/people#maintainers"><b>' + num(Object.keys(maintainers).length) + '</b><span>maintainers</span></a><a href="/people#workers"><b>' + num(workers.filter(function (w) { return w.alive; }).length) + '</b><span>workers online</span></a><a href="/packages?q=factory"><b>' + num(landed) + '</b><span>community packages</span></a>';
     $("#open-people").innerHTML = chips;
   });
   liveStats(render, 60000);
