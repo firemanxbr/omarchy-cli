@@ -191,7 +191,7 @@ containers of the worker image, two of each role, one per architecture
 
 | Service | Registration | Takes |
 |---|---|---|
-| `pool-x86_64`, `pool-aarch64` | project trust | the pool's jobs: sync, render, promote, rollback, health, security, enqueue, gc, verify |
+| `pool-x86_64`, `pool-aarch64` | project trust | the pool's jobs: sync, render, promote, rollback, health, security, enqueue, gc, verify, relayout |
 | `review-x86_64`, `review-aarch64` | project trust, an agent key | the build of the recipes on `main`, the audit of staged builds |
 | `community-x86_64`, `community-aarch64` | community, shared, an agent key | contributors' requested packages, with the project's agent |
 | `agent-proxy` (profile `emulated`) | none — no token | the agent, natively, over HTTP for `community-x86_64`: Claude Code's binary dies under qemu, so the emulated worker asks this one (`FACTORY_PROVIDER=anthropic`, `ANTHROPIC_BASE_URL=http://agent-proxy:8790`; `factory/bin/agent-proxy`) |
