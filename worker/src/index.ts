@@ -70,6 +70,7 @@ import { handleAuthStart, handleAuthCallback, handleLogout } from "./routes/auth
 import { handleSignPool } from "./routes/pool";
 import { signingEnabled, publicKey } from "./signing";
 import { reviewHtml } from "./pages/review";
+import { requestHtml } from "./pages/request";
 import { governanceHtml } from "./pages/governance";
 import { docsHtml } from "./pages/docs";
 import { workersHtml } from "./pages/workers";
@@ -193,6 +194,7 @@ export default {
       if (path === "/pipeline") return html(pipelineHtml(env.POOL_URL, version(env)));
       if (path === "/contribute") return html(factoryPageHtml(env.POOL_URL, version(env)));
       if (path === "/review") return html(reviewHtml(env.POOL_URL, version(env)));
+      if (path === "/request") return html(requestHtml(env.POOL_URL, version(env)));
       const user = path.match(/^\/user\/([A-Za-z0-9-]{1,39})$/);
       if (user) return html(userHtml(user[1], env.POOL_URL, version(env)));
       if (path.startsWith("/package/")) return html(packageHtml(decodeURIComponent(path.slice("/package/".length)), env.POOL_URL, version(env)));
