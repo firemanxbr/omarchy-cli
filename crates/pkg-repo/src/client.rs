@@ -47,8 +47,12 @@ pub struct ReleaseRequest<'a> {
     /// Roll back / pin: copy this exact release's selection.
     pub from_release_id: Option<u64>,
     pub add: &'a [String],
+    /// Names to drop from every source's rows.
     pub remove: &'a [String],
-    /// Scope `add` lookups and `remove` to one repository architecture.
+    /// `(source, name)` to drop from that source's rows only: a sync's
+    /// removals, which leave another source's build of the name alone.
+    pub remove_from: &'a [(String, String)],
+    /// Scope `add` lookups and the removals to one repository architecture.
     pub remove_arch: Option<&'a str>,
     /// Promote or roll back this architecture only; the other keeps what the ring serves.
     pub arch: Option<&'a str>,
@@ -489,6 +493,7 @@ impl Api {
             "from_release_id": req.from_release_id,
             "add": req.add,
             "remove": req.remove,
+            "remove_from": req.remove_from.iter().map(|(source, name)| serde_json::json!({"source": source, "name": name})).collect::<Vec<_>>(),
             "remove_arch": req.remove_arch,
             "arch": req.arch,
             "note": req.note,

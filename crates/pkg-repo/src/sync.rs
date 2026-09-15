@@ -75,10 +75,10 @@ pub struct SyncReport {
     /// `(filename, upstream sha256)` of packages whose filename already holds a
     /// different object in the pool; the existing object was pinned instead.
     pub collisions: Vec<(String, String)>,
-    /// With `defer_release`: the sha256s to pin and the names to drop for
-    /// the ring to serve this source's current upstream (empty when unchanged).
+    /// With `defer_release`: the sha256s to pin and the `(source, name)`s to
+    /// drop for the ring to serve this source's current upstream (empty when unchanged).
     pub pending_add: Vec<String>,
-    pub pending_remove: Vec<String>,
+    pub pending_remove: Vec<(String, String)>,
 }
 
 /// A repository published as GitHub releases, one per snapshot, is named by
@@ -217,10 +217,12 @@ pub fn run(api: &Api, opts: &SyncOptions) -> Result<SyncReport, RepoError> {
                 .collect()
         })
         .unwrap_or_default();
-    let remove: Vec<String> = current
+    // Names upstream dropped: gone from this source's rows only — another
+    // source's build of the name is that source's to keep or drop.
+    let remove: Vec<(String, String)> = current
         .iter()
         .filter(|p| !upstream_names.contains(p.name.as_str()))
-        .map(|p| p.name.clone())
+        .map(|p| (opts.source.clone(), p.name.clone()))
         .collect();
     report.removed = remove.len();
 
@@ -247,7 +249,7 @@ pub fn run(api: &Api, opts: &SyncOptions) -> Result<SyncReport, RepoError> {
     let created = api.create_release(&ReleaseRequest {
         ring: &opts.ring,
         add: &add,
-        remove: &remove,
+        remove_from: &remove,
         remove_arch: Some(&opts.arch),
         note: Some(&note),
         ..ReleaseRequest::default()

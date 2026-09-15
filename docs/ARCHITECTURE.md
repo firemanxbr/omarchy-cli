@@ -36,6 +36,13 @@ Promoting a release copies and re-uploads most of that data, so a bump takes
   ring, then every 24th, and any older release read by id (a pinned page, a diff,
   a rollback target), reconstructed from the checkpoint behind it plus the deltas.
   A release costs hundreds of rows, not thirty thousand (migration 0017).
+  A selection holds **one row per source, name and architecture**: a package
+  added replaces its own source's build of that name, never another source's —
+  Arch Linux ARM's `mesa` and asahi-alarm's are two rows, each in its own
+  database, and the order of the pacman include (`REPO_ORDER`, `worker/src/meta.ts`)
+  is the only thing that decides between them, as it does between mirrors. A
+  sync drops a name from its own source's rows (`remove_from`); a maintainer's
+  `remove` drops it from every source.
 * **Generated pacman databases** — for each ring and source the publisher renders
   `omarchy-<source>-<ring>.db` and `.files` in `repo-add` format and uploads them;
   the Worker signs them with its own OpenPGP key (a secret that never leaves

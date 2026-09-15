@@ -9,10 +9,18 @@ interface CreateRelease {
   from_ring?: string | null;
   /** Roll back / pin: start from this exact release's selection (any ring). */
   from_release_id?: number | null;
-  /** Package sha256s to add; a package replaces any same-name entry of the same repo arch. */
+  /**
+   * Package sha256s to add; a package replaces the same-name entry of the
+   * same source and repo arch. Another source's build of that name stays:
+   * each source renders its own database, and the order of the include
+   * (setup.ts) decides which one pacman takes — the pool holds every
+   * source's row, the way the mirrors do.
+   */
   add?: string[];
-  /** Package names to drop from the selection (scoped by `remove_arch` when given). */
+  /** Package names to drop from the selection, whichever source (scoped by `remove_arch` when given). */
   remove?: string[];
+  /** Names to drop from one source's rows only: what a sync sends when its upstream dropped them. */
+  remove_from?: { source: string; name: string }[];
   remove_arch?: string | null;
   /**
    * Promote or roll back one architecture only: the source's rows of this
@@ -98,22 +106,26 @@ export async function handleCreateRelease(request: Request, env: Env): Promise<R
   // row is addressed by (ring, seq) — unique — until its id is read back.
   const rel = `(SELECT id FROM releases WHERE ring = ?1 AND seq = ?2)`;
   // The target selection: the base minus the names being removed (within
-  // remove_arch) minus any (name, repo_arch) an added package replaces,
-  // plus the adds. The delta is the target against what the ring serves
-  // now, both ways — the only rows a release writes (migration 0017) —
-  // and the ring's live rows move by exactly that delta. The JSON
-  // parameters are materialised once (a CTE), never re-parsed per row:
-  // evaluated inline over a 32k-row ring they took D1 past its CPU limit.
+  // remove_arch; `remove` from every source, `remove_from` from one) minus
+  // any (source, name, repo_arch) an added package replaces, plus the adds.
+  // The delta is the target against what the ring serves now, both ways —
+  // the only rows a release writes (migration 0017) — and the ring's live
+  // rows move by exactly that delta. The JSON parameters are materialised
+  // once (a CTE), never re-parsed per row: evaluated inline over a 32k-row
+  // ring they took D1 past its CPU limit.
+  const removeFrom = (body.remove_from ?? []).map((r) => ({ source: String(r.source), name: String(r.name) }));
   const own = ringMembers(ring);
-  const withSets = `WITH rm(name) AS MATERIALIZED (SELECT value FROM json_each(?3)),
+  const withSets = `WITH rm(name, source) AS MATERIALIZED (
+         SELECT value, NULL FROM json_each(?3)
+         UNION ALL SELECT json_extract(value, '$.name'), json_extract(value, '$.source') FROM json_each(?6)),
        adds(id) AS MATERIALIZED (SELECT value FROM json_each(?5)),
-       addnames(name, repo_arch) AS MATERIALIZED (SELECT q.name, q.repo_arch FROM packages q WHERE q.id IN (SELECT id FROM adds)),
+       addnames(name, repo_arch, source) AS MATERIALIZED (SELECT q.name, q.repo_arch, q.source FROM packages q WHERE q.id IN (SELECT id FROM adds)),
        target(package_id) AS MATERIALIZED (
          SELECT b.package_id FROM ${baseSql} b JOIN packages p ON p.id = b.package_id
-          WHERE NOT (p.name IN (SELECT name FROM rm) AND (?4 IS NULL OR p.repo_arch = ?4))
-            AND NOT EXISTS (SELECT 1 FROM addnames a WHERE a.name = p.name AND a.repo_arch = p.repo_arch)
+          WHERE NOT EXISTS (SELECT 1 FROM rm WHERE rm.name = p.name AND (rm.source IS NULL OR rm.source = p.source) AND (?4 IS NULL OR p.repo_arch = ?4))
+            AND NOT EXISTS (SELECT 1 FROM addnames a WHERE a.name = p.name AND a.repo_arch = p.repo_arch AND a.source = p.source)
          UNION SELECT id FROM adds)`;
-  const args = [ring, seq, JSON.stringify(body.remove ?? []), removeArch, JSON.stringify(added)];
+  const args = [ring, seq, JSON.stringify(body.remove ?? []), removeArch, JSON.stringify(added), JSON.stringify(removeFrom)];
   const stmts: D1PreparedStatement[] = [
     env.DB.prepare("INSERT INTO releases (ring, seq, parent_id, source_id, note) VALUES (?1, ?2, ?3, ?4, ?5)").bind(ring, seq, parent?.id ?? null, source?.id ?? null, body.note ?? null),
     env.DB.prepare(`${withSets} INSERT INTO release_deltas (release_id, package_id, op) SELECT ${rel}, package_id, 'add' FROM (SELECT package_id FROM target EXCEPT SELECT package_id FROM ${own})`).bind(...args),
@@ -141,7 +153,7 @@ export async function handleCreateRelease(request: Request, env: Env): Promise<R
   // are already rendered, at the live keys. The parent's artifact rows
   // carry over, and the caller is told not to render it again (a sync of
   // an aarch64 source no longer re-renders the 15k-package x86_64 extra).
-  const untouched = (body.remove ?? []).length === 0 && added.length === 0;
+  const untouched = (body.remove ?? []).length === 0 && removeFrom.length === 0 && added.length === 0;
   const scoped = parent && base?.id === parent.id ? removeArch : onlyArch !== null && (untouched || removeArch === onlyArch) ? onlyArch : null;
   const unchanged: string[] = parent && scoped !== null ? REPO_ARCHES.filter((a) => a !== scoped) : [];
   if (unchanged.length) {
@@ -198,7 +210,9 @@ export async function handleReleaseDiff(ring: string, url: URL, env: Env): Promi
         WHERE (?1 IS NULL OR p.repo_arch = ?1)`,
     ).bind(arch).all<Side>();
   const [a, b] = await Promise.all([fromRow ? side(fromRow.id) : Promise.resolve({ results: [] as Side[] }), side(toRow.id)]);
-  const key = (p: { name: string; arch: string }) => `${p.name}\0${p.arch}`;
+  // A row is one source's build of a name: another source taking the name
+  // over is that source's add and the other's removal, not an upgrade.
+  const key = (p: { source: string; name: string; arch: string }) => `${p.source}\0${p.name}\0${p.arch}`;
   const before = new Map(a.results.map((p) => [key(p), p]));
   const after = new Map(b.results.map((p) => [key(p), p]));
   const added = [], removed = [], upgraded = [];
@@ -208,7 +222,8 @@ export async function handleReleaseDiff(ring: string, url: URL, env: Env): Promi
     else if (was.sha256 !== p.sha256) upgraded.push({ name: p.name, arch: p.arch, from: was.version, to: p.version, source: p.source });
   }
   for (const [k, p] of before) if (!after.has(k)) removed.push(p);
-  const byName = (x: { name: string; arch: string }, y: { name: string; arch: string }) => x.name.localeCompare(y.name) || x.arch.localeCompare(y.arch);
+  const byName = (x: { name: string; arch: string; source: string }, y: { name: string; arch: string; source: string }) =>
+    x.name.localeCompare(y.name) || x.arch.localeCompare(y.arch) || x.source.localeCompare(y.source);
   return json(
     {
       ring,
@@ -233,7 +248,7 @@ const MAX_PAGE = 1000;
  * The ring's current release (or `release_id=` — one of its earlier releases,
  * so a paging client stays on one release while the ring moves on) and its
  * packages. `arch=` narrows to one architecture; `limit=`/`offset=` page
- * through the manifests in (name, arch) order. Summaries are small and never
+ * through the manifests in (name, arch, source) order. Summaries are small and never
  * need paging; manifests do once a ring holds more than MAX_UNPAGED packages.
  */
 export async function handleGetRelease(ring: string, url: URL, env: Env): Promise<Response> {
@@ -255,13 +270,21 @@ export async function handleGetRelease(ring: string, url: URL, env: Env): Promis
   const limitParam = url.searchParams.get("limit");
   const limit = limitParam ? Math.min(Math.max(1, Number(limitParam)), MAX_PAGE) : 0;
   const offset = Math.max(0, Number(url.searchParams.get("offset") ?? 0));
-  // `after=<name>/<repo_arch>`: the page after that row (keyset), instead of an offset.
+  // `after=<name>/<repo_arch>/<source>`: the page after that row (keyset),
+  // instead of an offset. A source's build of a name is its own row, so
+  // the cursor names the source too; the older two-part form (a walk that
+  // started before this deployment) still continues from its name and arch.
   const afterParam = url.searchParams.get("after");
-  let after: { name: string; repoArch: string } | null = null;
+  let after: { name: string; repoArch: string; source: string | null } | null = null;
   if (afterParam) {
-    const i = afterParam.lastIndexOf("/");
-    if (i <= 0 || !isRepoArch(afterParam.slice(i + 1))) return json({ error: "after must be <name>/<repo_arch>, as page.next gives it" }, 400);
-    after = { name: afterParam.slice(0, i), repoArch: afterParam.slice(i + 1) };
+    const parts = afterParam.split("/");
+    const bad = () => json({ error: "after must be <name>/<repo_arch>/<source>, as page.next gives it" }, 400);
+    if (parts.length >= 3 && isRepoArch(parts[parts.length - 2]) && parts[parts.length - 1]) {
+      after = { name: parts.slice(0, -2).join("/"), repoArch: parts[parts.length - 2], source: parts[parts.length - 1] };
+    } else if (parts.length >= 2 && isRepoArch(parts[parts.length - 1])) {
+      after = { name: parts.slice(0, -1).join("/"), repoArch: parts[parts.length - 1], source: null };
+    } else return bad();
+    if (!after.name) return bad();
   }
   if (!limit && detail !== "summary" && total > MAX_UNPAGED) {
     return json(
@@ -275,12 +298,12 @@ export async function handleGetRelease(ring: string, url: URL, env: Env): Promis
     .bind(release.id)
     .all();
   const packages = await releaseManifests(env, release.id, detail, { arch, offset, limit, after });
-  const last = packages.length && limit && packages.length === limit ? (packages[packages.length - 1] as { name: string; repo_arch: string }) : null;
+  const last = packages.length && limit && packages.length === limit ? (packages[packages.length - 1] as { name: string; repo_arch: string; source: string }) : null;
   return json({
     release,
     ...(await releaseSummary(env, release.id)),
     artifacts: artifacts.results,
-    page: { arch, offset: after ? null : offset, after: afterParam ?? null, limit: limit || null, returned: packages.length, total, next: last ? `${last.name}/${last.repo_arch}` : null },
+    page: { arch, offset: after ? null : offset, after: afterParam ?? null, limit: limit || null, returned: packages.length, total, next: last ? `${last.name}/${last.repo_arch}/${last.source}` : null },
     packages,
   });
 }

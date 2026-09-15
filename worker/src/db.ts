@@ -111,8 +111,8 @@ export interface ManifestWindow {
   arch?: string | null;
   offset?: number;
   limit?: number;
-  /** Keyset paging: the (name, repo_arch) of the last row of the previous page — the rows after it, in order. */
-  after?: { name: string; repoArch: string } | null;
+  /** Keyset paging: the (name, repo_arch, source) of the last row of the previous page — the rows after it, in order (source null: an older cursor, after the name and arch). */
+  after?: { name: string; repoArch: string; source: string | null } | null;
 }
 
 /**
@@ -127,13 +127,18 @@ export async function releaseManifests(
   window: ManifestWindow = {},
 ): Promise<unknown[]> {
   const arch = window.arch ?? null;
-  // A page: after a (name, repo_arch) key — the rows in order from there, a
-  // walk of the (name, repo_arch) index that reads what it returns — or, for
-  // an older client, an OFFSET, which sorts the whole selection every page.
+  // A page: after a (name, repo_arch, source) key — the rows in order from
+  // there, a walk of that index (migration 0022) that reads what it
+  // returns — or, for an older client, an OFFSET, which sorts the whole
+  // selection every page. Two sources' builds of one name are two rows,
+  // so the key names the source: a cursor on (name, repo_arch) alone
+  // skipped the second one at a page boundary. A cursor without a source
+  // (from before the source was part of it) continues after the name.
   const after = window.after ?? null;
   const page = window.limit ? ` LIMIT ${Math.floor(window.limit)}${after ? "" : ` OFFSET ${Math.floor(window.offset ?? 0)}`}` : "";
-  const where = `WHERE (?1 IS NULL OR p.repo_arch = ?1)${after ? " AND (p.name, p.repo_arch) > (?2, ?3)" : ""} ORDER BY p.name, p.repo_arch`;
-  const binds = after ? [arch, after.name, after.repoArch] : [arch];
+  const keyset = after ? (after.source === null ? " AND (p.name, p.repo_arch) > (?2, ?3)" : " AND (p.name, p.repo_arch, p.source) > (?2, ?3, ?4)") : "";
+  const where = `WHERE (?1 IS NULL OR p.repo_arch = ?1)${keyset} ORDER BY p.name, p.repo_arch, p.source`;
+  const binds = after ? (after.source === null ? [arch, after.name, after.repoArch] : [arch, after.name, after.repoArch, after.source]) : [arch];
   const members = await releaseMembers(env, releaseId);
   if (detail === "summary") {
     // Enough for status / list / search: ~100 bytes per package instead of ~800.

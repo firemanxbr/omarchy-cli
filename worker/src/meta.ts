@@ -26,6 +26,25 @@ export function version(env: Env): RunningVersion {
 }
 
 /**
+ * The order of the sources in the pacman include (routes/setup.ts), which
+ * is priority: pacman takes a package from the first repository that has
+ * it. Omarchy's own packages (the OPR) and the factory's builds come first
+ * — as [omarchy] sits above [core] on an Omarchy install — then Arch's
+ * core, extra, multilib, Arch Linux ARM's alarm, and the optional sources
+ * last. On a Mac the Asahi fork and asahi-alarm come before all of them:
+ * their kernel, graphics and Apple-specific builds must win. A ring holds
+ * every source's build of a name (routes/releases.ts); this order is the
+ * only thing that decides between them.
+ */
+export const REPO_ORDER = ["asahi", "asahi-alarm", "packages", "factory", "core", "extra", "multilib", "alarm"];
+
+/** Where a source sits in REPO_ORDER; the optional ones after all of it. */
+export function sourceRank(source: string): number {
+  const i = REPO_ORDER.indexOf(source);
+  return i < 0 ? REPO_ORDER.length : i;
+}
+
+/**
  * Every upstream repository the pipeline mirrors (the SOURCES table of
  * SYNC_SOURCES in scheduler.ts), so the dashboard can show what has not been synced yet.
  */
