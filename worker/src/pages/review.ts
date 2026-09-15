@@ -1,8 +1,9 @@
 /**
  * Review: staged community builds waiting for a maintainer. The evidence
- * (log, PKGBUILD, PKGINFO) is public; approving needs a maintainer's
- * contributor token (the same sign-in as /contribute) and queues a project
- * rebuild of the same PKGBUILD — what users get is what the project built.
+ * (log, PKGBUILD, PKGINFO, audit) is public; approving needs a maintainer's
+ * contributor token (the same sign-in as /contribute), never the owner's,
+ * and copies nothing: the project builds the recipe a maintainer writes
+ * from the evidence and merges into factory/pkgbuilds (docs/GOVERNANCE.md).
  */
 import { page } from "./layout";
 import type { RunningVersion } from "../meta";
@@ -11,7 +12,7 @@ const BODY = String.raw`
   <div class="hero compact">
     <p class="eyebrow">Review</p>
     <h1>What contributors built, waiting for a maintainer</h1>
-    <p class="lede">Each row is evidence, not a package: read the PKGBUILD, the log, the manifest and the audit, then <b>approve</b> — the project rebuilds the same recipe on a trusted worker, signs it and publishes it into <code>edge</code> — or <b>reject</b> with a note the contributor sees. Every decision carries a name. <a href="/docs/governance">Governance →</a></p>
+    <p class="lede">Each row is evidence, not a package: read the PKGBUILD, the log, the manifest and the audit, then <b>approve</b> or <b>reject</b> with a note the contributor sees. Nothing here is copied: an approval is the decision, and the project builds the recipe a maintainer writes from this evidence and merges into <code>factory/pkgbuilds/&lt;group&gt;/&lt;name&gt;/</code>. Never your own package. <a href="/docs/governance">Governance →</a></p>
   </div>
   <p class="sub" id="who"></p>
 
@@ -30,7 +31,7 @@ const BODY = String.raw`
 
   <section>
     <h2>Decisions</h2>
-    <div class="table-wrap"><table id="decisions"><thead><tr><th>When</th><th>Package</th><th>Arch</th><th>Decision</th><th>By</th><th>Note</th><th>Rebuild</th></tr></thead><tbody></tbody></table></div>
+    <div class="table-wrap"><table id="decisions"><thead><tr><th>When</th><th>Package</th><th>Arch</th><th>Decision</th><th>By</th><th>Note</th><th>Project build</th></tr></thead><tbody></tbody></table></div>
   </section>
 `;
 
@@ -47,7 +48,7 @@ const SCRIPT = String.raw`
     var note = what === "reject" ? prompt("Why? The contributor sees this.") : (prompt("Note for the record (optional)") || "");
     if (what === "reject" && !note) return;
     busy(fetch(API + "/tasks/" + id + "/" + what, { method: "POST", headers: headers(), body: JSON.stringify({ note: note }) })).then(function (r) { return r.json(); }).then(function (d) {
-      alert(d.error ? d.error : (what === "approve" ? "Approved — project rebuild queued as task #" + d.rebuild_task : "Rejected"));
+      alert(d.error ? d.error : (what === "approve" ? "Approved. Now the recipe: write " + d.recipe + " from the evidence and open the pull request — the project builds it once it is on main." : "Rejected"));
       load();
     });
   }
@@ -89,7 +90,7 @@ const SCRIPT = String.raw`
     }).catch(function () { endSkeleton(); });
     busy(fetch(API + "/approvals")).then(function (r) { return r.json(); }).then(function (d) {
       pager("#decisions", (d.approvals || []), function (a) {
-        return '<tr><td>' + ago(a.created_at) + '</td><td><b>' + esc(a.name) + '</b>' + (a.version ? ' <span class="mono muted">' + esc(a.version) + '</span>' : '') + '</td><td>' + esc(a.arch) + '</td><td>' + esc(a.decision) + '</td><td>' + person(a.by) + '</td><td>' + esc(a.note || "") + '</td><td>' + (a.rebuild_task ? '#' + a.rebuild_task + ' ' + esc(a.rebuild_status || "") + (a.rebuild_result ? ' <span class="mono">' + esc(a.rebuild_result) + '</span>' : '') : '—') + '</td></tr>';
+        return '<tr><td>' + ago(a.created_at) + '</td><td><b>' + esc(a.name) + '</b>' + (a.version ? ' <span class="mono muted">' + esc(a.version) + '</span>' : '') + '</td><td>' + esc(a.arch) + '</td><td>' + esc(a.decision) + '</td><td>' + person(a.by) + '</td><td>' + esc(a.note || "") + '</td><td>' + (a.rebuild_task ? '#' + a.rebuild_task + ' ' + esc(a.rebuild_status || "") + (a.rebuild_result ? ' <span class="mono">' + esc(a.rebuild_result) + '</span>' : '') : (a.decision === "approved" ? '<span class="dim">waiting for the recipe on main</span>' : '—')) + '</td></tr>';
       }, { empty: 'no decision yet' });
       endSkeleton();
     }).catch(function () { endSkeleton(); });

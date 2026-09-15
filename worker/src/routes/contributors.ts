@@ -200,11 +200,11 @@ export async function handleRegisterPackage(c: Contributor, request: Request, en
   return json({ package: row, skipped: upstream, next: `POST /api/v1/factory/packages/${name}/build queues it; a worker of yours (or a shared one) builds it into your staging workspace.` }, existing ? 200 : 201);
 }
 
-/** The owner frees the name (unless approved); a maintainer of its group frees any, an unmaintained one included. */
+/** The owner frees the name (unless approved or published); a maintainer of its group frees any, an unmaintained one included. */
 export async function handleDeletePackage(c: Contributor, name: string, env: Env): Promise<Response> {
   const pkg = await env.DB.prepare("SELECT owner, \"group\", status FROM factory_packages WHERE name = ?").bind(name).first<{ owner: string; group: string; status: string }>();
   if (!pkg) return json({ error: "not registered" }, 404);
-  const mine = pkg.owner === c.login && pkg.status !== "approved";
+  const mine = pkg.owner === c.login && pkg.status !== "approved" && pkg.status !== "published";
   if (!mine && !maintains(c, pkg.group)) return json({ error: "not yours, or already approved (a maintainer of the group can remove it)" }, 403);
   await env.DB.batch([
     env.DB.prepare("UPDATE build_tasks SET status = 'cancelled', error = ? WHERE name = ? AND trust = 'community' AND status = 'queued'").bind(`registration removed by ${c.login}`, name),

@@ -16,7 +16,7 @@ const BODY = String.raw`
   <div class="hero">
     <p class="eyebrow">For contributors</p>
     <h1>Package what you love. The factory builds it, a maintainer checks it.</h1>
-    <p class="lede">Register a project, build it on your own worker or on the ones the community shares, and a maintainer rebuilds it from <em>your</em> recipe before it enters the rings. A GitHub account is the only thing asked.</p>
+    <p class="lede">Register a project, build it on your own worker or on the ones the community shares, and a maintainer learns from <em>your</em> build — the recipe, the log, the metrics — to write the one the project builds. A GitHub account is the only thing asked.</p>
     <div class="cta-row" id="signin">
       <a class="btn" id="oauth-link" href="/auth/github?next=/factory">${GITHUB_ICON} Sign in with GitHub</a>
       <a class="btn ghost" href="#ways">Request a package</a>
@@ -36,7 +36,7 @@ const BODY = String.raw`
 
   <section>
     <div class="h2row"><h2>How a package gets in</h2><a class="more-link" href="/docs/governance">Governance: contributors and maintainers →</a></div>
-    <p class="sub">Nobody knows better than you how your software should be built. The maintainer learns it from you — and rebuilds it from scratch.</p>
+    <p class="sub">Nobody knows better than you how your software should be built. The maintainer learns it from you — and writes the recipe the project builds; nothing you built is copied.</p>
     <figure class="diagram">${factoryDiagram()}<figcaption>Your build is evidence, never what users install: the project builds it again from your PKGBUILD, signs it, and your name goes on the record. The agents draft and audit — their keys stay with whoever runs the worker.</figcaption></figure>
   </section>
 
@@ -247,7 +247,7 @@ __CHARTS__
       document.querySelectorAll('[data-live="shared-online"]').forEach(function (el) { el.textContent = num(shared.length) + " online now"; });
       $("#landed").innerHTML = approved.slice(0, 6).map(function (a) {
         var owner = owners[a.name];
-        return '<div class="land">' + (owner ? avatar(owner, "contributor") : '<span class="avatar">?</span>') + '<div class="n"><span>' + esc(a.name) + ' <span class="v">' + esc(a.version || "") + '</span></span><span class="pill ' + (a.rebuild_status === "done" ? "ok" : "blue") + '">' + (a.rebuild_status === "done" ? "in the rings" : "rebuilding") + '</span></div><div class="b">by ' + (owner ? '<a href="/user/' + encodeURIComponent(owner) + '">' + esc(owner) + '</a>' : "—") + ' · approved by <a href="/user/' + encodeURIComponent(a.by) + '">' + esc(a.by) + '</a> · ' + ago(a.created_at) + ' · ' + esc(a.arch) + '</div></div>';
+        return '<div class="land">' + (owner ? avatar(owner, "contributor") : '<span class="avatar">?</span>') + '<div class="n"><span>' + esc(a.name) + ' <span class="v">' + esc(a.version || "") + '</span></span><span class="pill ' + (a.rebuild_status === "done" ? "ok" : "blue") + '">' + (a.rebuild_status === "done" ? "in the rings" : a.rebuild_task ? "building" : "recipe pending") + '</span></div><div class="b">by ' + (owner ? '<a href="/user/' + encodeURIComponent(owner) + '">' + esc(owner) + '</a>' : "—") + ' · approved by <a href="/user/' + encodeURIComponent(a.by) + '">' + esc(a.by) + '</a> · ' + ago(a.created_at) + ' · ' + esc(a.arch) + '</div></div>';
       }).join("") || '<div class="muted">nothing approved yet — <a href="/auth/github?next=/factory">be the first</a></div>';
       // The funnel: medians from what the record holds (a package's registration, its first staged build, the decision), then the soaks the schedule imposes.
       var median = function (xs) { if (!xs.length) return null; xs = xs.slice().sort(function (a, b) { return a - b; }); return xs[Math.floor(xs.length / 2)]; };
@@ -256,7 +256,7 @@ __CHARTS__
       var regToStaged = pkgs.filter(function (p) { return firstStaged[p.name] && p.created_at; }).map(function (p) { return (Date.parse(firstStaged[p.name]) - Date.parse(p.created_at)) / 3600e3; }).filter(function (h) { return h >= 0; });
       var stagedToDecided = apps.filter(function (a) { return byTask[a.task_id] && byTask[a.task_id].finished_at; }).map(function (a) { return (Date.parse(a.created_at) - Date.parse(byTask[a.task_id].finished_at)) / 3600e3; }).filter(function (h) { return h >= 0; });
       var fmtH = function (h) { return h == null ? "—" : h < 1 ? Math.round(h * 60) + " min" : h < 48 ? (Math.round(h * 10) / 10) + " h" : Math.round(h / 24) + " d"; };
-      var stagesF = [["registered → staged", median(regToStaged), "the build, on a worker"], ["staged → decided", median(stagedToDecided), "a maintainer reads the evidence"], ["approved → edge", null, "the rebuild on the review worker"], ["edge → rc", 24, "promoted daily, after the checks"], ["rc → stable", 24, "the soak"]];
+      var stagesF = [["registered → staged", median(regToStaged), "the build, on a worker"], ["staged → decided", median(stagedToDecided), "a maintainer reads the evidence"], ["approved → edge", null, "a maintainer's recipe, merged and built"], ["edge → rc", 24, "promoted daily, after the checks"], ["rc → stable", 24, "the soak"]];
       var maxH = Math.max(24, median(regToStaged) || 0, median(stagedToDecided) || 0);
       $("#c-funnel").innerHTML = '<div class="hrows">' + stagesF.map(function (st) { var human = st[0] === "staged → decided"; return '<div class="hrow" style="grid-template-columns:170px 1fr 56px"><div class="l" title="' + esc(st[2]) + '">' + esc(st[0]) + '</div><div class="bar" data-tip="' + esc(st[0] + ": " + (st[1] == null ? "no measurement yet" : "median " + fmtH(st[1])) + " — " + st[2]) + '"><i style="width:' + (st[1] == null ? 0 : Math.min(100, 100 * st[1] / maxH)) + '%;background:' + (human ? "var(--amber)" : "var(--green)") + '"></i></div><div class="p num">' + fmtH(st[1]) + '</div></div>'; }).join("") + '</div><div class="legend"><span><i style="background:var(--green)"></i>the machines</span><span><i style="background:var(--amber)"></i>a human decides</span></div>';
       endSkeleton();

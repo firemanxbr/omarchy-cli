@@ -56,8 +56,9 @@ agent_label() {
 #   <commit>                   factory/pkgbuilds/<group>/<name> in omarchy-pool at that commit
 #   <url>@<tag>:<path>         the contributor's own repository at a tag (path is the PKGBUILD or its directory)
 #   draft:<url>@<tag|latest>   drafted here by factory/bin/draft-pkgbuild (the contributor's agent key, if any)
-#   bump:<task>@<tag>          the PKGBUILD approved in <task>, pkgver moved to <tag>, checksums refreshed
-#   staging:<task>             the PKGBUILD a contributor's build staged, approved by a maintainer (the project rebuild)
+#   bump:<task>@<tag>          the PKGBUILD approved in <task>, pkgver moved to <tag>, checksums refreshed (a community build: evidence)
+#   staging:<task>             refused since 2026-09-15: a build never starts from a contributor's staged
+#                              artifact; the project builds the recipe a maintainer wrote (docs/GOVERNANCE.md)
 prepare_container() {
   # pacman's download sandbox (seccomp + landlock) has no place in an
   # already-isolated, sometimes emulated container.
@@ -109,10 +110,8 @@ fetch_pkgbuild() { # name group ref → /build/pkg holds the PKGBUILD directory
   local name="$1" group="$2" ref="$3"
   rm -rf /build/pkg /build/src
   if [[ "$ref" == staging:* ]]; then
-    local from="${ref#staging:}"
-    echo "==> PKGBUILD from staged task $from (approved)"
-    mkdir -p /build/pkg
-    curl -sSf "${OMARCHY_API:-https://pkgs.firemanxbr.org}/api/v1/factory/tasks/$from/artifacts/PKGBUILD" -o /build/pkg/PKGBUILD
+    echo "==> refused: a build never starts from a contributor's staged artifact (task ${ref#staging:}); the project builds the recipe a maintainer wrote into factory/pkgbuilds/$group/$name (docs/GOVERNANCE.md)" >&2
+    return 1
   elif [[ "$ref" == bump:* ]]; then
     # A new upstream release of an approved package: the PKGBUILD a
     # maintainer approved, with pkgver moved to the tag and pkgrel reset;

@@ -51,17 +51,27 @@ export async function factoryChain(env: Env, sha256: string): Promise<Record<str
   if (!build) return null;
   const builder = await builderOf(env, build.id);
   const ref = build.pkgbuild_ref;
+  // Before 2026-09-15 an approval queued a rebuild of the staged PKGBUILD
+  // itself (`staging:<task>`); since then the project builds the recipe a
+  // maintainer wrote and merged, and the approval it answers is linked to
+  // the build when it lands (handleComplete). Both chains read the same way.
   const staged = ref.startsWith("staging:") ? Number(ref.slice(8)) : null;
   const recipe: Record<string, unknown> = { ref };
+  const approval = await env.DB.prepare("SELECT by, note, created_at, task_id FROM approvals WHERE decision = 'approved' AND (rebuild_task = ?1 OR task_id = ?2) ORDER BY id DESC LIMIT 1")
+    .bind(build.id, staged ?? -1)
+    .first<{ by: string; note: string | null; created_at: string; task_id: number }>();
   let sourceBuild: Record<string, unknown> | null = null;
   let audit: Record<string, unknown> | null = null;
-  if (staged) {
-    const src = await env.DB.prepare("SELECT * FROM build_tasks WHERE id = ?").bind(staged).first<TaskRow>();
+  const learned = staged ?? approval?.task_id ?? null;
+  if (learned) {
+    const src = await env.DB.prepare("SELECT * FROM build_tasks WHERE id = ?").bind(learned).first<TaskRow>();
     if (src) {
       const b = await builderOf(env, src.id);
       sourceBuild = { task: src.id, owner: src.owner, worker: b.worker, agent: b.agent, recipe: src.pkgbuild_ref, staged_at: src.finished_at, evidence: { pkgbuild: `/api/v1/factory/tasks/${src.id}/artifacts/PKGBUILD`, log: `/api/v1/factory/tasks/${src.id}/artifacts/build.log`, pkginfo: `/api/v1/factory/tasks/${src.id}/artifacts/PKGINFO` } };
-      recipe.from = src.pkgbuild_ref;
-      recipe.pkgbuild = `/api/v1/factory/tasks/${src.id}/artifacts/PKGBUILD`;
+      if (staged) {
+        recipe.from = src.pkgbuild_ref;
+        recipe.pkgbuild = `/api/v1/factory/tasks/${src.id}/artifacts/PKGBUILD`;
+      } else recipe.learned_from = `/api/v1/factory/tasks/${src.id}/artifacts/PKGBUILD`;
       const a = await env.DB.prepare("SELECT status, result FROM build_tasks WHERE kind = 'audit' AND json_extract(params, '$.task') = ? ORDER BY id DESC LIMIT 1").bind(src.id).first<{ status: string; result: string | null }>();
       if (a?.status === "done" && a.result) {
         try {
@@ -72,15 +82,13 @@ export async function factoryChain(env: Env, sha256: string): Promise<Record<str
         }
       } else if (a) audit = { verdict: null, status: a.status };
     }
-  } else {
+  }
+  if (!staged) {
     recipe.repository = REPO_URL;
     recipe.path = `factory/pkgbuilds/${build.group}/${build.name}/PKGBUILD`;
     recipe.commit = ref;
     recipe.pkgbuild = `${REPO_URL}/blob/${ref}/factory/pkgbuilds/${build.group}/${build.name}/PKGBUILD`;
   }
-  const approval = await env.DB.prepare("SELECT by, note, created_at, task_id FROM approvals WHERE decision = 'approved' AND (rebuild_task = ?1 OR task_id = ?2) ORDER BY id DESC LIMIT 1")
-    .bind(build.id, staged ?? -1)
-    .first<{ by: string; note: string | null; created_at: string; task_id: number }>();
   return {
     builder: { worker: builder.worker, trust: "project" },
     buildType: "makepkg in a fresh Arch Linux container (factory/worker/omarchy-build-worker.sh --inside)",

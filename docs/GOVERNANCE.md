@@ -25,18 +25,24 @@ than the author how their software should be compiled and packaged, and an
 agent turns that knowledge into a recipe faster. The agent's key is the
 contributor's, on their machine; the project runs no agent for them.
 
-**What the contributor built is never what users get.** The maintainer does
-not trust it and must not: they redo the work on a worker the project
-trusts, and the pool signs that. What they have in front of them is not
-"some software, go package it" — it is a recipe that already built, its
-log, its manifest, its metrics, the corrections made along the way.
-Evidence. It makes the maintainer faster and less likely to err, and the
-approval more confident, not less demanding.
+**Nothing the contributor built is ever used — not the package, not the
+recipe.** The maintainer does not trust it and must not: they write the
+project's recipe themselves, with the knowledge the evidence handed over,
+merge it into `factory/pkgbuilds/<group>/<name>/` by pull request, and a
+worker the project trusts builds *that*; the pool signs the result. What
+the maintainer has in front of them is not "some software, go package it"
+— it is a recipe that already built, its log, its manifest, its metrics,
+the corrections made along the way, the second agent's audit. Evidence.
+It makes the maintainer faster and less likely to err, and the approval
+more confident, not less demanding. The pool enforces the line: an
+approval queues no build, and a worker refuses to start one from a staged
+artifact (`factory/worker/omarchy-build-worker.sh`).
 
 Zero trust between people, shared knowledge between them. Users get a
-package at least **two different people** checked — the contributor who
-made it work, the maintainer who rebuilt and attested it — and, when both
-sides run an agent, one that two independent agents built and tested.
+package at least **two different people** made — the contributor who
+made it work, the maintainer who wrote the recipe the project built and
+attested — and, when both sides run an agent, one that two independent
+agents built and tested.
 
 ### The second agent
 
@@ -66,13 +72,20 @@ page and at `GET /api/v1/factory/groups`.
 ## What a maintainer does
 
 - Approves or rejects the staged builds of their groups, with the evidence
-  (PKGBUILD, log, PKGINFO) in front of them. An approval queues the
-  project's own rebuild; users only ever get what the project built and
-  signed. **Never their own package**: a maintainer who brought a package
-  is its contributor, and another maintainer of the group approves it
-  (conflict of interest, refused by the pool). While a group has a single
-  maintainer there is nobody else — that maintainer may approve their own,
-  and the approval says so.
+  (PKGBUILD, log, PKGINFO, audit) in front of them. An approval is the
+  decision, on the record with a name; it queues nothing. **Never their
+  own package**: a maintainer who brought a package is its contributor,
+  and another maintainer of the group approves it (conflict of interest,
+  refused by the pool). A group with a single maintainer is no exception:
+  that maintainer's own packages wait for a second one — which is why a
+  group needs two.
+- Writes the project's recipe for what they approved, from the evidence,
+  and opens the pull request adding `factory/pkgbuilds/<group>/<name>/`.
+  The merge is what the project builds (the hourly `enqueue` job queues
+  it from `main`), signs and publishes into `edge`; the build is linked
+  back to the approval it answers, and the seal of the object shows the
+  whole chain. The maintainer who wrote the recipe is not the package's
+  owner.
 - Reviews pull requests touching `factory/pkgbuilds/<group>/` (a new recipe
   of the project's own, a version bump).
 - Trusts workers as project workers (`POST /factory/workers/:id/trust`).
@@ -81,16 +94,17 @@ page and at `GET /api/v1/factory/groups`.
 ## The project's workers
 
 Machines maintainers trust. They only do what a maintainer would: the
-pool's jobs (sync, promote, health, security, gc) and the rebuild of a
-package a maintainer approved. They never pull a new package that has no
+pool's jobs (sync, promote, health, security, gc), the audit of a staged
+build and the build of the recipes on `main`. They never build from a
+contributor's staged artifact, and never pull a new package that has no
 evidence and no review yet — that is a contributor's worker's job.
 
 The project runs them as two roles of the same image, and a third for the
 community (`OMARCHY_WORKER_ROLE`, [factory/README.md](../factory/README.md)
 *Three roles*): a **pool** worker takes the pool's jobs and nothing else; a
 **review** worker takes the maintainers' work and nothing else — the
-rebuild after an approval and the audit of every staged build (the second
-agent); a shared **community** worker builds contributors' packages and
+build of the recipes maintainers merge and the audit of every staged build
+(the second agent); a shared **community** worker builds contributors' packages and
 drafts package requests with an agent key its owner brought. The split
 keeps the maintainers' agent and the contributors' agent apart, and a
 container that is not a review worker never audits.
@@ -115,8 +129,10 @@ that pull request to regenerate `CODEOWNERS`; CI fails when the two
 disagree.
 
 **Bootstrap.** While the project has a single maintainer there is nobody
-else to approve: that maintainer merges alone, and GitHub records the
-bypassed review. The exception ends the moment a second maintainer exists.
+else to approve *the pull request that adds the second one*: that
+maintainer merges it alone, and GitHub records the bypassed review. The
+exception ends the moment a second maintainer exists, and it never
+extended to packages — a sole maintainer's own packages wait.
 
 ## Workers, compute and agents
 
@@ -151,14 +167,16 @@ bypassed review. The exception ends the moment a second maintainer exists.
 
 A new upstream release of an approved package is built the way the first
 version was — on the owner's worker, as evidence a maintainer reviews. Once
-a day the pool queues that build (`bump:<task>@<tag>`: the approved
-PKGBUILD with `pkgver` moved to the tag). The owner's worker has **14
-days**; after that any `--shared` worker may build it. **30 days** without
-a build and the package is *unmaintained*: no more bumps until its owner
-builds again, or a maintainer of the group removes the registration so
-someone else can take the name. The project's own recipes
-(`factory/pkgbuilds/<group>/`) are bumped by pull request, reviewed by the
-group's maintainers, never auto-merged.
+a day the pool queues that build (`bump:<task>@<tag>`: the contributor's
+staged PKGBUILD with `pkgver` moved to the tag; evidence again, never the
+product). The owner's worker has **14 days**; after that any `--shared`
+worker may build it. **30 days** without a build and the package is
+*unmaintained*: no more bumps until its owner builds again, or a
+maintainer of the group removes the registration so someone else can take
+the name. The project's recipes (`factory/pkgbuilds/<group>/`, the
+maintainers' own and the ones written from contributors' evidence) are
+bumped by pull request — `factory-update.yml` opens one per package —
+reviewed by the group's maintainers, never auto-merged.
 
 ## The record
 
