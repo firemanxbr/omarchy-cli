@@ -61,11 +61,17 @@ PKGBUILD reviewed and merged ──▶ pool: package_requests / build_tasks (D1)
    worker owner's key, never the pool's; without one a template covers Rust,
    Go, CMake, Meson, autotools and prebuilt release binaries. `updpkgsums`
    fills the checksums and `namcap` lints, in the container.
-4. **It is built before anyone reviews it.** The worker builds it in its
-   fresh container; a failure feeds the log back to the drafter for a
-   corrected PKGBUILD — three attempts. The package, the PKGBUILD and the log
-   land in the contributor's staging workspace as **evidence**; nothing is
-   published.
+4. **It is built before anyone reviews it — and it passes the gate.** The
+   worker builds it in its fresh container; a failure feeds the log back to
+   the drafter for a corrected PKGBUILD — three attempts. Then the gate
+   (*The gate*, below): the checks every package must pass, run by the
+   worker on what it just built, the transcript in `tests.log`, the verdict
+   in `vet.json`. A failing gate is a failed build (final, never retried
+   by the pool; the drafter gets one turn with the verdict as the log). The
+   package, the PKGBUILD, the log and the gate land in the contributor's
+   staging workspace as **evidence**, and the evidence — never the package
+   — is copied to the record, `factory/<name>/<request>/build-<task>/`,
+   signed; nothing is published.
 5. **The second agent reads it.** Staging the build queues an `audit`: a
    project worker whose owner set an agent key reads the PKGBUILD, the log
    and the `.PKGINFO`, asks the model for a structured review
@@ -107,6 +113,32 @@ PKGBUILD reviewed and merged ──▶ pool: package_requests / build_tasks (D1)
 
 The Factory page follows a request through every stage
 (`requested → drafting → validating → review → approved`).
+
+## The gate
+
+What the factory asks of every package, on both sides of the review —
+the contributor's build and the project's — run by the worker in the
+container that built it (`factory/worker/omarchy-build-worker.sh`,
+`vet_package`), after the checks the omarchy-aur-factory runs. `fail`
+fails the build; `warn` is for the audit and the maintainer to weigh.
+
+| Check | What it asks | fail when |
+|---|---|---|
+| checksums | every source pinned (`updpkgsums` fills them) | a `SKIP` for a source that is not a VCS |
+| shellcheck | `shellcheck --shell=bash` on the PKGBUILD (SC2034, SC2154, SC2164 excluded: makepkg's own) | an error |
+| namcap-pkgbuild | `namcap PKGBUILD` | an `E:` |
+| namcap-package | `namcap -i` on every built package: dependencies the ELF scan finds, sonames, permissions, paths, `$srcdir` leaks, the licence file | an `E:` |
+| files | `pacman -Qlp`: only `/usr`, `/etc`, `/opt` | anything under `/usr/local`, `/bin`, `/sbin`, `/lib`, `/home`, `/tmp`; a `.la`; an empty package |
+| metadata | `pacman -Qip`: `pkgdesc`, `license`, `url` | no description or licence |
+| check | a `check()` running the upstream tests, or a comment saying why not | never (a warning) |
+| smoke | `pacman -U` in the fresh container, then every binary the package puts in `/usr/bin` started once (`--version`, then `--help`) | the install is refused, or a binary cannot start (a missing library, exit 126/127, a signal) |
+
+shellcheck comes from pacman where it exists and from the pinned static
+release (`SHELLCHECK_VERSION`, checksum verified) on Arch Linux ARM, which
+does not ship it; without it the gate says so and goes on. The audit (the
+second agent) reads `tests.log` beside the PKGBUILD and the log, so it
+weighs what the gate found instead of rediscovering it; the Review page
+shows the gate's verdict next to the audit's.
 
 ## Contribute a package
 

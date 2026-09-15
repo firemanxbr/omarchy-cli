@@ -12,13 +12,13 @@ const BODY = String.raw`
   <div class="hero compact">
     <p class="eyebrow">Review</p>
     <h1>What contributors built, waiting for a maintainer</h1>
-    <p class="lede">Each row is evidence, not a package: read the PKGBUILD, the log, the manifest and the audit, then <b>approve</b> or <b>reject</b> with a note the contributor sees. Nothing here is copied: an approval is the decision, and the project builds the recipe a maintainer writes from this evidence and merges into <code>factory/pkgbuilds/&lt;group&gt;/&lt;name&gt;/</code>. Never your own package. <a href="/docs/governance">Governance →</a></p>
+    <p class="lede">Each row is evidence, not a package: read the PKGBUILD, the log, the manifest, the gate's verdict and the audit, then <b>approve</b> or <b>reject</b> with a note the contributor sees. Nothing here is copied: an approval is the decision, and the project builds the recipe a maintainer writes from this evidence and merges into <code>factory/pkgbuilds/&lt;group&gt;/&lt;name&gt;/</code>. Never your own package. <a href="/docs/governance">Governance →</a></p>
   </div>
   <p class="sub" id="who"></p>
 
   <section>
     <h2>Staged builds</h2>
-    <div class="table-wrap"><table id="staged"><thead><tr><th>#</th><th>Package</th><th>Arch</th><th>Project</th><th>Detected</th><th>Built by</th><th>Evidence</th><th>Audit</th><th>Decision</th></tr></thead><tbody></tbody></table></div>
+    <div class="table-wrap"><table id="staged"><thead><tr><th>#</th><th>Package</th><th>Arch</th><th>Project</th><th>Detected</th><th>Built by</th><th>Evidence</th><th>Gate</th><th>Audit</th><th>Decision</th></tr></thead><tbody></tbody></table></div>
     <p class="sub">The audit column is the second agent (<a href="/docs/governance">Governance</a>): a project worker whose owner set an agent key reads the PKGBUILD, the log and the <code>.PKGINFO</code> and writes a report — supply chain, security, packaging practice, licence. It is evidence for you, never a decision: <span class="pill ok">ok</span> nothing worth a change · <span class="pill warn">warn</span> approve with the findings in mind · <span class="pill error">block</span> do not approve as is. <em>Waiting</em> means no project worker with a key has picked it up yet.</p>
   </section>
 
@@ -53,6 +53,13 @@ const SCRIPT = String.raw`
     });
   }
   // The second agent's column: its verdict and one line, the report behind it.
+  // The gate: the worker's own checks on the build (factory/README.md *The gate*), pass with its warnings named, or none for a build older than the gate.
+  function gate(t) {
+    var v = t.vet;
+    if (!v) return '<span class="dim" title="built before the gate existed">—</span>';
+    if (v.verdict === "pass") return '<span class="pill ok">pass</span> <a class="run" href="' + t.evidence.tests + '" title="' + esc((v.warned || []).join(", ")) + '">' + (v.warnings ? v.warnings + ' warning' + (v.warnings === 1 ? '' : 's') : 'clean') + '</a>';
+    return '<span class="pill error">' + esc(v.verdict) + '</span> <a class="run" href="' + t.evidence.tests + '">' + esc((v.failed || []).join(", ")) + '</a>';
+  }
   function audit(t) {
     var a = t.audit || { status: "none" };
     if (a.status === "done" && a.verdict) {
@@ -74,7 +81,7 @@ const SCRIPT = String.raw`
           '<td>' + (t.url ? '<a href="' + esc(t.url) + '">' + esc(t.url.replace(/^https?:\/\/(www\.)?github\.com\//, "")) + '</a>' : '—') + '</td><td>' + esc([det.build_system, det.license, det.latest_tag].filter(Boolean).join(" · ")) + '</td>' +
           '<td>' + person(t.owner) + ' <span class="muted">' + (t.duration_ms ? Math.round(t.duration_ms / 1000) + " s" : "") + '</span></td>' +
           '<td><a class="run" href="' + t.evidence.pkgbuild + '">PKGBUILD</a> <a class="run" href="' + t.evidence.log + '">log</a> <a class="run" href="' + t.evidence.pkginfo + '">PKGINFO</a> <span class="mono muted">' + esc((t.result_sha256 || "").slice(0, 12)) + '</span></td>' +
-          '<td>' + audit(t) + '</td>' +
+          '<td>' + gate(t) + '</td><td>' + audit(t) + '</td>' +
           '<td>' + (token || signedIn ? '<button type="button" data-approve="' + t.id + '">Approve</button> <button type="button" data-reject="' + t.id + '">Reject</button>' : '<span class="muted">sign in</span>') + '</td></tr>';
       }, { empty: 'nothing waiting for review' });
       endSkeleton();

@@ -29,7 +29,7 @@ function upstreamOf(source: string, repoArch: string): { project: string; keyrin
 }
 
 interface PackageRow { id: number; sha256: string; name: string; version: string; arch: string; repo_arch: string; filename: string; source: string; has_signature: number; created_at: string; r2_key: string }
-interface TaskRow { id: number; name: string; group: string; arch: string; version: string | null; pkgbuild_ref: string; owner: string | null; trust: string; started_at: string | null; finished_at: string | null; duration_ms: number | null; attempts: number }
+interface TaskRow { id: number; name: string; group: string; arch: string; version: string | null; pkgbuild_ref: string; owner: string | null; trust: string; started_at: string | null; finished_at: string | null; duration_ms: number | null; attempts: number; result: string | null }
 
 async function builderOf(env: Env, task: number): Promise<{ worker: string | null; agent: string | null }> {
   const ev = await env.DB.prepare("SELECT payload FROM events WHERE kind = 'build' AND status = 'ok' AND json_extract(payload, '$.task') = ? ORDER BY id DESC LIMIT 1").bind(task).first<{ payload: string }>();
@@ -43,6 +43,16 @@ async function builderOf(env: Env, task: number): Promise<{ worker: string | nul
  * the audit, the approval, the rebuild. Null when the object is not a
  * factory build the pool knows the task of.
  */
+/** The gate's summary a build's completion kept on the task (build_tasks.result → {vet}); null before the gate. */
+function vetOf(result: string | null): unknown {
+  if (!result) return null;
+  try {
+    return (JSON.parse(result) as { vet?: unknown }).vet ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export async function factoryChain(env: Env, sha256: string): Promise<Record<string, unknown> | null> {
   const build = await env.DB.prepare("SELECT * FROM build_tasks WHERE kind = 'build' AND trust = 'project' AND result_sha256 = ? AND status = 'done' ORDER BY id DESC LIMIT 1")
     .bind(sha256)
@@ -66,7 +76,7 @@ export async function factoryChain(env: Env, sha256: string): Promise<Record<str
     const src = await env.DB.prepare("SELECT * FROM build_tasks WHERE id = ?").bind(learned).first<TaskRow>();
     if (src) {
       const b = await builderOf(env, src.id);
-      sourceBuild = { task: src.id, owner: src.owner, worker: b.worker, agent: b.agent, recipe: src.pkgbuild_ref, staged_at: src.finished_at, evidence: { pkgbuild: `/api/v1/factory/tasks/${src.id}/artifacts/PKGBUILD`, log: `/api/v1/factory/tasks/${src.id}/artifacts/build.log`, pkginfo: `/api/v1/factory/tasks/${src.id}/artifacts/PKGINFO` } };
+      sourceBuild = { task: src.id, owner: src.owner, worker: b.worker, agent: b.agent, recipe: src.pkgbuild_ref, staged_at: src.finished_at, evidence: { pkgbuild: `/api/v1/factory/tasks/${src.id}/artifacts/PKGBUILD`, log: `/api/v1/factory/tasks/${src.id}/artifacts/build.log`, pkginfo: `/api/v1/factory/tasks/${src.id}/artifacts/PKGINFO`, tests: `/api/v1/factory/tasks/${src.id}/artifacts/tests.log`, vet: `/api/v1/factory/tasks/${src.id}/artifacts/vet.json` }, gate: vetOf(src.result) };
       if (staged) {
         recipe.from = src.pkgbuild_ref;
         recipe.pkgbuild = `/api/v1/factory/tasks/${src.id}/artifacts/PKGBUILD`;

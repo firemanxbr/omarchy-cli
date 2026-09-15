@@ -1174,6 +1174,11 @@ fn audit_job(opts: &WorkOptions, job: &Api, task: &Task) -> Result<Outcome> {
     let has_pkginfo = job
         .download(&format!("{evidence}/PKGINFO"), &pkginfo)
         .is_ok();
+    // The gate's transcript, when the build ran one (workers before the gate did not).
+    let tests = dir.join("tests.log");
+    let has_tests = job
+        .download(&format!("{evidence}/tests.log"), &tests)
+        .is_ok();
     let mut cmd = Command::new("python3");
     cmd.arg(repo.join("factory/bin/audit-pkgbuild"))
         .arg("--pkgbuild")
@@ -1184,6 +1189,9 @@ fn audit_job(opts: &WorkOptions, job: &Api, task: &Task) -> Result<Outcome> {
         .arg(&dir);
     if has_pkginfo {
         cmd.arg("--pkginfo").arg(&pkginfo);
+    }
+    if has_tests {
+        cmd.arg("--tests").arg(&tests);
     }
     let out = cmd.output().context("running audit-pkgbuild")?;
     if !out.status.success() {

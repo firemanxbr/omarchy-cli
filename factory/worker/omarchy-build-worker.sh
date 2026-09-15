@@ -92,6 +92,7 @@ prepare_container() {
   done
   pacman-key --init >/dev/null 2>&1 || true
   pacman -Syu --noconfirm --needed base-devel git namcap jq python pacman-contrib ccache >/dev/null
+  install_shellcheck
   # makepkg refuses root; `builder` builds, root installs the dependencies
   # (install_deps) — no sudo anywhere: a setuid sudo does not start under
   # user-mode emulation (an x86_64 build on an aarch64 host).
@@ -205,8 +206,10 @@ install_deps() {
 
 run_makepkg() { # → /build/out/*.pkg.tar.zst
   rm -rf /build/out; mkdir -p /build/out && chown -R builder:builder /build/pkg /build/out
-  # A drafted PKGBUILD carries SKIP checksums; fill them in.
-  if grep -q "^sha256sums=('SKIP')" /build/pkg/PKGBUILD; then (cd /build/pkg && as_builder updpkgsums); fi
+  # A drafted PKGBUILD carries SKIP checksums; fill them in — every SKIP
+  # that is not a VCS source's, local files included (the gate refuses a
+  # SKIP left behind).
+  if grep -qE "^(sha256sums|sha512sums|b2sums|md5sums)=.*SKIP" /build/pkg/PKGBUILD; then (cd /build/pkg && as_builder updpkgsums); fi
   # Source signatures verify against keys shipped beside the PKGBUILD
   # (keys/pgp/<fingerprint>.asc, the AUR convention), never a keyserver.
   if compgen -G "/build/pkg/keys/pgp/*.asc" >/dev/null; then
@@ -221,6 +224,121 @@ run_makepkg() { # → /build/out/*.pkg.tar.zst
     makepkg --noconfirm --clean --cleanbuild --nosign)
 }
 
+# shellcheck for the gate: Arch ships it, Arch Linux ARM does not (a
+# Haskell build), so the static release is fetched, pinned by checksum,
+# when pacman has none. Without it the gate says so and goes on.
+SHELLCHECK_VERSION=v0.11.0
+install_shellcheck() {
+  command -v shellcheck >/dev/null 2>&1 && return 0
+  pacman -S --noconfirm --needed shellcheck >/dev/null 2>&1 && return 0
+  local arch sum; arch="$(uname -m)"
+  case "$arch" in
+    x86_64) sum=8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198 ;;
+    aarch64) sum=12b331c1d2db6b9eb13cfca64306b1b157a86eb69db83023e261eaa7e7c14588 ;;
+    *) return 1 ;;
+  esac
+  local tmp=/build/shellcheck.tar.xz
+  curl -fsSL --max-time 120 "https://github.com/koalaman/shellcheck/releases/download/$SHELLCHECK_VERSION/shellcheck-$SHELLCHECK_VERSION.linux.$arch.tar.xz" -o "$tmp" || return 1
+  [[ "$(sha256 "$tmp")" == "$sum" ]] || { echo "shellcheck: checksum mismatch, not installed" >&2; rm -f "$tmp"; return 1; }
+  tar -xJf "$tmp" -C /build && install -m755 "/build/shellcheck-$SHELLCHECK_VERSION/shellcheck" /usr/local/bin/shellcheck && rm -rf "$tmp" "/build/shellcheck-$SHELLCHECK_VERSION"
+}
+
+# ------------------------------------------------------------------ gate ---
+# What every package must pass before it is evidence, on both sides of the
+# review (docs/GOVERNANCE.md, factory/README.md *The gate*): real checksums,
+# a PKGBUILD shellcheck and namcap accept, a built package namcap accepts,
+# a sane file list, metadata that says what it is, a licence file where
+# Arch wants one, and a smoke test — installed in this fresh container,
+# every binary it puts in /usr/bin started once. The transcript is
+# tests.log, the verdict vet.json; a `fail` fails the build (final), a
+# `warn` is for the audit and the maintainer to weigh. The checks follow
+# the ones the omarchy-aur-factory (Adam Jacob) runs; none is skipped.
+VET_JSON=/build/vet.json; VET_LOG=/build/tests.log
+vet_add() { # name status detail
+  local name="$1" status="$2" detail="$3"
+  printf '[%s] %-4s %s — %s\n' "$(date -u +%H:%M:%S)" "$status" "$name" "${detail:0:800}" >>"$VET_LOG"
+  jq -c --arg n "$name" --arg s "$status" --arg d "${detail:0:2000}" '.checks += [{name:$n,status:$s,detail:$d}]' "$VET_JSON" >"$VET_JSON.tmp" && mv "$VET_JSON.tmp" "$VET_JSON"
+}
+vet_package() { # name → 0 pass (maybe warnings), 5 fail; writes vet.json and tests.log
+  local name="$1" pkgs=(/build/out/*.pkg.tar.zst) out fails
+  echo '{"schema":"omarchy-pool/vet/1","verdict":"pending","checks":[]}' >"$VET_JSON"; : >"$VET_LOG"
+  echo "==> The gate: lint, audit, smoke test"
+  # 1. checksums: real ones, SKIP only for a VCS source.
+  if grep -qE "^(sha256sums|sha512sums|b2sums|md5sums)=.*SKIP" /build/pkg/PKGBUILD && ! grep -qE "^source=.*(git\+|hg\+|svn\+|bzr\+|::git)" /build/pkg/PKGBUILD; then
+    vet_add checksums fail "a checksum is SKIP and the source is not a VCS: every download must be pinned"
+  else vet_add checksums pass "every source pinned by checksum (SKIP only for a VCS source)"; fi
+  # 2. shellcheck on the PKGBUILD (the three codes makepkg makes false: vars it consumes, $pkgdir it defines, cd under -e).
+  if ! command -v shellcheck >/dev/null 2>&1; then vet_add shellcheck warn "shellcheck is not available on this worker; the PKGBUILD was not linted for shell errors"; out=""
+  else out="$(shellcheck --shell=bash --exclude=SC2034,SC2154,SC2164 --format=gcc /build/pkg/PKGBUILD 2>&1 || true)"; fi
+  if ! command -v shellcheck >/dev/null 2>&1; then :
+  elif grep -q ": error:" <<<"$out"; then vet_add shellcheck fail "$(grep -c ': error:' <<<"$out") error(s): $(grep ': error:' <<<"$out" | head -3 | tr '\n' ' ')"
+  elif grep -q ": warning:" <<<"$out"; then vet_add shellcheck warn "$(grep -c ': warning:' <<<"$out") warning(s): $(grep ': warning:' <<<"$out" | head -3 | tr '\n' ' ')"
+  else vet_add shellcheck pass "clean"; fi
+  # 3. namcap on the PKGBUILD: E fails, W is weighed.
+  out="$(as_builder namcap /build/pkg/PKGBUILD 2>&1 || true)"
+  if grep -qE "^PKGBUILD.* E: " <<<"$out"; then vet_add namcap-pkgbuild fail "$(grep -E ' E: ' <<<"$out" | head -4 | tr '\n' ' ')"
+  elif grep -qE "^PKGBUILD.* W: " <<<"$out"; then vet_add namcap-pkgbuild warn "$(grep -E ' W: ' <<<"$out" | head -4 | tr '\n' ' ')"
+  else vet_add namcap-pkgbuild pass "clean"; fi
+  # 4. namcap on every built package: dependencies the ELF scan finds, permissions, paths, srcdir leaks, the licence.
+  local p e w
+  for p in "${pkgs[@]}"; do
+    out="$(as_builder namcap -i "$p" 2>&1 || true)"
+    e="$(grep -E ' E: ' <<<"$out" | grep -vE 'E: (dependency-detected-not-included (glibc|gcc-libs)|elffile-not-in-allowed-dirs.*/opt/)' | head -6 | tr '\n' ' ')"
+    w="$(grep -E ' W: ' <<<"$out" | head -6 | tr '\n' ' ')"
+    if [[ -n "$e" ]]; then vet_add "namcap-package:$(basename "$p")" fail "$e"
+    elif [[ -n "$w" ]]; then vet_add "namcap-package:$(basename "$p")" warn "$w"
+    else vet_add "namcap-package:$(basename "$p")" pass "clean"; fi
+  done
+  # 5. the file list: standard paths only, no libtool archives, not empty.
+  for p in "${pkgs[@]}"; do
+    out="$(pacman -Qlp "$p" 2>/dev/null | awk '{print $2}')"
+    local bad; bad="$(grep -E '^/(usr/local|bin|sbin|lib|lib64|home|tmp|root|opt/[^/]+/tmp)/' <<<"$out" | head -3 | tr '\n' ' ' || true)"
+    if [[ -z "$(grep -vE '/$' <<<"$out")" ]]; then vet_add "files:$(basename "$p")" fail "the package installs no file"
+    elif [[ -n "$bad" ]]; then vet_add "files:$(basename "$p")" fail "files outside the standard tree: $bad"
+    elif grep -qE '\.la$' <<<"$out"; then vet_add "files:$(basename "$p")" fail "libtool .la archives are not shipped: $(grep -E '\.la$' <<<"$out" | head -2 | tr '\n' ' ')"
+    else vet_add "files:$(basename "$p")" pass "$(grep -cvE '/$' <<<"$out") file(s) under /usr, /etc, /opt"; fi
+  done
+  # 6. metadata: what pacman shows must say what it is.
+  for p in "${pkgs[@]}"; do
+    out="$(pacman -Qip "$p" 2>/dev/null)"
+    local desc lic url
+    desc="$(awk -F' *: ' '/^Description/{print $2}' <<<"$out")"; lic="$(awk -F' *: ' '/^Licenses/{print $2}' <<<"$out")"; url="$(awk -F' *: ' '/^URL/{print $2}' <<<"$out")"
+    if [[ -z "$desc" || "$desc" == None || -z "$lic" || "$lic" == None || "$lic" == unknown ]]; then vet_add "metadata:$(basename "$p")" fail "pkgdesc or license missing (desc='${desc}', license='${lic}')"
+    elif [[ -z "$url" || "$url" == None ]]; then vet_add "metadata:$(basename "$p")" warn "no url= in the PKGBUILD"
+    else vet_add "metadata:$(basename "$p")" pass "$lic · $desc"; fi
+  done
+  # 7. check(): the upstream test suite, or a reason in the PKGBUILD.
+  if grep -qE '^check\(\)' /build/pkg/PKGBUILD; then vet_add check pass "check() runs the upstream tests"
+  elif grep -qiE '^#.*(no test|check\(\)|tests? (need|require|are)|upstream has no)' /build/pkg/PKGBUILD; then vet_add check warn "no check(): $(grep -iE '^#.*(no test|check\(\)|tests?|upstream has no)' /build/pkg/PKGBUILD | head -1)"
+  else vet_add check warn "no check() and no comment saying why"; fi
+  # 8. the smoke test: install here, start every binary the package puts in /usr/bin.
+  if pacman -U --noconfirm "${pkgs[@]}" >>"$VET_LOG" 2>&1; then
+    local bins started=0 broken=""
+    bins="$(for p in "${pkgs[@]}"; do pacman -Qlp "$p" 2>/dev/null | awk '$2 ~ /^\/usr\/bin\/[^\/]+$/ {print $2}'; done | sort -u)"
+    for b in $bins; do
+      [[ -x "$b" ]] || continue
+      local code
+      timeout 10 "$b" --version >/build/smoke.out 2>&1; code=$?
+      if (( code == 126 || code == 127 || code >= 129 )) || grep -qE 'error while loading shared libraries|cannot open shared object|No such file or directory' /build/smoke.out; then
+        timeout 10 "$b" --help >/build/smoke.out 2>&1; code=$?
+        if (( code == 126 || code == 127 || code >= 129 )) || grep -qE 'error while loading shared libraries|cannot open shared object' /build/smoke.out; then
+          broken+="$b (exit $code: $(head -c 160 /build/smoke.out | tr '\n' ' ')) "; continue
+        fi
+      fi
+      started=$((started + 1)); printf '    %s --version → exit %s\n' "$b" "$code" >>"$VET_LOG"
+    done
+    if [[ -n "$broken" ]]; then vet_add smoke fail "installed, but a binary does not start: $broken"
+    elif [[ -z "$bins" ]]; then vet_add smoke pass "installed; nothing in /usr/bin to start (a library, data, or a desktop app elsewhere)"
+    else vet_add smoke pass "installed; $started binary(ies) in /usr/bin started"; fi
+  else vet_add smoke fail "pacman -U refused the package: $(tail -n 3 "$VET_LOG" | tr '\n' ' ')"; fi
+  fails="$(jq -r '[.checks[] | select(.status == "fail")] | length' "$VET_JSON")"
+  local warns; warns="$(jq -r '[.checks[] | select(.status == "warn")] | length' "$VET_JSON")"
+  jq -c --arg v "$( (( fails > 0 )) && echo fail || echo pass)" '.verdict = $v | .fails = ([.checks[] | select(.status == "fail")] | length) | .warnings = ([.checks[] | select(.status == "warn")] | length)' "$VET_JSON" >"$VET_JSON.tmp" && mv "$VET_JSON.tmp" "$VET_JSON"
+  echo "==> The gate: $( (( fails > 0 )) && echo "FAIL ($fails failing check(s), $warns warning(s))" || echo "pass ($warns warning(s))")"
+  cat "$VET_LOG"
+  (( fails == 0 )) || return 5
+}
+
 # Build with the drafter correcting itself from the log — the contributor's
 # agent doing the heavy lifting, on the contributor's machine.
 build_with_retries() { # name group ref
@@ -228,9 +346,16 @@ build_with_retries() { # name group ref
   [[ "$ref" == draft:* && -n "$(agent_label)" ]] && max=3
   fetch_pkgbuild "$name" "$group" "$ref"
   while :; do
-    if run_makepkg > /build/attempt.log 2>&1; then cat /build/attempt.log; return 0; fi
-    cat /build/attempt.log
-    if (( attempt >= max )); then return 4; fi
+    if run_makepkg > /build/attempt.log 2>&1; then
+      cat /build/attempt.log
+      vet_package "$name" && return 0
+      # The gate failed: one more turn of the drafter, with the verdict as the log, when there is an agent.
+      if (( attempt >= max )); then return 5; fi
+      cp "$VET_LOG" /build/attempt.log
+    else
+      cat /build/attempt.log
+      if (( attempt >= max )); then return 4; fi
+    fi
     attempt=$((attempt + 1))
     echo "==> Attempt $attempt: correcting the PKGBUILD from the log"
     cp /build/pkg/PKGBUILD /build/PKGBUILD.prev
@@ -245,8 +370,12 @@ inside() {
   source /task/meta.sh
   prepare_container
   add_pool_repos "$arch" "$pool"
-  build_with_retries "$name" "$group" "$ref"
-  mkdir -p /task/out && cp /build/out/*.pkg.tar.zst /task/out/ && cp /build/pkg/PKGBUILD /task/out/PKGBUILD && ls /task/out
+  local status=0
+  build_with_retries "$name" "$group" "$ref" || status=$?
+  # The gate's verdict travels with the result, pass or fail.
+  mkdir -p /task/out; [[ -f "$VET_JSON" ]] && cp "$VET_JSON" "$VET_LOG" /task/out/ 2>/dev/null
+  (( status == 0 )) || exit "$status"
+  cp /build/out/*.pkg.tar.zst /task/out/ && cp /build/pkg/PKGBUILD /task/out/PKGBUILD && ls /task/out
 }
 
 # ------------------------------------------------------------- container ---
@@ -295,7 +424,9 @@ container_worker() {
   local took=$(( (SECONDS - started) * 1000 )) tail; tail="$(tail -n 80 /build/build.log | jq -Rs .)"
   if [[ $status -ne 0 ]]; then
     kill "$beat" 2>/dev/null || true
-    local err; err="$(grep -m1 -E '^(==> ERROR|error|Error|fatal)' /build/build.log || tail -n1 /build/build.log)"
+    local err
+    if (( status == 5 )); then err="the gate: $(jq -r '[.checks[] | select(.status == "fail") | .name + ": " + .detail] | join("; ")' "$VET_JSON" 2>/dev/null | head -c 400)"
+    else err="$(grep -m1 -E '^(==> ERROR|error|Error|fatal)' /build/build.log || tail -n1 /build/build.log)"; fi
     # The pool retries a task for the infrastructure's sake — a download
     # that broke, a mirror, a container killed under it. A recipe that
     # fails, fails the same way in the next fresh container: the report
@@ -307,6 +438,7 @@ container_worker() {
     # Upload what there is for the record, then report.
     upload_staging "$id" /build/build.log build.log || true
     [[ -f /build/pkg/PKGBUILD ]] && upload_staging "$id" /build/pkg/PKGBUILD PKGBUILD || true
+    [[ -f "$VET_JSON" ]] && upload_staging "$id" "$VET_JSON" vet.json && upload_staging "$id" "$VET_LOG" tests.log || true
     api POST "/factory/tasks/$id/fail" "$(jq -n --arg e "exit $status: ${err:0:500}" --argjson d "$took" --argjson t "$tail" --argjson f "$final" '{error:$e,duration_ms:$d,log_tail:$t,final:$f}')" >/dev/null || true
     exit 1
   fi
@@ -319,6 +451,7 @@ container_worker() {
   for p in "${pkgs[@]}"; do upload_staging "$id" "$p" "$(basename "$p")"; done
   upload_staging "$id" /build/pkg/PKGBUILD PKGBUILD
   upload_staging "$id" /build/build.log build.log
+  upload_staging "$id" "$VET_JSON" vet.json && upload_staging "$id" "$VET_LOG" tests.log
   tar -xOf "$main" .PKGINFO > /build/PKGINFO && upload_staging "$id" /build/PKGINFO PKGINFO || true
   kill "$beat" 2>/dev/null || true
   api POST "/factory/tasks/$id/complete" "$(jq -n --arg s "$sha" --arg f "$filename" --arg v "$version" --argjson d "$took" --argjson t "$tail" '{sha256:$s,filename:$f,version:$v,duration_ms:$d,log_tail:$t}')" >/dev/null

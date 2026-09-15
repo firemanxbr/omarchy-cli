@@ -3,6 +3,7 @@ import { writeAttestation } from "./seal";
 import { isRepoArch } from "../r2";
 import type { WorkerIdentity } from "./contributors";
 import { issueJobToken, scopesFor, type JobClaims } from "../jobtoken";
+import { recordEvidence, vetSummary } from "../record";
 
 /**
  * The factory's brain. Cloudflare is the source of truth for package
@@ -166,6 +167,23 @@ export async function handleCancelTask(id: number, env: Env): Promise<Response> 
 }
 
 // ---------- workers ----------
+
+/** The request behind a package name — where its record lives (null for a package that has none yet). */
+async function requestOf(env: Env, name: string): Promise<number | null> {
+  const r = await env.DB.prepare("SELECT request_id FROM factory_packages WHERE name = ?").bind(name).first<{ request_id: number | null }>();
+  return r?.request_id ?? null;
+}
+
+/** The gate's verdict, read from the vet.json a worker staged — kept on the task so the review needs no second fetch. */
+async function vetOf(env: Env, stagingPrefix: string): Promise<ReturnType<typeof vetSummary>> {
+  const obj = await env.STAGING.get(`${stagingPrefix}vet.json`);
+  if (!obj) return null;
+  try {
+    return vetSummary(await obj.json());
+  } catch {
+    return { verdict: "unknown", fails: 0, warnings: 0, failed: ["vet.json unreadable"], warned: [] };
+  }
+}
 
 /** What the worker said about its agent with this claim: the probe's answer (factory/bin/agent.py --probe). */
 interface AgentReport { status: "ok" | "error" | null; error: string | null; checked_at: string | null }
@@ -331,6 +349,11 @@ export async function handleComplete(id: number, request: Request, env: Env, act
     await env.DB.prepare("UPDATE build_workers SET last_seen = ?, current_task = NULL, builds_done = builds_done + 1 WHERE id = ?").bind(now(), who).run();
     const p = task.params ? (JSON.parse(task.params) as Record<string, string>) : {};
     const label = task.kind === "audit" ? `${p.name} (task ${p.task})` : [p.source, p.arch, p.ring, p.from && p.to ? `${p.from} → ${p.to}` : null].filter(Boolean).join("/");
+    if (task.kind === "audit" && p.task) {
+      // The second agent's report joins the evidence on the record.
+      const audited = await env.DB.prepare("SELECT name, staged_prefix FROM build_tasks WHERE id = ?").bind(Number(p.task)).first<{ name: string; staged_prefix: string | null }>();
+      if (audited?.staged_prefix) await recordEvidence(env, audited.name, await requestOf(env, audited.name), Number(p.task), audited.staged_prefix, ["audit.json", "audit.md"]);
+    }
     await event(env, "job", "ok", `${task.kind}${label ? " " + label : ""}: ${b.summary ?? "done"} by ${who}${b.duration_ms ? " in " + Math.round(b.duration_ms / 1000) + " s" : ""}`, { task: id, kind: task.kind, params: p, worker: who, result: b.result ?? null, duration_ms: b.duration_ms ?? null });
     return json({ task: id, status: "done" });
   }
@@ -342,11 +365,16 @@ export async function handleComplete(id: number, request: Request, env: Env, act
     const have = (await env.DB.prepare("SELECT key FROM staging_objects WHERE task_id = ?").bind(id).all<{ key: string }>()).results.map((r) => r.key.slice(prefix.length));
     const missing = [b.filename, "PKGBUILD", "build.log"].filter((f) => !have.includes(f));
     if (missing.length) return json({ error: `upload ${missing.join(", ")} to staging first (PUT /factory/tasks/${id}/artifacts/<filename>)`, have }, 409);
+    // The gate (vet.json, the worker's own verdict) travels with the task; a failing gate never stages — the worker reports it as a failure.
+    const vet = await vetOf(env, prefix);
+    if (vet?.verdict === "fail") return json({ error: `the gate failed (${vet.failed.join(", ")}); report the build as failed, not complete` }, 409);
     await env.DB.prepare(
-      "UPDATE build_tasks SET status = 'staged', finished_at = ?, result_sha256 = ?, result_filename = ?, result_version = ?, version = COALESCE(version, ?), duration_ms = ?, log_tail = ?, staged_prefix = ?, lease_owner = NULL, lease_expires_at = NULL WHERE id = ?",
+      "UPDATE build_tasks SET status = 'staged', finished_at = ?, result_sha256 = ?, result_filename = ?, result_version = ?, version = COALESCE(version, ?), duration_ms = ?, log_tail = ?, staged_prefix = ?, result = ?, lease_owner = NULL, lease_expires_at = NULL WHERE id = ?",
     )
-      .bind(now(), b.sha256, b.filename, b.version ?? null, b.version ?? null, b.duration_ms ?? null, (b.log_tail ?? "").slice(-4000), prefix, id)
+      .bind(now(), b.sha256, b.filename, b.version ?? null, b.version ?? null, b.duration_ms ?? null, (b.log_tail ?? "").slice(-4000), prefix, vet ? JSON.stringify({ vet }) : null, id)
       .run();
+    // The evidence outlives staging: on the record, signed.
+    await recordEvidence(env, task.name, await requestOf(env, task.name), id, prefix);
     await env.DB.prepare("UPDATE build_workers SET last_seen = ?, current_task = NULL, builds_done = builds_done + 1 WHERE id = ?").bind(now(), who).run();
     // A newer build of the same package and architecture supersedes the
     // staged ones before it: one row per package in the review queue, the
@@ -427,6 +455,11 @@ export async function handleFail(id: number, request: Request, env: Env, actor: 
   // worker says which is which (`final`); the contributor fixes and queues
   // a new build.
   const exhausted = b.final === true || task.attempts >= task.max_attempts;
+  // What the worker uploaded before giving up — the log, the PKGBUILD, the
+  // gate's verdict — is evidence too: a failed attempt is on the record.
+  if (task.trust === "community" && task.kind === "build" && task.owner) {
+    await recordEvidence(env, task.name, await requestOf(env, task.name), id, `staging/${task.owner}/${task.name}/${task.id}/`, ["PKGBUILD", "build.log", "vet.json", "tests.log"]);
+  }
   // A requeued task goes behind its peers (priority + 10) so one broken
   // PKGBUILD does not hold the queue.
   await env.DB.prepare(

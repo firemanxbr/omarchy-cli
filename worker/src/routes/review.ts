@@ -32,7 +32,7 @@ interface Staged {
 
 export async function handleReviewList(env: Env): Promise<Response> {
   const staged = await env.DB.prepare(
-    `SELECT t.id, t.name, t."group", t.arch, t.version, t.owner, t.status, t.staged_prefix, t.result_sha256, t.result_filename, t.duration_ms, t.finished_at, t.pkgbuild_ref,
+    `SELECT t.id, t.name, t."group", t.arch, t.version, t.owner, t.status, t.staged_prefix, t.result_sha256, t.result_filename, t.duration_ms, t.finished_at, t.pkgbuild_ref, t.result,
             p.url, p.detected,
             (SELECT decision FROM approvals a WHERE a.task_id = t.id ORDER BY a.id DESC LIMIT 1) AS decision,
             (SELECT by FROM approvals a WHERE a.task_id = t.id ORDER BY a.id DESC LIMIT 1) AS decided_by,
@@ -49,11 +49,13 @@ export async function handleReviewList(env: Env): Promise<Response> {
       staged: staged.results.map((r) => ({
         ...r,
         detected: r.detected ? JSON.parse(r.detected as string) : null,
-        evidence: { log: `/api/v1/factory/tasks/${r.id}/artifacts/build.log`, pkgbuild: `/api/v1/factory/tasks/${r.id}/artifacts/PKGBUILD`, pkginfo: `/api/v1/factory/tasks/${r.id}/artifacts/PKGINFO`, audit: `/api/v1/factory/tasks/${r.id}/artifacts/audit.md` },
+        evidence: { log: `/api/v1/factory/tasks/${r.id}/artifacts/build.log`, pkgbuild: `/api/v1/factory/tasks/${r.id}/artifacts/PKGBUILD`, pkginfo: `/api/v1/factory/tasks/${r.id}/artifacts/PKGINFO`, audit: `/api/v1/factory/tasks/${r.id}/artifacts/audit.md`, tests: `/api/v1/factory/tasks/${r.id}/artifacts/tests.log`, vet: `/api/v1/factory/tasks/${r.id}/artifacts/vet.json` },
+        // The gate (factory/README.md *The gate*): the worker's own checks — checksums, shellcheck, namcap, the file list, the metadata, check(), the smoke test — as vet.json said.
+        vet: vetOf(r.result as string | null),
         // The second agent's report (docs/GOVERNANCE.md): a verdict a
         // maintainer reads, never one the pool acts on.
         audit: auditOf(r.audit_status as string | null, r.audit_result as string | null, r.audit_error as string | null),
-        audit_status: undefined, audit_result: undefined, audit_error: undefined,
+        audit_status: undefined, audit_result: undefined, audit_error: undefined, result: undefined,
       })),
     },
     200,
@@ -62,6 +64,16 @@ export async function handleReviewList(env: Env): Promise<Response> {
 }
 
 interface AuditReport { verdict: string; summary: string; findings: { severity: string; area: string }[]; model?: string }
+
+/** The gate's summary the build's completion kept on the task (build_tasks.result → {vet}); null for a build older than the gate. */
+function vetOf(result: string | null): { verdict: string; fails: number; warnings: number; failed: string[]; warned: string[] } | null {
+  if (!result) return null;
+  try {
+    return (JSON.parse(result) as { vet?: { verdict: string; fails: number; warnings: number; failed: string[]; warned: string[] } }).vet ?? null;
+  } catch {
+    return null;
+  }
+}
 
 /** The audit as the Review page shows it: its state while pending, the verdict once done. */
 function auditOf(status: string | null, result: string | null, error: string | null): { status: string; verdict?: string; summary?: string; findings?: number; high?: number; model?: string; error?: string } {
