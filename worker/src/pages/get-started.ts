@@ -8,7 +8,7 @@ import type { RunningVersion } from "../meta";
 
 const BODY = String.raw`
   <h1>Get started</h1>
-  <p class="lede">Three steps: trust the key that signs the databases, point pacman at a ring, upgrade. Packages keep the signatures of the project that built them (Arch, Arch Linux ARM, Omarchy) — the only new key you trust signs the databases and what the pool builds itself.</p>
+  <p class="lede">One command — or three steps by hand: trust the key that signs the databases, point pacman at a ring, upgrade. Packages keep the signatures of the project that built them (Arch, Arch Linux ARM, Omarchy) — the only new key you trust signs the databases and what the pool builds itself.</p>
 
   <div class="steps">
     <div class="step">
@@ -20,14 +20,23 @@ const BODY = String.raw`
     </div>
 
     <div class="step">
+      <h3>The one command</h3>
+      <p>Everything below, done for you — once per machine, on x86_64 or aarch64 (it finds out):</p>
+      <pre><span class="copy" data-copy="setup">copy</span><span id="setup-cmd"></span></pre>
+      <p>What it does, and nothing else: trusts the key that signs the pool's databases (step 2); writes <code>/etc/pacman.d/omarchy-pool.conf</code> with the repositories the ring serves right now (step 3 — asked to the pool at run time, so it is never stale); adds one line to <code>/etc/pacman.conf</code>, above <code>[core]</code>, once: <code>Include = /etc/pacman.d/omarchy-pool.conf</code>; runs <code>pacman -Sy</code> and tells you to run <code>sudo pacman -Syu</code>. It keeps a backup (<code>pacman.conf.bak-omarchy-pool</code>), it never upgrades on its own, and it never touches your other repositories.</p>
+      <p><b>Why an <code>Include</code>, above <code>[core]</code>.</b> pacman takes a package from the first repository that has it, in file order. What you keep above the line — an Asahi <code>[omarchy]</code> or <code>[asahi-alarm]</code> on a Mac, a repository of your own — keeps priority; the pool serves core, extra, multilib, alarm, the OPR and the factory's builds from the ring; Arch's own mirrors below the line stay as the fallback for the rare package the pool does not have yet, and for repositories it does not mirror (<code>[aur]</code> on Arch Linux ARM). Switching rings rewrites the include file only: <code>--ring rc</code>, <code>--ring edge</code>; <code>--remove</code> deletes it and takes the line out. <a href="/setup">The script, in full →</a></p>
+      <p><b>The first <code>pacman -Syu</code>.</b> Usually "nothing to do": <em>stable</em> is about two days behind upstream, and pacman never downgrades what a mirror already gave you. From then on the upgrades come through the ring when it promotes them.</p>
+    </div>
+
+    <div class="step">
       <h3>2. Trust the database key</h3>
       <p>Once per machine. The key signs the pacman databases and the packages the pool builds itself (source <em>factory</em>); every other package still carries its upstream signature.</p>
       <pre><span class="copy" data-copy="key">copy</span><span id="key-cmd"></span></pre>
     </div>
 
     <div class="step">
-      <h3>3. Configure pacman</h3>
-      <p>Add these sections to <code>/etc/pacman.conf</code> above <code>[core]</code>/<code>[extra]</code> — or replace them, the pool serves the same packages. The list is generated from what the ring serves right now.</p>
+      <h3>3. Configure pacman, by hand</h3>
+      <p>Save the sections below as <code>/etc/pacman.d/omarchy-pool.conf</code> (<code>sudo nvim</code>, or <code>curl -o</code> from <code>/api/v1/pacman.conf?ring=…&amp;arch=…</code>), then add <code>Include = /etc/pacman.d/omarchy-pool.conf</code> to <code>/etc/pacman.conf</code> above <code>[core]</code>. The list is generated from what the ring serves right now.</p>
       <div class="choice" id="optional"></div>
       <pre><span class="copy" data-copy="conf">copy</span><span id="conf"></span></pre>
       <p>Then:</p>
@@ -68,6 +77,7 @@ const SCRIPT = String.raw`
     pick("pick-arch", ARCHES, arch, function (v) { arch = v; history.replaceState(null, "", "?ring=" + ring + "&arch=" + arch); draw(); });
     $("#ring-desc").textContent = DESC[ring];
     $("#key-cmd").innerHTML = 'curl -O ' + POOL + '/omarchy-staging.pub.asc\nsudo pacman-key --add omarchy-staging.pub.asc &amp;&amp; sudo pacman-key --lsign-key staging@firemanxbr.org';
+    $("#setup-cmd").innerHTML = 'curl -fsSL ' + location.origin + '/setup | sudo bash -s -- --ring ' + ring;
     var r = data ? data.rings.filter(function (x) { return x.ring === ring; })[0] : null;
     var cov = data ? data.coverage || [] : [];
     var optionalSources = cov.filter(function (c) { return c.optional && c.arch === arch; });
@@ -90,7 +100,7 @@ const SCRIPT = String.raw`
   }
   document.querySelectorAll(".copy").forEach(function (b) {
     b.onclick = function () {
-      var id = { key: "#key-cmd", conf: "#conf", up: "#up-cmd", cli: "#cli-cmd" }[b.getAttribute("data-copy")];
+      var id = { setup: "#setup-cmd", key: "#key-cmd", conf: "#conf", up: "#up-cmd", cli: "#cli-cmd" }[b.getAttribute("data-copy")];
       navigator.clipboard.writeText($(id).textContent).then(function () { b.textContent = "copied"; setTimeout(function () { b.textContent = "copy"; }, 1500); });
     };
   });

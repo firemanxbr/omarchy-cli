@@ -12,6 +12,12 @@ routes = [
   { pattern = "dashboard-omarchy.firemanxbr.org", custom_domain = true }
 ]
 
+# The setup script (src/setup.sh) is served as text: `curl …/setup | sudo bash`.
+[[rules]]
+type = "Text"
+globs = ["**/*.sh"]
+fallthrough = true
+
 [observability]
 enabled = true
 
