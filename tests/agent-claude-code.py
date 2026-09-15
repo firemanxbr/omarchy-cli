@@ -54,6 +54,11 @@ with tempfile.TemporaryDirectory() as tmp:
     agent.complete("s", "u")
     assert json.load(open(record))["args"][a.index("--model") + 1] == "claude-opus-5"
     print("ok: FACTORY_MODEL")
+    os.environ["FACTORY_MODEL"] = "gemini-3.6-flash"  # left over from the provider before
+    agent.complete("s", "u")
+    assert json.load(open(record))["args"][a.index("--model") + 1] == "claude-sonnet-5"
+    print("ok: a FACTORY_MODEL of another family is ignored")
+    del os.environ["FACTORY_MODEL"]
 
     for mode, expect in (("limit", "hit your limit"), ("notlogged", "Not logged in")):
         os.environ["FAKE_MODE"] = mode

@@ -39,6 +39,19 @@ const AGENTS: [(&str, &str, &str); 5] = [
     ("xai", "XAI_API_KEY", "grok-4"),
 ];
 
+/// A `FACTORY_MODEL` that plainly belongs to another provider is ignored for
+/// the default, as agent.py does (a switch of provider with the old model
+/// left in the file): the label says what will actually run.
+fn model_fits(provider: &str, model: &str) -> bool {
+    let family = match provider {
+        "anthropic" | "claude-code" => "claude",
+        "gemini" => "gemini",
+        "xai" => "grok",
+        _ => return true,
+    };
+    model.to_ascii_lowercase().starts_with(family)
+}
+
 /// The agent this worker runs, as `<provider>/<model>` — what the claim
 /// reports so the Factory page can show it; the key itself stays here.
 /// None without a key. `FACTORY_PROVIDER` and `FACTORY_MODEL` override the
@@ -53,7 +66,7 @@ pub fn agent_label() -> Option<String> {
         .find(|(name, key, _)| wanted.as_deref().is_none_or(|w| w == *name) && set(key))?;
     let model = std::env::var("FACTORY_MODEL")
         .ok()
-        .filter(|m| !m.is_empty())
+        .filter(|m| !m.is_empty() && model_fits(name, m))
         .unwrap_or_else(|| (*default_model).to_owned());
     Some(format!("{name}/{model}"))
 }

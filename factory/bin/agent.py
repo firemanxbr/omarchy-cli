@@ -38,13 +38,28 @@ import urllib.error
 import urllib.request
 
 PROVIDERS = {
-    "anthropic": {"key": "ANTHROPIC_API_KEY", "model": "claude-sonnet-5", "base": "https://api.anthropic.com", "base_env": "ANTHROPIC_BASE_URL", "api": "anthropic"},
-    "claude-code": {"key": "CLAUDE_CODE_OAUTH_TOKEN", "model": "claude-sonnet-5", "base": "", "base_env": "CLAUDE_CODE_BIN", "api": "claude-code"},
-    "openai": {"key": "OPENAI_API_KEY", "model": "gpt-5", "base": "https://api.openai.com/v1", "base_env": "OPENAI_BASE_URL", "api": "openai"},
-    "gemini": {"key": "GEMINI_API_KEY", "model": "gemini-3.6-flash", "base": "https://generativelanguage.googleapis.com/v1beta/openai", "base_env": "GEMINI_BASE_URL", "api": "openai"},
-    "xai": {"key": "XAI_API_KEY", "model": "grok-4", "base": "https://api.x.ai/v1", "base_env": "XAI_BASE_URL", "api": "openai"},
+    "anthropic": {"key": "ANTHROPIC_API_KEY", "model": "claude-sonnet-5", "family": "claude", "base": "https://api.anthropic.com", "base_env": "ANTHROPIC_BASE_URL", "api": "anthropic"},
+    "claude-code": {"key": "CLAUDE_CODE_OAUTH_TOKEN", "model": "claude-sonnet-5", "family": "claude", "base": "", "base_env": "CLAUDE_CODE_BIN", "api": "claude-code"},
+    "openai": {"key": "OPENAI_API_KEY", "model": "gpt-5", "family": None, "base": "https://api.openai.com/v1", "base_env": "OPENAI_BASE_URL", "api": "openai"},
+    "gemini": {"key": "GEMINI_API_KEY", "model": "gemini-3.6-flash", "family": "gemini", "base": "https://generativelanguage.googleapis.com/v1beta/openai", "base_env": "GEMINI_BASE_URL", "api": "openai"},
+    "xai": {"key": "XAI_API_KEY", "model": "grok-4", "family": "grok", "base": "https://api.x.ai/v1", "base_env": "XAI_BASE_URL", "api": "openai"},
 }
 KEYS = [p["key"] for p in PROVIDERS.values()]
+
+
+def model_for(name, p):
+    """The model: FACTORY_MODEL, unless it plainly belongs to another
+    provider — a switch to claude-code with FACTORY_MODEL=gemini-3.6-flash
+    left in the file asked Claude Code for Gemini (2026-09-15). Then the
+    provider's default, said out loud."""
+    wanted = (os.environ.get("FACTORY_MODEL") or "").strip()
+    if not wanted:
+        return p["model"]
+    family = p["family"]
+    if family and not wanted.lower().startswith(family):
+        print(f"agent: FACTORY_MODEL={wanted} is not a {family} model; {name} uses {p['model']}", file=sys.stderr)
+        return p["model"]
+    return wanted
 
 
 def provider():
@@ -95,7 +110,7 @@ def complete(system, user, max_tokens=4000, timeout=300):
         raise SystemExit("no agent key: set one of " + ", ".join(KEYS) + " on the worker (the worker owner's key, never the pool's)")
     name, p = found
     key = os.environ[p["key"]]
-    model = os.environ.get("FACTORY_MODEL") or p["model"]
+    model = model_for(name, p)
     base = os.environ.get(p["base_env"], p["base"]).rstrip("/")
     if p["api"] == "claude-code":
         return claude_code(base, model, system, user, timeout)
