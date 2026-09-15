@@ -503,7 +503,7 @@ fn execute(opts: &WorkOptions, task: &Task, token: &Arc<Mutex<String>>) -> Resul
         "publish" => publish_job(opts, &job, task),
         "audit" => audit_job(opts, &job, task),
         "verify" => verify_job(opts, &job, task),
-        "relayout" => relayout_job(opts, &job),
+        "relayout" => relayout_job(opts, token),
         other => Err(anyhow!("this worker does not run '{other}' jobs")),
     }
 }
@@ -979,13 +979,17 @@ fn rollback_job(opts: &WorkOptions, job: &Api, task: &Task) -> Result<Outcome> {
 /// (`<source>/<arch>/<filename>`, routes/relayout.ts): copy until nothing
 /// remains, render every ring so its databases sit in the same directories
 /// (the include then names them), and purge the flat directories last. The
-/// pool does the copying; this loops, a page at a time, and renders.
-fn relayout_job(opts: &WorkOptions, job: &Api) -> Result<Outcome> {
+/// pool does the copying; this loops, a page at a time, and renders. Hours
+/// of pages: every call takes the token the heartbeat last renewed — a
+/// per-job token lives thirty minutes, and the first run died on a 401
+/// with the token it started with (task 275, 2026-09-15).
+fn relayout_job(opts: &WorkOptions, token: &Arc<Mutex<String>>) -> Result<Outcome> {
     let started = Instant::now();
+    let fresh = || Api::new(&opts.api, &token.lock().unwrap().clone());
     let (mut moved, mut ghosts, mut missing) = (0u64, 0u64, 0u64);
     let mut errors: Vec<String> = Vec::new();
     loop {
-        let r = job.relayout("copy", 40)?;
+        let r = fresh()?.relayout("copy", 40)?;
         let step = r["moved"].as_u64().unwrap_or(0) + r["ghosts"].as_u64().unwrap_or(0);
         moved += r["moved"].as_u64().unwrap_or(0);
         ghosts += r["ghosts"].as_u64().unwrap_or(0);
@@ -1013,14 +1017,14 @@ fn relayout_job(opts: &WorkOptions, job: &Api) -> Result<Outcome> {
     let mut rendered = Vec::new();
     for ring in ["edge", "rc", "stable"] {
         for arch in ["x86_64", "aarch64"] {
-            let repos = ops::render(job, ring, arch, opts.sign.as_deref())
+            let repos = ops::render(&fresh()?, ring, arch, opts.sign.as_deref())
                 .with_context(|| format!("rendering {ring}/{arch} after the move"))?;
             rendered.extend(repos.into_iter().map(|r| format!("{ring}/{arch}/{r}")));
         }
     }
     let mut deleted = 0u64;
     loop {
-        let r = job.relayout("purge", 40)?;
+        let r = fresh()?.relayout("purge", 40)?;
         deleted += r["deleted"].as_u64().unwrap_or(0);
         if !r["truncated"].as_bool().unwrap_or(false) {
             break;
@@ -1030,7 +1034,7 @@ fn relayout_job(opts: &WorkOptions, job: &Api) -> Result<Outcome> {
         "relayout: {moved} object(s) moved into their source's directory, {ghosts} ghost row(s) marked, {} database(s) rendered, {deleted} old key(s) purged",
         rendered.len()
     );
-    job.post_event(&serde_json::json!({
+    fresh()?.post_event(&serde_json::json!({
         "kind": "relayout", "status": if errors.is_empty() && missing == 0 { "ok" } else { "warn" },
         "summary": summary,
         "duration_ms": u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
